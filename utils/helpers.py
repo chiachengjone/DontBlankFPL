@@ -145,6 +145,14 @@ def get_fdr_color(fdr: int) -> str:
     return FDR_COLORS.get(fdr, '#888')
 
 
+def round_df(df: pd.DataFrame, max_dp: int = 3) -> pd.DataFrame:
+    """Round all numeric columns in a DataFrame to max_dp decimal places."""
+    df = df.copy()
+    for col in df.select_dtypes(include=['float64', 'float32', 'float']).columns:
+        df[col] = df[col].round(max_dp)
+    return df
+
+
 def style_df_with_injuries(df: pd.DataFrame, players_df: pd.DataFrame = None, player_col: str = 'Player') -> pd.DataFrame:
     """
     Apply injury-based row coloring to a dataframe.
@@ -166,7 +174,10 @@ def style_df_with_injuries(df: pd.DataFrame, players_df: pd.DataFrame = None, pl
         players_df = st.session_state.get('players_df')
     
     if players_df is None or player_col not in df.columns:
-        return df
+        return round_df(df)
+    
+    # Round all floats to 3dp first
+    df = round_df(df)
     
     # Build lookup of player name -> injury chance
     injury_lookup = {}

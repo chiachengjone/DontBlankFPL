@@ -161,16 +161,16 @@ def create_ep_ownership_scatter(
     fig.update_layout(
         height=500,
         template='plotly_dark',
-        paper_bgcolor='#0d0d0d',
-        plot_bgcolor='#1a1a1a',
-        font=dict(color='#ccc'),
+        paper_bgcolor='#0a0a0b',
+        plot_bgcolor='#111113',
+        font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
         xaxis_title='Ownership %',
         yaxis_title='Expected Points',
-        xaxis=dict(gridcolor='#333', zerolinecolor='#333'),
-        yaxis=dict(gridcolor='#333', zerolinecolor='#333'),
+        xaxis=dict(gridcolor='#1e1e21', zerolinecolor='#1e1e21'),
+        yaxis=dict(gridcolor='#1e1e21', zerolinecolor='#1e1e21'),
         legend=dict(
             orientation="v", yanchor="bottom", y=0.02, xanchor="right", x=0.99,
-            font=dict(color='#ccc'), bgcolor='rgba(13,13,13,0.8)'
+            font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11), bgcolor='rgba(13,13,13,0.8)'
         ),
         margin=dict(l=40, r=40, t=40, b=40)
     )
@@ -208,9 +208,9 @@ def create_cbit_chart(players_df: pd.DataFrame) -> Optional[go.Figure]:
         xaxis_title='', yaxis_title='Score',
         height=350,
         template='plotly_dark',
-        paper_bgcolor='#0d0d0d',
-        plot_bgcolor='#1a1a1a',
-        font=dict(color='#ccc'),
+        paper_bgcolor='#0a0a0b',
+        plot_bgcolor='#111113',
+        font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
         margin=dict(l=40, r=40, t=60, b=40)
     )
     
@@ -252,9 +252,9 @@ def create_fixture_heatmap(players_df: pd.DataFrame, player_ids: List[int]) -> O
         title=dict(text='Fixture Difficulty', font=dict(color='#fff', size=16)),
         height=350,
         template='plotly_dark',
-        paper_bgcolor='#0d0d0d',
-        plot_bgcolor='#1a1a1a',
-        font=dict(color='#ccc'),
+        paper_bgcolor='#0a0a0b',
+        plot_bgcolor='#111113',
+        font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
         margin=dict(l=100, r=40, t=60, b=40)
     )
     
@@ -283,8 +283,8 @@ def create_form_timeline(players_df: pd.DataFrame, player_ids: List[int]) -> Opt
     fig.update_layout(
         height=300,
         template='plotly_dark',
-        paper_bgcolor='#0d0d0d',
-        plot_bgcolor='#1a1a1a',
+        paper_bgcolor='#0a0a0b',
+        plot_bgcolor='#111113',
         font=dict(color='#ccc', size=10),
         margin=dict(l=40, r=40, t=20, b=80),
         xaxis_tickangle=-45
@@ -313,8 +313,8 @@ def create_budget_breakdown_pie(players_df: pd.DataFrame, player_ids: List[int])
     fig.update_layout(
         height=300,
         template='plotly_dark',
-        paper_bgcolor='#0d0d0d',
-        font=dict(color='#ccc'),
+        paper_bgcolor='#0a0a0b',
+        font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
         margin=dict(l=20, r=20, t=20, b=20),
         showlegend=False
     )
@@ -349,9 +349,9 @@ def create_ownership_trends_chart(players_df: pd.DataFrame, limit: int = 20) -> 
         barmode='relative',
         height=350,
         template='plotly_dark',
-        paper_bgcolor='#0d0d0d',
-        plot_bgcolor='#1a1a1a',
-        font=dict(color='#ccc'),
+        paper_bgcolor='#0a0a0b',
+        plot_bgcolor='#111113',
+        font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
         margin=dict(l=40, r=40, t=40, b=80),
         xaxis_tickangle=-45

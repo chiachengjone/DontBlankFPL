@@ -2,9 +2,11 @@
 
 import streamlit as st
 import pandas as pd
+import plotly.graph_objects as go
 
-from utils.helpers import safe_numeric, style_df_with_injuries
+from utils.helpers import safe_numeric, style_df_with_injuries, round_df
 from fpl_api import get_differential_picks
+from components.charts import create_cbit_chart, create_ownership_trends_chart
 
 
 def render_analytics_tab(processor, players_df: pd.DataFrame):
@@ -61,6 +63,15 @@ def render_analytics_tab(processor, players_df: pd.DataFrame):
     # Display player table
     render_player_table(df)
     
+    # Points distribution
+    render_points_distribution(players_df)
+    
+    # Value by position
+    render_value_by_position(players_df)
+    
+    # CBIT analysis chart
+    render_cbit_analysis(players_df)
+    
     # Differential picks
     render_differential_picks(processor)
     
@@ -69,6 +80,9 @@ def render_analytics_tab(processor, players_df: pd.DataFrame):
     
     # Expected vs Actual
     render_expected_vs_actual(players_df)
+    
+    # Ownership Trends
+    render_ownership_trends(players_df)
 
 
 def render_player_table(df: pd.DataFrame):
@@ -90,12 +104,95 @@ def render_player_table(df: pd.DataFrame):
     }
     
     display_df = df[display_cols].head(50).copy()
-    for col in numeric_cols:
-        if col in display_df.columns:
-            display_df[col] = display_df[col].round(2)
     
     st.markdown(f'<p class="section-title">Players ({len(df)} found)</p>', unsafe_allow_html=True)
     st.dataframe(style_df_with_injuries(display_df.rename(columns=rename)), hide_index=True, use_container_width=True)
+
+
+def render_points_distribution(players_df: pd.DataFrame):
+    """Render EP distribution histogram by position."""
+    st.markdown('<p class="section-title">EP Distribution by Position</p>', unsafe_allow_html=True)
+    st.caption("How expected points are spread across each position")
+    
+    df = players_df.copy()
+    df['ep'] = safe_numeric(df.get('ep_next', df.get('expected_points', pd.Series([0]*len(df)))))
+    df['minutes'] = safe_numeric(df.get('minutes', pd.Series([0]*len(df))))
+    df = df[df['minutes'] > 90]
+    
+    pos_colors = {'GKP': '#3b82f6', 'DEF': '#22c55e', 'MID': '#f59e0b', 'FWD': '#ef4444'}
+    
+    fig = go.Figure()
+    for pos, color in pos_colors.items():
+        pos_data = df[df['position'] == pos]['ep']
+        if pos_data.empty:
+            continue
+        fig.add_trace(go.Histogram(
+            x=pos_data, name=pos, marker_color=color,
+            opacity=0.7, nbinsx=20
+        ))
+    
+    fig.update_layout(
+        height=320, barmode='overlay',
+        template='plotly_dark',
+        paper_bgcolor='#0a0a0b', plot_bgcolor='#111113',
+        font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
+        xaxis=dict(title='Expected Points', gridcolor='#1e1e21'),
+        yaxis=dict(title='Count', gridcolor='#1e1e21'),
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+        margin=dict(l=50, r=30, t=30, b=50)
+    )
+    st.plotly_chart(fig, use_container_width=True, key='analytics_ep_distribution')
+
+
+def render_value_by_position(players_df: pd.DataFrame):
+    """Render value (EP per million) box plot by position."""
+    st.markdown('<p class="section-title">Value Distribution (EP / Price)</p>', unsafe_allow_html=True)
+    st.caption("Box plot showing EP per million by position — find the best bang for your buck")
+    
+    df = players_df.copy()
+    df['ep'] = safe_numeric(df.get('ep_next', df.get('expected_points', pd.Series([0]*len(df)))))
+    df['now_cost'] = safe_numeric(df['now_cost'], 5)
+    df['minutes'] = safe_numeric(df.get('minutes', pd.Series([0]*len(df))))
+    df = df[df['minutes'] > 200]
+    df['value'] = df['ep'] / df['now_cost'].clip(lower=4)
+    
+    pos_colors = {'GKP': '#3b82f6', 'DEF': '#22c55e', 'MID': '#f59e0b', 'FWD': '#ef4444'}
+    
+    fig = go.Figure()
+    for pos in ['GKP', 'DEF', 'MID', 'FWD']:
+        pos_data = df[df['position'] == pos]
+        if pos_data.empty:
+            continue
+        fig.add_trace(go.Box(
+            y=pos_data['value'], name=pos,
+            marker_color=pos_colors[pos],
+            boxpoints='outliers',
+            text=pos_data['web_name'],
+            hovertemplate='<b>%{text}</b><br>Value: %{y:.2f}<extra></extra>'
+        ))
+    
+    fig.update_layout(
+        height=350,
+        template='plotly_dark',
+        paper_bgcolor='#0a0a0b', plot_bgcolor='#111113',
+        font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
+        yaxis=dict(title='EP per £m', gridcolor='#1e1e21'),
+        showlegend=False,
+        margin=dict(l=50, r=30, t=20, b=40)
+    )
+    st.plotly_chart(fig, use_container_width=True, key='analytics_value_boxplot')
+
+
+def render_cbit_analysis(players_df: pd.DataFrame):
+    """Render CBIT (Clean sheet Bonus If Team) analysis chart for defenders."""
+    st.markdown('<p class="section-title">CBIT Propensity (Defenders)</p>', unsafe_allow_html=True)
+    st.caption("CBIT measures likelihood of clean sheet bonus points — higher = better for defender picks")
+    
+    fig = create_cbit_chart(players_df)
+    if fig:
+        st.plotly_chart(fig, use_container_width=True, key='analytics_cbit_chart')
+    else:
+        st.info("CBIT data unavailable - requires clean sheet history")
 
 
 def render_differential_picks(processor):
@@ -104,7 +201,8 @@ def render_differential_picks(processor):
     try:
         diffs = get_differential_picks(processor, min_ep=3.0, max_ownership=5.0)
         if diffs is not None and not diffs.empty:
-            st.dataframe(style_df_with_injuries(diffs.head(10)), hide_index=True, use_container_width=True)
+            diffs_display = round_df(diffs.head(10))
+            st.dataframe(style_df_with_injuries(diffs_display, player_col='web_name'), hide_index=True, use_container_width=True)
         else:
             st.info("No differentials matching criteria")
     except Exception as e:
@@ -151,6 +249,48 @@ def render_expected_vs_actual(players_df: pd.DataFrame):
     df['expected_total'] = df['ep_next'] * df['games_played'] * 0.6
     df['diff'] = df['total_points'] - df['expected_total']
     
+    # Scatter chart: actual vs expected
+    top_players = df.nlargest(40, 'total_points')
+    if len(top_players) > 5:
+        pos_colors = {'GKP': '#3b82f6', 'DEF': '#22c55e', 'MID': '#f59e0b', 'FWD': '#ef4444'}
+        fig = go.Figure()
+        
+        # Diagonal line (x=y)
+        max_val = max(top_players['total_points'].max(), top_players['expected_total'].max()) * 1.1
+        fig.add_trace(go.Scatter(
+            x=[0, max_val], y=[0, max_val],
+            mode='lines', line=dict(color='rgba(255,255,255,0.08)', dash='dot'),
+            showlegend=False, hoverinfo='skip'
+        ))
+        
+        for pos, color in pos_colors.items():
+            pos_df = top_players[top_players['position'] == pos]
+            if pos_df.empty:
+                continue
+            fig.add_trace(go.Scatter(
+                x=pos_df['expected_total'], y=pos_df['total_points'],
+                mode='markers', name=pos,
+                marker=dict(size=8, color=color, opacity=0.75,
+                           line=dict(width=1, color='rgba(255,255,255,0.1)')),
+                text=pos_df['web_name'],
+                hovertemplate='<b>%{text}</b><br>Expected: %{x:.0f}<br>Actual: %{y:.0f}<extra></extra>'
+            ))
+        
+        fig.update_layout(
+            height=380, template='plotly_dark',
+            paper_bgcolor='#0a0a0b', plot_bgcolor='#111113',
+            font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
+            xaxis=dict(title='Expected Total Points', gridcolor='#1e1e21'),
+            yaxis=dict(title='Actual Total Points', gridcolor='#1e1e21'),
+            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+            margin=dict(l=50, r=30, t=30, b=50)
+        )
+        fig.add_annotation(x=max_val*0.15, y=max_val*0.85, text="Overperforming ↑",
+                          showarrow=False, font=dict(color='#22c55e', size=10))
+        fig.add_annotation(x=max_val*0.85, y=max_val*0.15, text="Underperforming ↓",
+                          showarrow=False, font=dict(color='#ef4444', size=10))
+        st.plotly_chart(fig, use_container_width=True, key='analytics_expected_vs_actual')
+    
     xva1, xva2 = st.columns(2)
     
     with xva1:
@@ -168,3 +308,15 @@ def render_expected_vs_actual(players_df: pd.DataFrame):
         over['Expected'] = over['Expected'].round(0).astype(int)
         over['Diff'] = over['Diff'].round(0).astype(int)
         st.dataframe(style_df_with_injuries(over), hide_index=True, use_container_width=True)
+
+
+def render_ownership_trends(players_df: pd.DataFrame):
+    """Render ownership trends chart showing transfers in/out."""
+    st.markdown('<p class="section-title">Ownership Trends</p>', unsafe_allow_html=True)
+    st.caption("Most transferred players this gameweek — green = in, red = out")
+    
+    fig = create_ownership_trends_chart(players_df, limit=20)
+    if fig:
+        st.plotly_chart(fig, use_container_width=True, key='analytics_ownership_trends')
+    else:
+        st.info("Transfer data unavailable")

@@ -145,13 +145,13 @@ def render_blank_double_gw_radar(processor, current_gw: int):
         fig.update_layout(
             height=500,
             template='plotly_dark',
-            paper_bgcolor='#0d0d0d',
-            plot_bgcolor='#1a1a1a',
-            font=dict(color='#ccc', size=10),
+            paper_bgcolor='#0a0a0b',
+            plot_bgcolor='#111113',
+            font=dict(family='Inter, sans-serif', color='#6b6b6b', size=10),
             margin=dict(l=60, r=20, t=20, b=40),
             xaxis=dict(side='top')
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, key='planning_bgw_dgw_heatmap')
         st.caption("🔴 0 = Blank GW  |  ⚫ 1 = Normal  |  🟢 2 = Double GW")
         
         # Summary stats

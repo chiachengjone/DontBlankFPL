@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 
-from utils.helpers import safe_numeric, get_injury_status, style_df_with_injuries
+from utils.helpers import safe_numeric, get_injury_status, style_df_with_injuries, round_df
 from components.charts import create_ep_ownership_scatter
 from components.cards import render_player_detail_card
 from fpl_api import CBIT_BONUS_THRESHOLD, CBIT_BONUS_POINTS, MAX_FREE_TRANSFERS, CAPTAIN_MULTIPLIER
@@ -85,13 +85,16 @@ def render_strategy_tab(processor, players_df: pd.DataFrame):
     if 'expected_points' in df.columns or 'ep_next' in df.columns:
         fig = create_ep_ownership_scatter(df, pos_filter, search_player=search_player)
         if fig:
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key='strategy_ep_ownership_scatter')
     else:
         st.info("Data loading...")
     
     # Quick stats
     st.markdown('<p class="section-title">Quick Stats</p>', unsafe_allow_html=True)
     render_quick_stats(df)
+    
+    # Form vs EP bubble chart
+    render_form_vs_ep_chart(df)
     
     # Captain planning
     render_captain_planning(players_df, processor)
@@ -132,6 +135,63 @@ def render_quick_stats(df: pd.DataFrame):
     with stat4:
         avg_price = df['now_cost'].mean()
         st.metric("Avg Price", f"{avg_price:.1f}m")
+
+
+def render_form_vs_ep_chart(df: pd.DataFrame):
+    """Render Form vs EP bubble chart — size = price, color = position."""
+    st.markdown('<p class="section-title">Form vs Expected Points</p>', unsafe_allow_html=True)
+    st.caption("Bubble size = price. Top-right = hot and high-ceiling players.")
+    
+    chart_df = df.copy()
+    chart_df['form'] = safe_numeric(chart_df.get('form', pd.Series([0]*len(chart_df))))
+    chart_df['ep'] = safe_numeric(chart_df.get('ep_next', chart_df.get('expected_points', pd.Series([2]*len(chart_df)))))
+    chart_df['minutes'] = safe_numeric(chart_df.get('minutes', pd.Series([0]*len(chart_df))))
+    chart_df = chart_df[chart_df['minutes'] > 200]
+    
+    if chart_df.empty or len(chart_df) < 5:
+        return
+    
+    pos_colors = {'GKP': '#3b82f6', 'DEF': '#22c55e', 'MID': '#f59e0b', 'FWD': '#ef4444'}
+    
+    fig = go.Figure()
+    for pos, color in pos_colors.items():
+        pos_df = chart_df[chart_df['position'] == pos]
+        if pos_df.empty:
+            continue
+        fig.add_trace(go.Scatter(
+            x=pos_df['form'],
+            y=pos_df['ep'],
+            mode='markers',
+            name=pos,
+            marker=dict(
+                size=pos_df['now_cost'].clip(lower=4, upper=14) * 2.5,
+                color=color,
+                opacity=0.7,
+                line=dict(width=1, color='rgba(255,255,255,0.15)')
+            ),
+            text=pos_df['web_name'],
+            hovertemplate='<b>%{text}</b><br>Form: %{x:.1f}<br>EP: %{y:.1f}<br><extra></extra>'
+        ))
+    
+    # Add quadrant lines at medians
+    med_form = chart_df['form'].median()
+    med_ep = chart_df['ep'].median()
+    
+    fig.add_hline(y=med_ep, line_dash="dot", line_color="rgba(255,255,255,0.08)")
+    fig.add_vline(x=med_form, line_dash="dot", line_color="rgba(255,255,255,0.08)")
+    
+    fig.update_layout(
+        height=420,
+        template='plotly_dark',
+        paper_bgcolor='#0a0a0b',
+        plot_bgcolor='#111113',
+        font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
+        xaxis=dict(title='Form', gridcolor='#1e1e21', zerolinecolor='#1e1e21'),
+        yaxis=dict(title='Expected Points', gridcolor='#1e1e21', zerolinecolor='#1e1e21'),
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+        margin=dict(l=50, r=30, t=30, b=50)
+    )
+    st.plotly_chart(fig, use_container_width=True, key='strategy_form_vs_ep')
 
 
 def render_captain_planning(players_df: pd.DataFrame, processor):
@@ -216,13 +276,13 @@ def render_fixture_difficulty(processor):
         fig.update_layout(
             height=600,
             template='plotly_dark',
-            paper_bgcolor='#0d0d0d',
-            plot_bgcolor='#1a1a1a',
-            font=dict(color='#ccc'),
+            paper_bgcolor='#0a0a0b',
+            plot_bgcolor='#111113',
+            font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
             margin=dict(l=80, r=40, t=20, b=40),
             yaxis=dict(autorange='reversed')
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, key='strategy_fixture_heatmap')
         
     except Exception as e:
         st.info(f"Fixture data unavailable: {e}")
@@ -333,11 +393,11 @@ def render_ownership_trends(players_df: pd.DataFrame):
         barmode='relative',
         height=350,
         template='plotly_dark',
-        paper_bgcolor='#0d0d0d',
-        plot_bgcolor='#1a1a1a',
-        font=dict(color='#ccc'),
+        paper_bgcolor='#0a0a0b',
+        plot_bgcolor='#111113',
+        font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
         margin=dict(l=40, r=40, t=40, b=80),
         xaxis_tickangle=-45
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key='strategy_ownership_trends')

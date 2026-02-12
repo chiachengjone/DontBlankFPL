@@ -45,16 +45,7 @@ def main():
     """Main application."""
     
     # Header
-    render_header("FPL Strategy Engine", "2025/26 SEASON")
-    
-    # Settings row
-    settings_col1, settings_col2, _ = st.columns([1, 1, 3])
-    with settings_col1:
-        st.session_state.injury_highlight = st.toggle(
-            "Highlight Injuries",
-            value=st.session_state.injury_highlight,
-            help="Color-code player rows based on injury status (red=out, orange=50%, yellow=75%)"
-        )
+    render_header("FPL Strategy Engine", "2025/26")
     
     # Load data
     with st.spinner("Loading data..."):
@@ -62,7 +53,7 @@ def main():
     
     if error:
         st.error(f"Failed to load FPL data: {error}")
-        st.info("Please check your internet connection and refresh the page.")
+        st.info("Check your internet connection and refresh.")
         if st.button("Retry"):
             st.cache_resource.clear()
             st.rerun()
@@ -75,26 +66,32 @@ def main():
     # Get players data
     try:
         players_df = processor.players_df.copy()
-        # Store in session state for injury styling helper
         st.session_state.players_df = players_df
     except Exception as e:
         st.error(f"Error loading players: {e}")
         return
     
-    # Status bar
+    # Status bar + settings on same row
     try:
         gw = fetcher.get_current_gameweek()
-        render_status_bar(f"Gameweek {gw} | {len(players_df)} Players Loaded")
+        render_status_bar(f"GW {gw} LIVE | {len(players_df)} players | Updated just now")
     except:
-        render_status_bar(f"{len(players_df)} Players Loaded")
+        render_status_bar(f"{len(players_df)} players loaded")
     
-    # Navigation tabs (6 tabs for better organization)
+    # Settings row (compact)
+    st.session_state.injury_highlight = st.toggle(
+        "Injury highlights",
+        value=st.session_state.injury_highlight,
+        help="Color-code rows by injury status"
+    )
+    
+    # Navigation tabs
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📊 Strategy", 
-        "🔄 Squad Builder", 
-        "📈 Analytics", 
-        "🎯 Rival Scout",
-        "📅 Planning"
+        "Strategy", 
+        "Squad Builder", 
+        "Analytics", 
+        "Rival Scout",
+        "Planning"
     ])
     
     with tab1:

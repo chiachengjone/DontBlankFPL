@@ -4,7 +4,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 
-from utils.helpers import safe_numeric, style_df_with_injuries
+from utils.helpers import safe_numeric, style_df_with_injuries, round_df
 from optimizer import MAX_PLAYERS_PER_TEAM
 
 
@@ -193,13 +193,13 @@ def render_budget_breakdown(current_squad_df, ep_col):
         fig_pie.update_layout(
             height=250,
             template='plotly_dark',
-            paper_bgcolor='#0d0d0d',
-            plot_bgcolor='#1a1a1a',
-            font=dict(color='#ccc'),
+            paper_bgcolor='#0a0a0b',
+            plot_bgcolor='#111113',
+            font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
             margin=dict(l=20, r=20, t=20, b=20),
             showlegend=False
         )
-        st.plotly_chart(fig_pie, use_container_width=True)
+        st.plotly_chart(fig_pie, use_container_width=True, key='opt_budget_pie')
     
     with bud2:
         st.markdown('<p class="section-title">Form Timeline</p>', unsafe_allow_html=True)
@@ -217,14 +217,14 @@ def render_budget_breakdown(current_squad_df, ep_col):
         fig_form.update_layout(
             height=250,
             template='plotly_dark',
-            paper_bgcolor='#0d0d0d',
-            plot_bgcolor='#1a1a1a',
-            font=dict(color='#ccc'),
+            paper_bgcolor='#0a0a0b',
+            plot_bgcolor='#111113',
+            font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
             margin=dict(l=40, r=20, t=20, b=60),
             xaxis_tickangle=-45,
             yaxis_title='Form'
         )
-        st.plotly_chart(fig_form, use_container_width=True)
+        st.plotly_chart(fig_form, use_container_width=True, key='opt_form_timeline')
 
 
 def render_transfer_recommendations(current_squad_df, available_df, ep_col):
@@ -234,7 +234,6 @@ def render_transfer_recommendations(current_squad_df, available_df, ep_col):
         out_candidates = current_squad_df.nsmallest(5, 'transfer_score')
         out_display = out_candidates[['web_name', 'team_name', 'position', 'now_cost', ep_col, 'form', 'transfer_score']].copy()
         out_display.columns = ['Player', 'Team', 'Pos', 'Price', 'EP', 'Form', 'Score']
-        out_display['EP'] = out_display['EP'].round(2)
         st.dataframe(style_df_with_injuries(out_display), hide_index=True, use_container_width=True)
         
         st.markdown("**Recommended IN** (best available)", unsafe_allow_html=True)
@@ -339,8 +338,6 @@ def render_position_recommendations(available_df, ep_col):
             with st.expander(f"{pos} Recommendations", expanded=True):
                 display_df = pos_df[['web_name', 'team_name', 'now_cost', ep_col, 'form', 'selected_by_percent', 'transfer_score']].copy()
                 display_df.columns = ['Player', 'Team', 'Price', 'EP', 'Form', 'Owned%', 'Score']
-                display_df['EP'] = display_df['EP'].round(2)
-                display_df['Owned%'] = display_df['Owned%'].round(1)
                 st.dataframe(style_df_with_injuries(display_df), hide_index=True, use_container_width=True)
 
 
@@ -350,8 +347,6 @@ def render_top_picks(available_df, ep_col):
     top_10 = available_df.nlargest(10, 'transfer_score')
     top_display = top_10[['web_name', 'team_name', 'position', 'now_cost', ep_col, 'form', 'selected_by_percent', 'transfer_score']].copy()
     top_display.columns = ['Player', 'Team', 'Pos', 'Price', 'EP', 'Form', 'Owned%', 'Score']
-    top_display['EP'] = top_display['EP'].round(2)
-    top_display['Owned%'] = top_display['Owned%'].round(1)
     st.dataframe(style_df_with_injuries(top_display), hide_index=True, use_container_width=True)
 
 
@@ -377,12 +372,12 @@ def render_points_projection(current_squad_df, available_df, ep_col):
     fig_proj.update_layout(
         height=300,
         template='plotly_dark',
-        paper_bgcolor='#0d0d0d',
-        plot_bgcolor='#1a1a1a',
-        font=dict(color='#ccc'),
+        paper_bgcolor='#0a0a0b',
+        plot_bgcolor='#111113',
+        font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
         barmode='group',
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
         margin=dict(l=40, r=40, t=40, b=40),
         yaxis_title='Expected Points'
     )
-    st.plotly_chart(fig_proj, use_container_width=True)
+    st.plotly_chart(fig_proj, use_container_width=True, key='opt_points_projection')

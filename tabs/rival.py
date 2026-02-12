@@ -4,7 +4,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 
-from utils.helpers import safe_numeric, style_df_with_injuries
+from utils.helpers import safe_numeric, style_df_with_injuries, round_df
 from fpl_api import RivalScout
 
 
@@ -174,15 +174,15 @@ def render_unique_players_chart(result: dict, players_df: pd.DataFrame):
     fig.update_layout(
         height=400,
         template='plotly_dark',
-        paper_bgcolor='#0d0d0d',
-        plot_bgcolor='#1a1a1a',
-        font=dict(color='#ccc'),
+        paper_bgcolor='#0a0a0b',
+        plot_bgcolor='#111113',
+        font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
         yaxis_title='Threat Score',
         barmode='group',
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
         margin=dict(l=40, r=40, t=40, b=40)
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key='rival_unique_players_chart')
 
 
 def render_unique_players_tables(result: dict, players_df: pd.DataFrame):
