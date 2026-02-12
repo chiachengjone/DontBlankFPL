@@ -641,6 +641,8 @@ class RivalScout:
             'unique_to_rival': list(unique_to_team2),
             'common_players': list(common_players),
             'biggest_threat': biggest_threat,
+            'your_squad': picks1,
+            'rival_squad': picks2,
             'team1_data': team1_data,
             'team2_data': team2_data
         }
