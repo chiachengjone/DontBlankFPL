@@ -1,0 +1,21 @@
+# FPL Strategy Engine 2025/26
+# Core dependencies
+
+# Web framework
+streamlit>=1.32.0
+
+# Data processing
+pandas>=2.1.0
+numpy>=1.24.0
+
+# Optimization
+pulp>=2.7.0
+
+# Visualization  
+plotly>=5.18.0
+
+# HTTP requests
+requests>=2.31.0
+
+# Type hints (included in Python 3.9+)
+typing_extensions>=4.9.0
