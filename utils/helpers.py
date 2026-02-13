@@ -1,7 +1,17 @@
 """Helper utility functions for FPL Strategy Engine."""
 
 import pandas as pd
+import numpy as np
 from typing import Dict, List
+
+from config import (
+    OWNERSHIP_TEMPLATE_THRESHOLD,
+    OWNERSHIP_POPULAR_THRESHOLD,
+    OWNERSHIP_DIFFERENTIAL_THRESHOLD,
+    ROTATION_SAFE_MINUTES_PCT,
+    ROTATION_MODERATE_PCT,
+    UNAVAILABLE_STATUSES,
+)
 
 
 def safe_numeric(series, default=0):
@@ -227,3 +237,138 @@ def style_df_with_injuries(df: pd.DataFrame, players_df: pd.DataFrame = None, pl
         return pd.DataFrame(styles, index=display_df.index, columns=display_df.columns)
     
     return df.style.apply(style_rows, axis=None)
+
+
+# ── Rotation Risk ──
+
+def get_rotation_risk(player_row) -> Dict:
+    """
+    Assess rotation risk based on minutes played relative to available minutes.
+    Returns dict with risk level, color, minutes_pct.
+    """
+    minutes = safe_numeric(pd.Series([player_row.get('minutes', 0)])).iloc[0]
+    starts = safe_numeric(pd.Series([player_row.get('starts', 0)])).iloc[0]
+    # Total possible minutes: 90 * games played by team (estimated from events_played/appearances)
+    total_points = safe_numeric(pd.Series([player_row.get('total_points', 0)])).iloc[0]
+
+    # Use starts as a proxy; assume current GW count from minutes / 90 as max
+    # Better proxy: if the player has data, estimate from their starts vs total GWs completed
+    status = player_row.get('status', 'a')
+    chance = _safe_int(player_row.get('chance_of_playing_next_round'), 100)
+
+    if status in UNAVAILABLE_STATUSES or chance == 0:
+        return {'risk': 'Unavailable', 'color': '#ef4444', 'icon': 'X', 'minutes_pct': 0.0}
+
+    # minutes per start
+    if starts > 0:
+        mpg = minutes / starts
+    else:
+        mpg = 0
+
+    # Estimate total team games from event history (rough: use total_points > 0 appearances)
+    appearances = safe_numeric(pd.Series([player_row.get('starts', 0)])).iloc[0]
+    # More reliable: use 'minutes' relative to possible minutes
+    # Rough estimate: number of GWs played so far based on events
+    # Without exact GW count, use starts ratio vs team average
+    # Simpler: classify based on minutes_per_game
+    if mpg >= 80:
+        pct = ROTATION_SAFE_MINUTES_PCT + 0.1
+    elif mpg >= 65:
+        pct = ROTATION_SAFE_MINUTES_PCT
+    elif mpg >= 45:
+        pct = ROTATION_MODERATE_PCT
+    else:
+        pct = 0.4
+
+    if chance < 100 and chance > 0:
+        # Adjust for doubt
+        pct = min(pct, chance / 100.0)
+
+    if pct >= ROTATION_SAFE_MINUTES_PCT:
+        return {'risk': 'Low', 'color': '#22c55e', 'icon': '', 'minutes_pct': pct}
+    elif pct >= ROTATION_MODERATE_PCT:
+        return {'risk': 'Moderate', 'color': '#f59e0b', 'icon': '~', 'minutes_pct': pct}
+    else:
+        return {'risk': 'High', 'color': '#ef4444', 'icon': '!', 'minutes_pct': pct}
+
+
+# ── Ownership Tiers ──
+
+def get_ownership_tier(ownership_pct: float) -> Dict:
+    """
+    Classify player by ownership bracket.
+    Returns dict with tier name, color, description.
+    """
+    if ownership_pct >= OWNERSHIP_TEMPLATE_THRESHOLD:
+        return {'tier': 'Template', 'color': '#3b82f6', 'desc': 'Core pick, most managers own'}
+    elif ownership_pct >= OWNERSHIP_POPULAR_THRESHOLD:
+        return {'tier': 'Popular', 'color': '#22c55e', 'desc': 'Well-owned, mainstream pick'}
+    elif ownership_pct >= OWNERSHIP_DIFFERENTIAL_THRESHOLD:
+        return {'tier': 'Enabler', 'color': '#f59e0b', 'desc': 'Moderate ownership, some edge'}
+    else:
+        return {'tier': 'Differential', 'color': '#a855f7', 'desc': 'Low owned, high ceiling/risk'}
+
+
+def classify_ownership_column(df: pd.DataFrame, col='selected_by_percent') -> pd.Series:
+    """Add ownership tier column to a DataFrame."""
+    own = safe_numeric(df.get(col, pd.Series([0] * len(df))))
+    return own.apply(lambda x: get_ownership_tier(x)['tier'])
+
+
+# ── Availability Summary ──
+
+def get_availability_badge(player_row) -> str:
+    """
+    Return a short text badge combining injury status + rotation risk.
+    For use in table columns.
+    """
+    injury = get_injury_status(player_row)
+    if injury['status'] in ('injured', 'suspended', 'unavailable'):
+        return f"[{injury['icon']}] {injury['status'].title()}"
+    if injury['status'] == 'doubtful':
+        return f"[?] {injury['chance']}%"
+
+    rotation = get_rotation_risk(player_row)
+    if rotation['risk'] == 'High':
+        return "[!] Rotation"
+    elif rotation['risk'] == 'Moderate':
+        return "[~] Moderate"
+    return ""
+
+
+def add_availability_columns(df: pd.DataFrame, players_df: pd.DataFrame = None) -> pd.DataFrame:
+    """
+    Add 'Availability' and 'Ownership Tier' columns to a display DataFrame.
+    Matches on 'web_name' or 'Player' column.
+    """
+    import streamlit as st
+
+    if players_df is None:
+        players_df = st.session_state.get('players_df')
+    if players_df is None:
+        return df
+
+    df = df.copy()
+    # Find the player name column
+    name_col = None
+    for candidate in ['web_name', 'Player', 'player', 'Name']:
+        if candidate in df.columns:
+            name_col = candidate
+            break
+    if name_col is None:
+        return df
+
+    # Build lookup
+    avail_lookup = {}
+    tier_lookup = {}
+    for _, p in players_df.iterrows():
+        name = p.get('web_name', '')
+        avail_lookup[name] = get_availability_badge(p)
+        own = safe_numeric(pd.Series([p.get('selected_by_percent', 0)])).iloc[0]
+        tier_lookup[name] = get_ownership_tier(own)['tier']
+
+    df['Avail'] = df[name_col].map(avail_lookup).fillna('')
+    df['Tier'] = df[name_col].map(tier_lookup).fillna('')
+
+    return df
+

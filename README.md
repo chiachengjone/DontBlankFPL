@@ -16,27 +16,39 @@ A high-performance Streamlit application for Fantasy Premier League strategy opt
 
 ### Core Functionality
 
-####  Strategy Tab
+#### Dashboard Tab
+- At-a-glance gameweek overview with key metrics (average score, highest scorer, most transferred)
+- Top picks by position with availability badges and ownership tiers
+- Captain quick-pick (top 3 candidates with expected points)
+- Injury and suspension alerts for popular players (>1% ownership)
+- Fixture swing detection (improving vs worsening schedules)
+- Ownership landscape breakdown (Template / Popular / Enabler / Differential)
+- Transfer trend tracking (most transferred in and out)
+
+#### Strategy Tab
 - AI-powered squad optimization using Integer Linear Programming (PuLP)
 - Adjustable look-ahead window (3-10 gameweeks) with decay weighting
 - **Ghost Points Logic**: Automatically penalizes players with blank gameweeks
 - **Team Fixture Difficulty Ranking**: Sort teams by schedule difficulty, filter for detailed team analysis
 - Multiple optimization modes: Maximum Points, Differential Focus, Value Picks, Balanced
 
-####  Squad Builder Tab
+#### Squad Builder Tab
 - Transfer optimizer based on current team
 - Multi-gameweek planning horizon
-- Free transfer modeling
+- Free transfer modeling with rollover accumulation (up to 5 FTs)
 - Budget constraints
+- **Multi-week transfer planner**: Simulates rolling transfers over 2-4 GWs, showing hit costs vs expected-point gains
 
-####  Analytics Tab
+#### Analytics Tab
 - Searchable player database with engineered features
 - **Differential Finder Index**: $\text{Differential Score} = \frac{EP}{EO\%} \times \text{Fixture Ease}$
+- **Ownership tier filtering**: Template (>=25%), Popular (>=10%), Enabler (>=5%), Differential (<5%)
+- **Availability indicators**: Injury/suspension flags and rotation risk badges
 - CBIT Propensity Scores for defenders
 - Price sensitivity (xG/£) analysis
 - Interactive Plotly visualizations
 
-####  Rival Scout Tab
+#### Rival Scout Tab
 - Direct comparison of two Team IDs
 - **Jaccard Similarity** calculation for squad overlap
 - **Tactical Delta**: Identifies the biggest threat player in your rival's squad
@@ -94,6 +106,7 @@ best_individual = optimizer.evolve()
 ```
 DontBlankFPL/
 ├── app.py                    # Streamlit main application
+├── config.py                 # Centralized constants & thresholds
 ├── fpl_api.py                # FPL API integration & data processing
 ├── optimizer.py              # PuLP ILP optimization engine
 ├── ml_predictor.py           # ML prediction ensemble
@@ -105,15 +118,16 @@ DontBlankFPL/
 │   ├── charts.py             # Plotly visualizations
 │   └── styles.py             # CSS styling
 ├── tabs/
+│   ├── dashboard.py          # Dashboard overview tab
 │   ├── strategy.py           # Strategy tab (includes fixture difficulty)
-│   ├── optimization.py       # Squad builder tab
-│   ├── analytics.py          # Analytics tab
+│   ├── optimization.py       # Squad builder tab + multi-week planner
+│   ├── analytics.py          # Analytics tab + ownership tiers
 │   ├── rival.py              # Rival scout tab
 │   ├── ml_tab.py             # ML predictions tab
 │   ├── montecarlo_tab.py     # Monte Carlo tab
 │   └── genetic_tab.py        # Genetic optimizer tab
 └── utils/
-    └── helpers.py
+    └── helpers.py            # Shared utilities (availability, tiers)
 ```
 
 ##  Installation
@@ -210,11 +224,16 @@ Set via environment variable: `ODDS_API_KEY`
 
 ### Customization Points
 
-In `optimizer.py`:
+In `config.py`:
 - `CAPTAIN_MULTIPLIER`: Default 1.25 (2025/26 rule)
 - `MAX_FREE_TRANSFERS`: Default 5 (2025/26 rule)
 - `CBIT_BONUS_THRESHOLD`: Default 10
 - `CBIT_BONUS_POINTS`: Default 2
+- `OWNERSHIP_TEMPLATE_THRESHOLD`: Default 25% (template picks)
+- `OWNERSHIP_POPULAR_THRESHOLD`: Default 10% (popular picks)
+- `OWNERSHIP_DIFFERENTIAL_THRESHOLD`: Default 5% (differentials)
+- `ROTATION_SAFE_MINUTES_PCT`: Default 0.80 (low rotation risk)
+- `ROTATION_MODERATE_PCT`: Default 0.60 (moderate rotation risk)
 
 ##  Usage Tips
 

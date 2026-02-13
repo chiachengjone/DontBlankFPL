@@ -12,6 +12,7 @@ pd.set_option('display.float_format', lambda x: f'{x:.2f}')
 # Import from local modules
 from fpl_api import create_data_pipeline
 from components.styles import apply_theme, render_header, render_status_bar
+from tabs.dashboard import render_dashboard_tab
 from tabs.strategy import render_strategy_tab
 from tabs.optimization import render_optimization_tab
 from tabs.rival import render_rival_tab
@@ -31,11 +32,22 @@ st.set_page_config(
 # Apply dark theme
 apply_theme()
 
-# Initialize session state for injury highlighting
-if 'injury_highlight' not in st.session_state:
-    st.session_state.injury_highlight = True
-if 'fpl_team_id' not in st.session_state:
-    st.session_state.fpl_team_id = 0
+# ── Session State Defaults ──
+_SESSION_DEFAULTS = {
+    'injury_highlight': True,
+    'fpl_team_id': 0,
+    # Preferences
+    'pref_weeks_ahead': 5,
+    'pref_strategy': 'Balanced',
+    'pref_max_price': 15.0,
+    'pref_position': 'All',
+    'pref_min_mins': 90,
+    'pref_sort': 'Expected Points',
+}
+
+for key, default in _SESSION_DEFAULTS.items():
+    if key not in st.session_state:
+        st.session_state[key] = default
 
 
 @st.cache_resource(ttl=300, show_spinner=False)
@@ -88,8 +100,8 @@ def main():
     except:
         render_status_bar(f"{len(players_df)} players loaded")
     
-    # Settings row (compact) — Team ID + Injury highlights
-    settings_left, settings_right = st.columns([1, 1])
+    # Settings row (compact) -- Team ID + Injury highlights
+    settings_left, settings_mid, settings_right = st.columns([1, 1, 1])
     with settings_left:
         team_id_input = st.number_input(
             "FPL Team ID",
@@ -101,6 +113,15 @@ def main():
             help="Enter your FPL Team ID (find it in the URL of your team page). Used by Squad Builder and Monte Carlo."
         )
         st.session_state.fpl_team_id = team_id_input
+    with settings_mid:
+        pref_horizon = st.slider(
+            "Default Horizon (GWs)",
+            min_value=3, max_value=10,
+            value=st.session_state.pref_weeks_ahead,
+            key="header_horizon",
+            help="Default planning horizon used across tabs"
+        )
+        st.session_state.pref_weeks_ahead = pref_horizon
     with settings_right:
         st.session_state.injury_highlight = st.toggle(
             "Injury highlights",
@@ -109,7 +130,8 @@ def main():
         )
     
     # Navigation tabs
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+        "Dashboard",
         "Strategy", 
         "Squad Builder", 
         "Analytics", 
@@ -118,6 +140,9 @@ def main():
         "Monte Carlo",
         "Genetic",
     ])
+    
+    with tab0:
+        render_dashboard_tab(processor, players_df)
     
     with tab1:
         render_strategy_tab(processor, players_df)

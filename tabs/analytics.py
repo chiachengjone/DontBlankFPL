@@ -4,7 +4,10 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 
-from utils.helpers import safe_numeric, style_df_with_injuries, round_df
+from utils.helpers import (
+    safe_numeric, style_df_with_injuries, round_df,
+    classify_ownership_column, add_availability_columns,
+)
 from fpl_api import get_differential_picks
 from components.charts import create_cbit_chart, create_ownership_trends_chart
 
@@ -12,17 +15,39 @@ from components.charts import create_cbit_chart, create_ownership_trends_chart
 def render_analytics_tab(processor, players_df: pd.DataFrame):
     """Analytics tab - player discovery and advanced metrics."""
     
-    # Filters
-    f1, f2, f3, f4 = st.columns(4)
+    # Filters - use session state defaults
+    f1, f2, f3, f4, f5 = st.columns([1, 1, 1, 1, 1])
     
     with f1:
-        pos_filter = st.selectbox("Position", ['All', 'GKP', 'DEF', 'MID', 'FWD'], key="analytics_pos")
+        pos_filter = st.selectbox(
+            "Position", ['All', 'GKP', 'DEF', 'MID', 'FWD'],
+            index=['All', 'GKP', 'DEF', 'MID', 'FWD'].index(st.session_state.get('pref_position', 'All')),
+            key="analytics_pos",
+        )
     with f2:
-        max_price = st.slider("Max Price", 4.0, 15.0, 15.0, 0.5, key="analytics_price")
+        max_price = st.slider(
+            "Max Price", 4.0, 15.0,
+            value=st.session_state.get('pref_max_price', 15.0),
+            step=0.5, key="analytics_price",
+        )
     with f3:
-        min_mins = st.slider("Min Minutes", 0, 1000, 90, 90, key="analytics_mins")
+        min_mins = st.slider(
+            "Min Minutes", 0, 1000,
+            value=st.session_state.get('pref_min_mins', 90),
+            step=90, key="analytics_mins",
+        )
     with f4:
-        sort_col = st.selectbox("Sort By", ['Expected Points', 'Differential', 'Value', 'CBIT', 'Price'], key="analytics_sort")
+        sort_col = st.selectbox(
+            "Sort By",
+            ['Expected Points', 'Differential', 'Value', 'CBIT', 'Price', 'Ownership'],
+            key="analytics_sort",
+        )
+    with f5:
+        tier_filter = st.selectbox(
+            "Ownership Tier",
+            ['All', 'Template', 'Popular', 'Enabler', 'Differential'],
+            key="analytics_tier",
+        )
     
     search = st.text_input("Search player...", placeholder="Enter name", key="analytics_search")
     
@@ -53,12 +78,20 @@ def render_analytics_tab(processor, players_df: pd.DataFrame):
         'Differential': 'differential_score',
         'Value': 'xg_per_pound',
         'CBIT': 'cbit_propensity',
-        'Price': 'now_cost'
+        'Price': 'now_cost',
+        'Ownership': 'selected_by_percent',
     }
     sort_by = sort_map.get(sort_col, 'expected_points')
     if sort_by in df.columns:
         df[sort_by] = safe_numeric(df[sort_by])
-        df = df.sort_values(sort_by, ascending=False)
+        df = df.sort_values(sort_by, ascending=(sort_col == 'Price'))
+    
+    # Add ownership tier
+    df['ownership_tier'] = classify_ownership_column(df)
+    
+    # Apply tier filter
+    if tier_filter != 'All':
+        df = df[df['ownership_tier'] == tier_filter]
     
     # Display player table
     render_player_table(df)
@@ -86,9 +119,10 @@ def render_analytics_tab(processor, players_df: pd.DataFrame):
 
 
 def render_player_table(df: pd.DataFrame):
-    """Render the main player table."""
+    """Render the main player table with ownership tiers and availability."""
     display_cols = ['web_name', 'team_name', 'position', 'now_cost', 'selected_by_percent',
-                   'expected_points', 'differential_score', 'cbit_propensity', 'xg_per_pound']
+                   'expected_points', 'differential_score', 'cbit_propensity', 'xg_per_pound',
+                   'ownership_tier']
     display_cols = [c for c in display_cols if c in df.columns]
     
     numeric_cols = ['now_cost', 'selected_by_percent', 'expected_points', 'differential_score', 'cbit_propensity', 'xg_per_pound']
@@ -100,13 +134,22 @@ def render_player_table(df: pd.DataFrame):
         'web_name': 'Player', 'team_name': 'Team', 'position': 'Pos',
         'now_cost': 'Price', 'selected_by_percent': 'Own%',
         'expected_points': 'EP', 'differential_score': 'Diff',
-        'cbit_propensity': 'CBIT', 'xg_per_pound': 'Value'
+        'cbit_propensity': 'CBIT', 'xg_per_pound': 'Value',
+        'ownership_tier': 'Tier',
     }
     
     display_df = df[display_cols].head(50).copy()
+    display_df = add_availability_columns(display_df)
+    # Drop raw ownership_tier if add_availability_columns already added a Tier column
+    if 'Tier' in display_df.columns and 'ownership_tier' in display_df.columns:
+        display_df = display_df.drop(columns=['ownership_tier'])
+    
+    renamed = display_df.rename(columns=rename)
+    # Ensure no duplicate column names (Styler requirement)
+    renamed = renamed.loc[:, ~renamed.columns.duplicated()]
     
     st.markdown(f'<p class="section-title">Players ({len(df)} found)</p>', unsafe_allow_html=True)
-    st.dataframe(style_df_with_injuries(display_df.rename(columns=rename)), hide_index=True, use_container_width=True)
+    st.dataframe(style_df_with_injuries(renamed), hide_index=True, use_container_width=True)
 
 
 def render_points_distribution(players_df: pd.DataFrame):
@@ -235,7 +278,7 @@ def render_set_and_forget(players_df: pd.DataFrame):
 
 
 def render_expected_vs_actual(players_df: pd.DataFrame):
-    """Render Expected vs Actual performance analysis."""
+    """Render Expected vs Actual performance analysis with filters."""
     st.markdown('<p class="section-title">Expected vs Actual (Over/Under Performers)</p>', unsafe_allow_html=True)
     st.caption("Comparing total points vs what was expected - find unlucky players worth targeting")
     
@@ -248,9 +291,24 @@ def render_expected_vs_actual(players_df: pd.DataFrame):
     df['games_played'] = df['minutes'] / 90
     df['expected_total'] = df['ep_next'] * df['games_played'] * 0.6
     df['diff'] = df['total_points'] - df['expected_total']
+
+    # ── Filters ──
+    ef1, ef2, ef3 = st.columns([1, 1, 2])
+    with ef1:
+        eva_pos = st.selectbox("Position", ['All', 'GKP', 'DEF', 'MID', 'FWD'], key="eva_pos")
+    with ef2:
+        all_teams = sorted(df['team_name'].dropna().unique().tolist()) if 'team_name' in df.columns else []
+        eva_team = st.selectbox("Team", ['All'] + all_teams, key="eva_team")
+    with ef3:
+        eva_search = st.text_input("Search player", placeholder="Type name to highlight...", key="eva_search")
+
+    if eva_pos != 'All':
+        df = df[df['position'] == eva_pos]
+    if eva_team != 'All' and 'team_name' in df.columns:
+        df = df[df['team_name'] == eva_team]
     
     # Scatter chart: actual vs expected
-    top_players = df.nlargest(40, 'total_points')
+    top_players = df.nlargest(60, 'total_points')
     if len(top_players) > 5:
         pos_colors = {'GKP': '#3b82f6', 'DEF': '#22c55e', 'MID': '#f59e0b', 'FWD': '#ef4444'}
         fig = go.Figure()
@@ -275,6 +333,21 @@ def render_expected_vs_actual(players_df: pd.DataFrame):
                 text=pos_df['web_name'],
                 hovertemplate='<b>%{text}</b><br>Expected: %{x:.0f}<br>Actual: %{y:.0f}<extra></extra>'
             ))
+
+        # Highlight searched player
+        if eva_search and eva_search.strip():
+            search_lower = eva_search.lower().strip()
+            matched = top_players[top_players['web_name'].str.lower().str.contains(search_lower, na=False)]
+            if not matched.empty:
+                fig.add_trace(go.Scatter(
+                    x=matched['expected_total'], y=matched['total_points'],
+                    mode='markers+text', name='Search',
+                    marker=dict(size=14, color='#ffffff', symbol='diamond',
+                               line=dict(width=2, color='#ef4444')),
+                    text=matched['web_name'], textposition='top center',
+                    textfont=dict(color='#ffffff', size=11),
+                    hovertemplate='<b>%{text}</b><br>Expected: %{x:.0f}<br>Actual: %{y:.0f}<extra></extra>'
+                ))
         
         fig.update_layout(
             height=380, template='plotly_dark',
@@ -285,9 +358,9 @@ def render_expected_vs_actual(players_df: pd.DataFrame):
             legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
             margin=dict(l=50, r=30, t=30, b=50)
         )
-        fig.add_annotation(x=max_val*0.15, y=max_val*0.85, text="Overperforming ↑",
+        fig.add_annotation(x=max_val*0.15, y=max_val*0.85, text="Overperforming",
                           showarrow=False, font=dict(color='#22c55e', size=10))
-        fig.add_annotation(x=max_val*0.85, y=max_val*0.15, text="Underperforming ↓",
+        fig.add_annotation(x=max_val*0.85, y=max_val*0.15, text="Underperforming",
                           showarrow=False, font=dict(color='#ef4444', size=10))
         st.plotly_chart(fig, use_container_width=True, key='analytics_expected_vs_actual')
     

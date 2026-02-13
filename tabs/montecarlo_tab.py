@@ -51,6 +51,12 @@ def render_monte_carlo_tab(processor, players_df: pd.DataFrame):
                 )
 
                 if st.button("Simulate Player", type="primary", use_container_width=True):
+                    # Clear previous results so they don't stack
+                    st.session_state.pop("mc_player_result", None)
+                    st.session_state.pop("mc_player_id", None)
+                    st.session_state.pop("mc_portfolio", None)
+                    st.session_state.pop("mc_portfolio_ids", None)
+                    st.session_state.pop("mc_captain_id", None)
                     with st.spinner("Running Monte Carlo..."):
                         try:
                             from monte_carlo import create_monte_carlo_engine
@@ -74,6 +80,12 @@ def render_monte_carlo_tab(processor, players_df: pd.DataFrame):
         if team_id and team_id > 0:
             st.caption(f"Team ID: {team_id}")
             if st.button("Simulate My Squad", use_container_width=True):
+                # Clear previous results so they don't stack
+                st.session_state.pop("mc_player_result", None)
+                st.session_state.pop("mc_player_id", None)
+                st.session_state.pop("mc_portfolio", None)
+                st.session_state.pop("mc_portfolio_ids", None)
+                st.session_state.pop("mc_captain_id", None)
                 with st.spinner("Fetching squad and running simulations..."):
                     try:
                         from monte_carlo import create_monte_carlo_engine
