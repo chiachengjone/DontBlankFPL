@@ -106,7 +106,7 @@ def render_player_detail_card(player_row: Dict, processor, players_df: pd.DataFr
 
 def render_captain_pick_card(player_row: Dict, rank: int = 1):
     """Render captain pick card."""
-    ep = safe_numeric(pd.Series([player_row.get('ep_next', 0)])).iloc[0]
+    ep = safe_numeric(pd.Series([player_row.get('expected_points', player_row.get('ep_next', 0))])).iloc[0]
     form = safe_numeric(pd.Series([player_row.get('form', 0)])).iloc[0]
     
     medal = '#1' if rank == 1 else '#2' if rank == 2 else '#3' if rank == 3 else f'#{rank}'

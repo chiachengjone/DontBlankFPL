@@ -85,7 +85,7 @@ def render_dashboard_tab(processor, players_df: pd.DataFrame):
             color = '#22c55e' if diff >= 0 else '#ef4444'
             st.metric("vs Average", f"{diff:+d}", delta=f"{diff:+d}")
         else:
-            avg_ep = safe_numeric(players_df.get('ep_next', pd.Series([0] * len(players_df)))).mean()
+            avg_ep = safe_numeric(players_df.get('expected_points', players_df.get('ep_next', pd.Series([0] * len(players_df))))).mean()
             st.metric("Avg EP (all)", f"{avg_ep:.2f}")
 
     # ── Squad Performance ──
@@ -135,12 +135,13 @@ def render_squad_performance(processor, players_df, current_gw, team_id):
             return
 
         squad_df['total_points'] = safe_numeric(squad_df.get('total_points', pd.Series([0] * len(squad_df))))
-        squad_df['ep_next'] = safe_numeric(squad_df.get('ep_next', pd.Series([0] * len(squad_df))))
+        # Use advanced expected_points if available, fall back to ep_next
+        squad_df['expected_points'] = safe_numeric(squad_df.get('expected_points', squad_df.get('ep_next', pd.Series([0] * len(squad_df)))))
         squad_df['minutes'] = safe_numeric(squad_df.get('minutes', pd.Series([0] * len(squad_df))))
         squad_df['form'] = safe_numeric(squad_df.get('form', pd.Series([0] * len(squad_df))))
         squad_df['games_played'] = (squad_df['minutes'] / 90).clip(lower=1)
         squad_df['pts_per_game'] = squad_df['total_points'] / squad_df['games_played']
-        squad_df['expected_per_game'] = squad_df['ep_next']
+        squad_df['expected_per_game'] = squad_df['expected_points']
         squad_df['perf_diff'] = squad_df['pts_per_game'] - squad_df['expected_per_game']
 
         st.markdown('<p class="section-title">Squad Performance</p>', unsafe_allow_html=True)
@@ -205,7 +206,8 @@ def render_top_picks_summary(players_df: pd.DataFrame):
     st.caption("Highest expected points this gameweek per position")
 
     df = players_df.copy()
-    df['ep_next'] = safe_numeric(df.get('ep_next', pd.Series([0] * len(df))))
+    # Use advanced expected_points if available
+    df['ep'] = safe_numeric(df.get('expected_points', df.get('ep_next', pd.Series([0] * len(df)))))
     df['now_cost'] = safe_numeric(df['now_cost'], 5)
     df['selected_by_percent'] = safe_numeric(df['selected_by_percent'])
     df['minutes'] = safe_numeric(df.get('minutes', pd.Series([0] * len(df))))
@@ -214,7 +216,7 @@ def render_top_picks_summary(players_df: pd.DataFrame):
     cols = st.columns(4)
     for i, pos in enumerate(['GKP', 'DEF', 'MID', 'FWD']):
         with cols[i]:
-            pos_df = df[df['position'] == pos].nlargest(DASHBOARD_TOP_PICKS, 'ep_next')
+            pos_df = df[df['position'] == pos].nlargest(DASHBOARD_TOP_PICKS, 'ep')
             st.markdown(f"**{pos}**")
             if pos_df.empty:
                 st.caption("No data")
@@ -232,7 +234,7 @@ def render_top_picks_summary(players_df: pd.DataFrame):
                     f'{p["web_name"]}{flag}{avail_html}</div>'
                     f'<div style="color:#888;font-size:0.72rem;">'
                     f'{p.get("team_name", "")} | {p["now_cost"]:.1f}m | '
-                    f'<span style="color:{POSITION_COLORS.get(pos, "#888")}">EP {p["ep_next"]:.1f}</span> | '
+                    f'<span style="color:{POSITION_COLORS.get(pos, "#888")}">EP {p["ep"]:.1f}</span> | '
                     f'<span style="color:{tier["color"]}">{tier["tier"]}</span>'
                     f'</div></div>',
                     unsafe_allow_html=True,
@@ -244,11 +246,12 @@ def render_captain_quick_pick(players_df: pd.DataFrame):
     st.markdown('<p class="section-title">Captain Quick Pick</p>', unsafe_allow_html=True)
 
     df = players_df.copy()
-    df['ep_next'] = safe_numeric(df.get('ep_next', pd.Series([0] * len(df))))
+    # Use advanced expected_points if available
+    df['ep'] = safe_numeric(df.get('expected_points', df.get('ep_next', pd.Series([0] * len(df)))))
     df['form'] = safe_numeric(df.get('form', pd.Series([0] * len(df))))
     df['minutes'] = safe_numeric(df.get('minutes', pd.Series([0] * len(df))))
     df = df[df['minutes'] > 500]
-    df['captain_ev'] = df['ep_next'] * CAPTAIN_MULTIPLIER
+    df['captain_ev'] = df['ep'] * CAPTAIN_MULTIPLIER
     df['captain_score'] = df['captain_ev'] + df['form'] * 0.3
 
     top3 = df.nlargest(3, 'captain_score')
@@ -263,7 +266,7 @@ def render_captain_quick_pick(players_df: pd.DataFrame):
                 f'<div style="font-size:1.1rem;font-weight:600;color:#fff;">{cap["web_name"]}</div>'
                 f'<div style="color:#888;font-size:0.8rem;">{cap.get("team_name", "")} | {cap["now_cost"]:.1f}m</div>'
                 f'<div style="color:#ef4444;font-weight:600;margin-top:0.3rem;">{cap["captain_ev"]:.1f} EV</div>'
-                f'<div style="color:#888;font-size:0.72rem;">Form {cap["form"]:.1f} | EP {cap["ep_next"]:.1f}</div>'
+                f'<div style="color:#888;font-size:0.72rem;">Form {cap["form"]:.1f} | EP {cap["ep"]:.1f}</div>'
                 f'</div>',
                 unsafe_allow_html=True,
             )

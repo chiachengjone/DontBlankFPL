@@ -39,7 +39,7 @@ def render_analytics_tab(processor, players_df: pd.DataFrame):
     with f4:
         sort_col = st.selectbox(
             "Sort By",
-            ['Expected Points', 'Differential', 'Value', 'CBIT', 'Price', 'Ownership'],
+            ['Expected Points', 'EPPM', 'Threat', 'Diff Gain (RRI)', 'Diff ROI/m', 'CBIT', 'Price', 'Ownership'],
             key="analytics_sort",
         )
     with f5:
@@ -51,14 +51,31 @@ def render_analytics_tab(processor, players_df: pd.DataFrame):
     
     search = st.text_input("Search player...", placeholder="Enter name", key="analytics_search")
     
-    # Prepare data
+    # Prepare data - use expected_points from fpl_api (already enriched with Understat)
     df = players_df.copy()
-    df['expected_points'] = safe_numeric(df.get('ep_next', pd.Series([2.0]*len(df))))
-    df['differential_score'] = df['expected_points'] / safe_numeric(df['selected_by_percent'], 5).clip(lower=0.5)
-    df['cbit_propensity'] = 0.0
-    if 'clean_sheets' in df.columns:
+    # EP comes from advanced calculation in fpl_api; fall back to ep_next if missing
+    if 'expected_points' not in df.columns or df['expected_points'].isna().all():
+        df['expected_points'] = safe_numeric(df.get('ep_next', pd.Series([2.0]*len(df))))
+    else:
+        df['expected_points'] = safe_numeric(df['expected_points'])
+    
+    # Use pre-calculated differential metrics if available
+    if 'differential_gain' not in df.columns:
+        eo = safe_numeric(df['selected_by_percent'], 5).clip(lower=0.1)
+        eo_frac = eo / 100.0
+        import numpy as np
+        eo_10k = (1.5 * np.power(eo_frac, 1.4) + 0.01).clip(0.01, 0.99)
+        df['eo_top10k'] = (eo_10k * 100).round(1)
+        df['differential_gain'] = (df['expected_points'] * (1 - eo_10k)).round(2)
+        df['diff_roi'] = (df['differential_gain'] / safe_numeric(df['now_cost'], 5).clip(lower=4)).round(3)
+    if 'differential_score' not in df.columns:
+        df['differential_score'] = df['differential_gain']
+    
+    df['cbit_propensity'] = safe_numeric(df.get('cbit_propensity', pd.Series([0]*len(df))))
+    if df['cbit_propensity'].sum() == 0 and 'clean_sheets' in df.columns:
         df.loc[df['position'] == 'DEF', 'cbit_propensity'] = safe_numeric(df['clean_sheets']) / 10
-    df['xg_per_pound'] = df['expected_points'] / safe_numeric(df['now_cost'], 5).clip(lower=4)
+    
+    df['xg_per_pound'] = safe_numeric(df.get('xg_per_pound', df['expected_points'] / safe_numeric(df['now_cost'], 5).clip(lower=4)))
     
     # Apply filters
     if pos_filter != 'All':
@@ -75,8 +92,11 @@ def render_analytics_tab(processor, players_df: pd.DataFrame):
     # Sort
     sort_map = {
         'Expected Points': 'expected_points',
+        'EPPM': 'eppm',
+        'Threat': 'threat_momentum',
+        'Diff Gain (RRI)': 'differential_gain',
+        'Diff ROI/m': 'diff_roi',
         'Differential': 'differential_score',
-        'Value': 'xg_per_pound',
         'CBIT': 'cbit_propensity',
         'Price': 'now_cost',
         'Ownership': 'selected_by_percent',
@@ -105,6 +125,9 @@ def render_analytics_tab(processor, players_df: pd.DataFrame):
     # CBIT analysis chart
     render_cbit_analysis(players_df)
     
+    # Advanced Metrics (Threat Momentum, EPPM, Matchup Quality)
+    render_advanced_metrics(players_df)
+    
     # Differential picks
     render_differential_picks(processor)
     
@@ -119,13 +142,14 @@ def render_analytics_tab(processor, players_df: pd.DataFrame):
 
 
 def render_player_table(df: pd.DataFrame):
-    """Render the main player table with ownership tiers and availability."""
+    """Render the main player table with RRI differential columns."""
     display_cols = ['web_name', 'team_name', 'position', 'now_cost', 'selected_by_percent',
-                   'expected_points', 'differential_score', 'cbit_propensity', 'xg_per_pound',
-                   'ownership_tier']
+                   'expected_points', 'differential_gain', 'diff_roi', 'eppm',
+                   'threat_momentum', 'diff_verdict', 'ownership_tier']
     display_cols = [c for c in display_cols if c in df.columns]
     
-    numeric_cols = ['now_cost', 'selected_by_percent', 'expected_points', 'differential_score', 'cbit_propensity', 'xg_per_pound']
+    numeric_cols = ['now_cost', 'selected_by_percent', 'expected_points', 'differential_gain',
+                   'diff_roi', 'eppm', 'threat_momentum']
     for col in numeric_cols:
         if col in df.columns:
             df[col] = safe_numeric(df[col])
@@ -133,9 +157,9 @@ def render_player_table(df: pd.DataFrame):
     rename = {
         'web_name': 'Player', 'team_name': 'Team', 'position': 'Pos',
         'now_cost': 'Price', 'selected_by_percent': 'Own%',
-        'expected_points': 'EP', 'differential_score': 'Diff',
-        'cbit_propensity': 'CBIT', 'xg_per_pound': 'Value',
-        'ownership_tier': 'Tier',
+        'expected_points': 'EP', 'differential_gain': 'xNP',
+        'diff_roi': 'ROI/m', 'eppm': 'EPPM', 'threat_momentum': 'Threat',
+        'diff_verdict': 'Verdict', 'ownership_tier': 'Tier',
     }
     
     display_df = df[display_cols].head(50).copy()
@@ -158,7 +182,8 @@ def render_points_distribution(players_df: pd.DataFrame):
     st.caption("How expected points are spread across each position")
     
     df = players_df.copy()
-    df['ep'] = safe_numeric(df.get('ep_next', df.get('expected_points', pd.Series([0]*len(df)))))
+    # Use expected_points (advanced EP) if available, else fall back to ep_next
+    df['ep'] = safe_numeric(df.get('expected_points', df.get('ep_next', pd.Series([0]*len(df)))))
     df['minutes'] = safe_numeric(df.get('minutes', pd.Series([0]*len(df))))
     df = df[df['minutes'] > 90]
     
@@ -193,7 +218,8 @@ def render_value_by_position(players_df: pd.DataFrame):
     st.caption("Box plot showing EP per million by position — find the best bang for your buck")
     
     df = players_df.copy()
-    df['ep'] = safe_numeric(df.get('ep_next', df.get('expected_points', pd.Series([0]*len(df)))))
+    # Use expected_points (advanced EP) if available
+    df['ep'] = safe_numeric(df.get('expected_points', df.get('ep_next', pd.Series([0]*len(df)))))
     df['now_cost'] = safe_numeric(df['now_cost'], 5)
     df['minutes'] = safe_numeric(df.get('minutes', pd.Series([0]*len(df))))
     df = df[df['minutes'] > 200]
@@ -238,18 +264,298 @@ def render_cbit_analysis(players_df: pd.DataFrame):
         st.info("CBIT data unavailable - requires clean sheet history")
 
 
-def render_differential_picks(processor):
-    """Render differential picks section."""
-    st.markdown('<p class="section-title">Differential Picks (under 5% ownership)</p>', unsafe_allow_html=True)
-    try:
-        diffs = get_differential_picks(processor, min_ep=3.0, max_ownership=5.0)
-        if diffs is not None and not diffs.empty:
-            diffs_display = round_df(diffs.head(10))
-            st.dataframe(style_df_with_injuries(diffs_display, player_col='web_name'), hide_index=True, use_container_width=True)
+def render_advanced_metrics(players_df: pd.DataFrame):
+    """Render Advanced Metrics section: EPPM, Threat Momentum, Matchup Quality, Engineered Differentials."""
+    st.markdown('<p class="section-title">Advanced Metrics</p>', unsafe_allow_html=True)
+    st.caption("EPPM, Threat Momentum & Matchup Quality — find hidden value using xG/xA data")
+    
+    df = players_df.copy()
+    df['minutes'] = safe_numeric(df.get('minutes', pd.Series([0]*len(df))))
+    df = df[df['minutes'] > 200]  # Filter for players with meaningful minutes
+    
+    # Ensure columns exist
+    for col in ['eppm', 'threat_momentum', 'matchup_quality', 'engineered_diff', 'threat_direction']:
+        if col not in df.columns:
+            df[col] = 0.0
+        df[col] = safe_numeric(df[col])
+    
+    df['now_cost'] = safe_numeric(df['now_cost'], 5)
+    df['selected_by_percent'] = safe_numeric(df['selected_by_percent'])
+    df['expected_points'] = safe_numeric(df.get('expected_points', df.get('ep_next', pd.Series([0]*len(df)))))
+    
+    # ── Sub-tabs for different views ──
+    am1, am2, am3 = st.tabs(["EPPM Leaders", "Threat Momentum", "Engineered Differentials"])
+    
+    with am1:
+        # EPPM: Effective Points Per Million
+        st.markdown("**Top EPPM (Value Picks)**")
+        st.caption("Highest expected points per million — best bang for your buck")
+        
+        eppm_df = df.nlargest(15, 'eppm')[['web_name', 'team_name', 'position', 'now_cost', 'expected_points', 'eppm', 'selected_by_percent']]
+        eppm_df = eppm_df.copy()
+        eppm_df.columns = ['Player', 'Team', 'Pos', 'Price', 'EP', 'EPPM', 'Own%']
+        for c in ['Price', 'EP', 'EPPM', 'Own%']:
+            eppm_df[c] = eppm_df[c].round(2)
+        st.dataframe(style_df_with_injuries(eppm_df), hide_index=True, use_container_width=True)
+        
+        # EPPM by position chart
+        pos_colors = {'GKP': '#3b82f6', 'DEF': '#22c55e', 'MID': '#f59e0b', 'FWD': '#ef4444'}
+        fig = go.Figure()
+        for pos in ['GKP', 'DEF', 'MID', 'FWD']:
+            pos_df = df[df['position'] == pos].nlargest(10, 'eppm')
+            if pos_df.empty:
+                continue
+            fig.add_trace(go.Bar(
+                x=pos_df['web_name'], y=pos_df['eppm'],
+                name=pos, marker_color=pos_colors[pos],
+                hovertemplate='<b>%{x}</b><br>EPPM: %{y:.2f}<br>Price: %{customdata[0]:.1f}m<extra></extra>',
+                customdata=pos_df[['now_cost']].values
+            ))
+        fig.update_layout(
+            height=300, template='plotly_dark',
+            paper_bgcolor='#0a0a0b', plot_bgcolor='#111113',
+            font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
+            xaxis=dict(gridcolor='#1e1e21', tickangle=45),
+            yaxis=dict(title='EPPM', gridcolor='#1e1e21'),
+            legend=dict(orientation='h', yanchor='bottom', y=1.02),
+            margin=dict(l=50, r=30, t=40, b=80),
+            barmode='group'
+        )
+        st.plotly_chart(fig, use_container_width=True, key='analytics_eppm_chart')
+    
+    with am2:
+        # Threat Momentum: Searchable scatter plot
+        st.markdown("**Threat Momentum (xG/xA Trend)**")
+        st.caption("Search for a player to highlight on the chart and see detailed stats")
+        
+        # Search input
+        am2_search = st.text_input("Search player", placeholder="Type name to highlight...", key="am2_player_search")
+        
+        # Prepare data for scatter
+        scatter_df = df[df['threat_momentum'] > 0].copy()
+        
+        if 'matchup_quality' in scatter_df.columns and not scatter_df.empty:
+            # Determine if we're searching
+            is_searching = bool(am2_search and am2_search.strip())
+            search_lower = am2_search.lower().strip() if is_searching else ""
+            
+            if is_searching:
+                scatter_df['is_searched'] = scatter_df['web_name'].str.lower().str.contains(search_lower, na=False)
+            else:
+                scatter_df['is_searched'] = False
+            
+            fig = go.Figure()
+            
+            # Plot non-matched players (transparent when searching)
+            for pos, color in pos_colors.items():
+                pos_df = scatter_df[(scatter_df['position'] == pos) & (~scatter_df['is_searched'])]
+                if pos_df.empty:
+                    continue
+                opacity = 0.15 if is_searching else 0.7
+                fig.add_trace(go.Scatter(
+                    x=pos_df['threat_momentum'], y=pos_df['matchup_quality'],
+                    mode='markers', name=pos,
+                    marker=dict(size=8, color=color, opacity=opacity),
+                    text=pos_df['web_name'],
+                    hovertemplate='<b>%{text}</b><br>Momentum: %{x:.2f}<br>Matchup: %{y:.2f}<extra></extra>'
+                ))
+            
+            # Highlight matched players
+            matched_df = scatter_df[scatter_df['is_searched']]
+            if not matched_df.empty:
+                for _, p in matched_df.iterrows():
+                    pos_color = pos_colors.get(p['position'], '#ffffff')
+                    fig.add_trace(go.Scatter(
+                        x=[p['threat_momentum']], y=[p['matchup_quality']],
+                        mode='markers+text', name=p['web_name'],
+                        marker=dict(size=16, color=pos_color, symbol='diamond',
+                                   line=dict(width=2, color='#ffffff')),
+                        text=[p['web_name']], textposition='top center',
+                        textfont=dict(color='#ffffff', size=12),
+                        hovertemplate=f"<b>{p['web_name']}</b><br>Momentum: {p['threat_momentum']:.2f}<br>Matchup: {p['matchup_quality']:.2f}<extra></extra>",
+                        showlegend=False
+                    ))
+            
+            fig.update_layout(
+                height=380, template='plotly_dark',
+                paper_bgcolor='#0a0a0b', plot_bgcolor='#111113',
+                font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
+                xaxis=dict(title='Threat Momentum', gridcolor='#1e1e21'),
+                yaxis=dict(title='Matchup Quality', gridcolor='#1e1e21'),
+                legend=dict(orientation='h', yanchor='bottom', y=1.02),
+                margin=dict(l=50, r=30, t=40, b=50)
+            )
+            
+            # Add quadrant labels
+            x_mid = scatter_df['threat_momentum'].median()
+            y_mid = scatter_df['matchup_quality'].median()
+            fig.add_annotation(x=scatter_df['threat_momentum'].quantile(0.9), y=scatter_df['matchup_quality'].quantile(0.9),
+                              text="Sweet Spot", showarrow=False, font=dict(color='#22c55e', size=10))
+            fig.add_annotation(x=scatter_df['threat_momentum'].quantile(0.1), y=scatter_df['matchup_quality'].quantile(0.9),
+                              text="Good Matchup", showarrow=False, font=dict(color='#3b82f6', size=9))
+            fig.add_annotation(x=scatter_df['threat_momentum'].quantile(0.9), y=scatter_df['matchup_quality'].quantile(0.1),
+                              text="High Threat", showarrow=False, font=dict(color='#f59e0b', size=9))
+            
+            st.plotly_chart(fig, use_container_width=True, key='analytics_momentum_scatter')
+            
+            # Show detailed stats for matched player(s)
+            if is_searching and not matched_df.empty:
+                st.markdown("**Player Details**")
+                for _, p in matched_df.iterrows():
+                    pos_color = pos_colors.get(p['position'], '#888')
+                    # Gather all available stats
+                    xg = safe_numeric(pd.Series([p.get('us_xG', p.get('expected_goals', 0))])).iloc[0]
+                    xa = safe_numeric(pd.Series([p.get('us_xA', p.get('expected_assists', 0))])).iloc[0]
+                    goals = int(safe_numeric(pd.Series([p.get('goals_scored', 0)])).iloc[0])
+                    assists = int(safe_numeric(pd.Series([p.get('assists', 0)])).iloc[0])
+                    ep = safe_numeric(pd.Series([p.get('expected_points', 0)])).iloc[0]
+                    eppm = safe_numeric(pd.Series([p.get('eppm', 0)])).iloc[0]
+                    form = safe_numeric(pd.Series([p.get('form', 0)])).iloc[0]
+                    own = safe_numeric(pd.Series([p.get('selected_by_percent', 0)])).iloc[0]
+                    momentum = safe_numeric(pd.Series([p.get('threat_momentum', 0)])).iloc[0]
+                    matchup = safe_numeric(pd.Series([p.get('matchup_quality', 0)])).iloc[0]
+                    direction = safe_numeric(pd.Series([p.get('threat_direction', 0)])).iloc[0]
+                    
+                    # Over/underperformance
+                    goal_overperf = goals - xg
+                    assist_overperf = assists - xa
+                    goal_label = f"+{goal_overperf:.1f}" if goal_overperf >= 0 else f"{goal_overperf:.1f}"
+                    goal_color = '#22c55e' if goal_overperf > 0 else '#ef4444' if goal_overperf < 0 else '#888'
+                    assist_label = f"+{assist_overperf:.1f}" if assist_overperf >= 0 else f"{assist_overperf:.1f}"
+                    assist_color = '#22c55e' if assist_overperf > 0 else '#ef4444' if assist_overperf < 0 else '#888'
+                    
+                    direction_label = f"+{direction:.0%}" if direction >= 0 else f"{direction:.0%}"
+                    direction_color = '#22c55e' if direction > 0 else '#ef4444' if direction < 0 else '#888'
+                    
+                    st.markdown(
+                        f'<div style="background:#141416;border:1px solid #2a2a2e;border-radius:12px;padding:1rem;margin-bottom:0.5rem;">'
+                        f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">'
+                        f'<div><span style="color:{pos_color};font-weight:600;font-size:0.9rem;">{p["position"]}</span>'
+                        f' <span style="color:#fff;font-weight:700;font-size:1.2rem;">{p["web_name"]}</span>'
+                        f' <span style="color:#888;font-size:0.85rem;">{p.get("team_name", "")} | {p["now_cost"]:.1f}m</span></div>'
+                        f'<div style="color:#888;font-size:0.8rem;">Own: {own:.1f}%</div></div>'
+                        f'<div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:0.75rem;text-align:center;">'
+                        f'<div><div style="color:#888;font-size:0.7rem;">EP</div><div style="color:#fff;font-weight:600;">{ep:.1f}</div></div>'
+                        f'<div><div style="color:#888;font-size:0.7rem;">EPPM</div><div style="color:#fff;font-weight:600;">{eppm:.2f}</div></div>'
+                        f'<div><div style="color:#888;font-size:0.7rem;">Form</div><div style="color:#fff;font-weight:600;">{form:.1f}</div></div>'
+                        f'<div><div style="color:#888;font-size:0.7rem;">Direction</div><div style="color:{direction_color};font-weight:600;">{direction_label}</div></div>'
+                        f'</div>'
+                        f'<div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:0.75rem;text-align:center;margin-top:0.5rem;">'
+                        f'<div><div style="color:#888;font-size:0.7rem;">Momentum</div><div style="color:#fff;font-weight:600;">{momentum:.2f}</div></div>'
+                        f'<div><div style="color:#888;font-size:0.7rem;">Matchup</div><div style="color:#fff;font-weight:600;">{matchup:.2f}</div></div>'
+                        f'<div><div style="color:#888;font-size:0.7rem;">Goals vs xG</div><div style="color:{goal_color};font-weight:600;">{goals} ({goal_label})</div></div>'
+                        f'<div><div style="color:#888;font-size:0.7rem;">Assists vs xA</div><div style="color:{assist_color};font-weight:600;">{assists} ({assist_label})</div></div>'
+                        f'</div></div>',
+                        unsafe_allow_html=True
+                    )
         else:
-            st.info("No differentials matching criteria")
+            st.info("Matchup quality data unavailable")
+    
+    with am3:
+        # Engineered Differentials: RRI-based smart buys
+        st.markdown("**Engineered Differentials (RRI)**")
+        st.caption("Low ownership (<10%) + High net-points gain + Positive momentum — Smart Buys")
+        
+        eng_sort = 'engineered_diff' if 'engineered_diff' in df.columns else 'differential_gain'
+        eng_df = df[df['selected_by_percent'] < 10].nlargest(12, eng_sort)
+        if not eng_df.empty:
+            eng_display_cols = ['web_name', 'team_name', 'position', 'now_cost', 'expected_points',
+                                'differential_gain', 'diff_roi', 'eo_top10k', 'diff_profile', 'selected_by_percent', eng_sort]
+            eng_display_cols = [c for c in eng_display_cols if c in eng_df.columns]
+            display_eng = eng_df[eng_display_cols].copy()
+            eng_rename = {
+                'web_name': 'Player', 'team_name': 'Team', 'position': 'Pos',
+                'now_cost': 'Price', 'expected_points': 'EP', 'differential_gain': 'xNP',
+                'diff_roi': 'ROI/m', 'eo_top10k': 'EO10k%', 'diff_profile': 'Profile',
+                'selected_by_percent': 'Own%', 'engineered_diff': 'Score',
+            }
+            display_eng = display_eng.rename(columns=eng_rename)
+            for c in ['Price', 'EP', 'xNP', 'ROI/m', 'EO10k%', 'Own%', 'Score']:
+                if c in display_eng.columns:
+                    display_eng[c] = display_eng[c].round(2)
+            st.dataframe(style_df_with_injuries(display_eng), hide_index=True, use_container_width=True)
+        else:
+            st.info("No engineered differentials found")
+        
+        # Highlight top 3
+        if len(eng_df) >= 3:
+            st.markdown("**Top 3 Smart Buys**")
+            top3_cols = st.columns(3)
+            for i, (_, p) in enumerate(eng_df.head(3).iterrows()):
+                with top3_cols[i]:
+                    pos_color = pos_colors.get(p['position'], '#888')
+                    diff_gain = p.get('differential_gain', 0)
+                    verdict = p.get('diff_verdict', '')
+                    profile = p.get('diff_profile', '')
+                    st.markdown(
+                        f'<div style="background:#141416;border:1px solid #2a2a2e;border-radius:8px;padding:0.7rem;">'
+                        f'<div style="color:{pos_color};font-size:0.75rem;font-weight:600;">{p["position"]}</div>'
+                        f'<div style="color:#fff;font-size:1rem;font-weight:600;">{p["web_name"]}</div>'
+                        f'<div style="color:#888;font-size:0.8rem;">{p.get("team_name", "")} | {p["now_cost"]:.1f}m</div>'
+                        f'<div style="margin-top:0.4rem;">'
+                        f'<span style="color:#22c55e;">xNP {diff_gain:.2f}</span> | '
+                        f'<span style="color:#f59e0b;">Own {p["selected_by_percent"]:.1f}%</span>'
+                        f'{" | " + verdict if verdict else ""}'
+                        f'</div></div>',
+                        unsafe_allow_html=True
+                    )
+
+
+def render_differential_picks(processor):
+    """Render differential picks using RRI-based engineered_diff metric."""
+    st.markdown('<p class="section-title">Differential Picks (RRI)</p>', unsafe_allow_html=True)
+    st.caption("Score = xP × (1 − EO_top10k) — points gained vs the elite managers")
+    
+    try:
+        df = processor.get_engineered_features_df()
+        df['selected_by_percent'] = safe_numeric(df['selected_by_percent'])
+        df['expected_points'] = safe_numeric(df.get('expected_points', pd.Series([0]*len(df))))
+        df['differential_gain'] = safe_numeric(df.get('differential_gain', pd.Series([0]*len(df))))
+        df['diff_roi'] = safe_numeric(df.get('diff_roi', pd.Series([0]*len(df))))
+        df['engineered_diff'] = safe_numeric(df.get('engineered_diff', pd.Series([0]*len(df))))
+        df['minutes'] = safe_numeric(df.get('minutes', pd.Series([0]*len(df))))
+        
+        sort_col = 'engineered_diff' if 'engineered_diff' in df.columns else 'differential_gain'
+        
+        # Filter: <10% ownership, >200 mins, EP > 2
+        diffs = df[
+            (df['selected_by_percent'] < 10) & 
+            (df['minutes'] > 200) &
+            (df['expected_points'] > 2)
+        ].nlargest(12, sort_col)
+        
+        if not diffs.empty:
+            display_cols = ['web_name', 'team_name', 'position', 'now_cost', 'selected_by_percent',
+                           'expected_points', 'differential_gain', 'diff_roi', 'eo_top10k',
+                           'diff_verdict', 'diff_profile', 'engineered_diff']
+            display_cols = [c for c in display_cols if c in diffs.columns]
+            diffs_display = diffs[display_cols].copy()
+            rename_map = {
+                'web_name': 'Player', 'team_name': 'Team', 'position': 'Pos',
+                'now_cost': 'Price', 'selected_by_percent': 'Own%',
+                'expected_points': 'EP', 'differential_gain': 'xNP',
+                'diff_roi': 'ROI/m', 'eo_top10k': 'EO10k%',
+                'diff_verdict': 'Verdict', 'diff_profile': 'Profile',
+                'engineered_diff': 'Score',
+            }
+            diffs_display = diffs_display.rename(columns=rename_map)
+            for c in ['Price', 'Own%', 'EP', 'xNP', 'ROI/m', 'EO10k%', 'Score']:
+                if c in diffs_display.columns:
+                    diffs_display[c] = diffs_display[c].round(2)
+            st.dataframe(style_df_with_injuries(diffs_display, player_col='Player'), hide_index=True, use_container_width=True)
+        else:
+            st.info("No engineered differentials matching criteria")
     except Exception as e:
-        st.warning(f"Could not load differentials: {e}")
+        # Fallback to old method
+        try:
+            diffs = get_differential_picks(processor, min_ep=3.0, max_ownership=5.0)
+            if diffs is not None and not diffs.empty:
+                diffs_display = round_df(diffs.head(10))
+                st.dataframe(style_df_with_injuries(diffs_display, player_col='web_name'), hide_index=True, use_container_width=True)
+            else:
+                st.info("No differentials matching criteria")
+        except:
+            st.warning(f"Could not load differentials: {e}")
 
 
 def render_set_and_forget(players_df: pd.DataFrame):
@@ -258,13 +564,14 @@ def render_set_and_forget(players_df: pd.DataFrame):
     st.caption("Players with high EP, good fixture run, and consistent minutes - minimal rotation needed")
     
     df = players_df.copy()
-    df['ep_next'] = safe_numeric(df.get('ep_next', pd.Series([0]*len(df))))
+    # Use expected_points (advanced EP) for Set & Forget
+    df['ep'] = safe_numeric(df.get('expected_points', df.get('ep_next', pd.Series([0]*len(df)))))
     df['minutes'] = safe_numeric(df.get('minutes', pd.Series([0]*len(df))))
     df['form'] = safe_numeric(df.get('form', pd.Series([0]*len(df))))
     df['now_cost'] = safe_numeric(df['now_cost'], 5)
     
     df['minutes_reliability'] = df['minutes'].clip(upper=2500) / 2500
-    df['sf_score'] = df['ep_next'] * 0.5 + df['form'] * 0.2 + df['minutes_reliability'] * 10 * 0.3
+    df['sf_score'] = df['ep'] * 0.5 + df['form'] * 0.2 + df['minutes_reliability'] * 10 * 0.3
     
     sf_cols = st.columns(4)
     
@@ -378,22 +685,34 @@ def render_expected_vs_actual(players_df: pd.DataFrame):
                           showarrow=False, font=dict(color='#ef4444', size=10))
         st.plotly_chart(fig, use_container_width=True, key='analytics_expected_vs_actual')
     
+    # Add threat momentum to the data
+    if 'threat_momentum' not in df.columns:
+        df['threat_momentum'] = 0.0
+    df['threat_momentum'] = safe_numeric(df['threat_momentum'])
+    if 'threat_direction' not in df.columns:
+        df['threat_direction'] = 0.0
+    df['threat_direction'] = safe_numeric(df['threat_direction'])
+    
     xva1, xva2 = st.columns(2)
     
     with xva1:
         st.markdown("**Underperformers** (unlucky, may bounce back)")
-        under = df.nsmallest(8, 'diff')[['web_name', 'team_name', 'total_points', 'expected_total', 'diff']]
-        under.columns = ['Player', 'Team', 'Actual Pts', 'Expected', 'Diff']
+        st.caption("Players with positive threat momentum are primed for regression upward")
+        under = df.nsmallest(8, 'diff')[['web_name', 'team_name', 'total_points', 'expected_total', 'diff', 'threat_momentum']].copy()
+        under.columns = ['Player', 'Team', 'Actual', 'Expected', 'Diff', 'Threat']
         under['Expected'] = under['Expected'].round(0).astype(int)
         under['Diff'] = under['Diff'].round(0).astype(int)
+        under['Threat'] = under['Threat'].round(2)
         st.dataframe(style_df_with_injuries(under), hide_index=True, use_container_width=True)
     
     with xva2:
         st.markdown("**Overperformers** (may regress)")
-        over = df.nlargest(8, 'diff')[['web_name', 'team_name', 'total_points', 'expected_total', 'diff']]
-        over.columns = ['Player', 'Team', 'Actual Pts', 'Expected', 'Diff']
+        st.caption("Players with negative threat momentum are cooling off")
+        over = df.nlargest(8, 'diff')[['web_name', 'team_name', 'total_points', 'expected_total', 'diff', 'threat_momentum']].copy()
+        over.columns = ['Player', 'Team', 'Actual', 'Expected', 'Diff', 'Threat']
         over['Expected'] = over['Expected'].round(0).astype(int)
         over['Diff'] = over['Diff'].round(0).astype(int)
+        over['Threat'] = over['Threat'].round(2)
         st.dataframe(style_df_with_injuries(over), hide_index=True, use_container_width=True)
 
 

@@ -75,33 +75,144 @@ POS_WEIGHTS = {
 # Fetching
 # ---------------------------------------------------------------------------
 
-def fetch_understat_league_players(season: int = UNDERSTAT_SEASON) -> List[Dict]:
-    """Fetch all EPL player data from Understat for *season*."""
-    url = f"https://understat.com/league/EPL/{season}"
+def fetch_understat_league_data(season: int = UNDERSTAT_SEASON) -> Tuple[List[Dict], Dict]:
+    """Fetch both player-level and team-level data from Understat in one request.
+
+    Uses the ``POST /getLeagueData/EPL/<season>`` AJAX endpoint which returns
+    JSON with ``players``, ``teams``, and ``dates`` keys.  Falls back to the
+    legacy HTML-scraping approach if the AJAX call fails.
+
+    Returns:
+        Tuple of (players_raw_list, teams_raw_dict)
+    """
+
+    # ── Primary: AJAX JSON endpoint (fast, reliable) ──
+    ajax_url = f"https://understat.com/getLeagueData/EPL/{season}"
     try:
-        resp = requests.get(url, timeout=20, headers={
+        resp = requests.post(
+            ajax_url,
+            data={},
+            timeout=20,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+                "X-Requested-With": "XMLHttpRequest",
+                "Referer": f"https://understat.com/league/EPL/{season}",
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        players_raw = data.get("players", [])
+        teams_raw = data.get("teams", {})
+        if players_raw:
+            logger.info(
+                "Understat AJAX: %d players, %d teams fetched",
+                len(players_raw), len(teams_raw),
+            )
+            return players_raw, teams_raw
+        logger.warning("Understat AJAX returned empty players list")
+    except (requests.RequestException, json.JSONDecodeError, ValueError) as exc:
+        logger.warning("Understat AJAX fetch failed: %s — trying HTML fallback", exc)
+
+    # ── Fallback: HTML scraping (legacy, kept for resilience) ──
+    html_url = f"https://understat.com/league/EPL/{season}"
+    try:
+        resp = requests.get(html_url, timeout=20, headers={
             "User-Agent": "Mozilla/5.0 FPL-Strategy-Engine"
         })
         resp.raise_for_status()
     except requests.RequestException as exc:
-        logger.warning("Understat fetch failed: %s", exc)
-        return []
+        logger.warning("Understat HTML fetch also failed: %s", exc)
+        return [], {}
 
-    match = re.search(
-        r"var\s+playersData\s*=\s*JSON\.parse\('(.+?)'\)",
-        resp.text,
+    html = resp.text
+
+    # Extract playersData
+    players_raw: List[Dict] = []
+    pmatch = re.search(
+        r"var\s+playersData\s*=\s*JSON\.parse\('(.+?)'\)", html
     )
-    if not match:
+    if pmatch:
+        try:
+            decoded = pmatch.group(1).encode("utf-8").decode("unicode_escape")
+            players_raw = json.loads(decoded)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            logger.warning("Understat players JSON parse error: %s", exc)
+    else:
         logger.warning("Could not locate playersData in Understat page")
-        return []
 
-    try:
-        raw = match.group(1)
-        decoded = raw.encode("utf-8").decode("unicode_escape")
-        return json.loads(decoded)
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        logger.warning("Understat JSON parse error: %s", exc)
-        return []
+    # Extract teamsData
+    teams_raw: Dict = {}
+    tmatch = re.search(
+        r"var\s+teamsData\s*=\s*JSON\.parse\('(.+?)'\)", html
+    )
+    if tmatch:
+        try:
+            decoded = tmatch.group(1).encode("utf-8").decode("unicode_escape")
+            teams_raw = json.loads(decoded)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            logger.warning("Understat teams JSON parse error: %s", exc)
+
+    return players_raw, teams_raw
+
+
+def fetch_understat_league_players(season: int = UNDERSTAT_SEASON) -> List[Dict]:
+    """Fetch all EPL player data from Understat for *season*."""
+    players, _ = fetch_understat_league_data(season)
+    return players
+
+
+def build_team_stats_df(teams_raw: Dict) -> pd.DataFrame:
+    """Build team-level xG For / xGA DataFrame from Understat *teamsData*.
+
+    Each team entry has a ``history`` list of per-match records with
+    ``xG`` (created) and ``xGA`` (conceded).  We aggregate to per-match
+    averages so the Poisson engine can use **real opponent xGA** instead
+    of the rudimentary FDR proxy.
+
+    Returns:
+        DataFrame with columns:
+            understat_team, games_played, xG_for_per90, xGA_per90, etc.
+    """
+    if not teams_raw:
+        return pd.DataFrame()
+
+    rows = []
+    for team_id, team_data in teams_raw.items():
+        title = team_data.get("title", "")
+        history = team_data.get("history", [])
+        if not history:
+            continue
+
+        games = len(history)
+        total_xg = sum(float(m.get("xG", 0)) for m in history)
+        total_xga = sum(float(m.get("xGA", 0)) for m in history)
+        total_npxg = sum(float(m.get("npxG", 0)) for m in history)
+        total_npxga = sum(float(m.get("npxGA", 0)) for m in history)
+        total_scored = sum(int(m.get("scored", 0)) for m in history)
+        total_missed = sum(int(m.get("missed", 0)) for m in history)
+
+        rows.append({
+            "understat_team": title,
+            "understat_id": int(team_id),
+            "games_played": games,
+            "xG_for_total": total_xg,
+            "xGA_total": total_xga,
+            "xG_for_per90": total_xg / games,
+            "xGA_per90": total_xga / games,
+            "npxG_for_per90": total_npxg / games,
+            "npxGA_per90": total_npxga / games,
+            "goals_per90": total_scored / games,
+            "conceded_per90": total_missed / games,
+        })
+
+    df = pd.DataFrame(rows)
+    logger.info(
+        "Built team stats for %d teams (avg xG=%.2f, avg xGA=%.2f)",
+        len(df),
+        df["xG_for_per90"].mean() if not df.empty else 0,
+        df["xGA_per90"].mean() if not df.empty else 0,
+    )
+    return df
 
 
 # ---------------------------------------------------------------------------
@@ -118,6 +229,35 @@ def _norm(name: str) -> str:
 def _last(name: str) -> str:
     parts = name.strip().split()
     return _norm(parts[-1]) if parts else ""
+
+
+def _levenshtein(s1: str, s2: str) -> int:
+    """Calculate Levenshtein distance between two strings."""
+    if len(s1) < len(s2):
+        return _levenshtein(s2, s1)
+    if len(s2) == 0:
+        return len(s1)
+    
+    prev_row = range(len(s2) + 1)
+    for i, c1 in enumerate(s1):
+        curr_row = [i + 1]
+        for j, c2 in enumerate(s2):
+            insertions = prev_row[j + 1] + 1
+            deletions = curr_row[j] + 1
+            substitutions = prev_row[j] + (c1 != c2)
+            curr_row.append(min(insertions, deletions, substitutions))
+        prev_row = curr_row
+    return prev_row[-1]
+
+
+def _fuzzy_match_score(name1: str, name2: str) -> float:
+    """Return similarity score (0-1) using Levenshtein distance."""
+    n1, n2 = _norm(name1), _norm(name2)
+    if not n1 or not n2:
+        return 0.0
+    max_len = max(len(n1), len(n2))
+    distance = _levenshtein(n1, n2)
+    return 1.0 - (distance / max_len)
 
 
 # ---------------------------------------------------------------------------
@@ -202,6 +342,7 @@ def match_understat_to_fpl(
 
     # Columns to write
     merge_map = {
+        "us_games": "games", "us_goals": "goals", "us_assists": "assists",
         "us_xG": "xG", "us_xA": "xA", "us_npxG": "npxG",
         "us_xGChain": "xGChain", "us_xGBuildup": "xGBuildup",
         "us_xG_per90": "xG_per90", "us_xA_per90": "xA_per90",
@@ -217,6 +358,17 @@ def match_understat_to_fpl(
         result[col] = 0.0
 
     matched = 0
+    fuzzy_matched = 0
+    FUZZY_THRESHOLD = 0.75  # Minimum similarity for fuzzy match
+    
+    # Build list of all Understat players per team for fuzzy fallback
+    ustat_by_team: Dict[str, List[pd.Series]] = {}
+    for _, urow in ustat_df.iterrows():
+        team = urow.get("team_title", "")
+        if team not in ustat_by_team:
+            ustat_by_team[team] = []
+        ustat_by_team[team].append(urow)
+    
     for idx, row in result.iterrows():
         ustat_team = fpl_to_ustat.get(row.get("team_name", ""), "")
 
@@ -233,6 +385,20 @@ def match_understat_to_fpl(
             candidate = by_last.get((ustat_team, web_last))
             if candidate is not None:
                 urow = candidate
+        
+        # Fuzzy matching fallback (Levenshtein distance)
+        if urow is None and ustat_team in ustat_by_team:
+            best_score = 0.0
+            best_match = None
+            fpl_name = row["_fpl_full"]
+            for candidate_row in ustat_by_team[ustat_team]:
+                score = _fuzzy_match_score(fpl_name, candidate_row["_name_norm"])
+                if score > best_score:
+                    best_score = score
+                    best_match = candidate_row
+            if best_score >= FUZZY_THRESHOLD and best_match is not None:
+                urow = best_match
+                fuzzy_matched += 1
 
         if urow is not None:
             for dest, src in merge_map.items():
@@ -240,7 +406,7 @@ def match_understat_to_fpl(
             matched += 1
 
     result.drop(columns=["_fpl_full", "_fpl_last", "_fpl_web"], inplace=True, errors="ignore")
-    logger.info("Understat matched %d / %d FPL players", matched, len(result))
+    logger.info("Understat matched %d / %d FPL players (%d via fuzzy)", matched, len(result), fuzzy_matched)
     return result
 
 
@@ -248,38 +414,202 @@ def match_understat_to_fpl(
 # EP adjustment
 # ---------------------------------------------------------------------------
 
+def calculate_advanced_ep(df: pd.DataFrame) -> pd.DataFrame:
+    """Calculate Expected Points using the Advanced Additive Model (2025/26 rules).
+
+    Components:
+        EP_app  – Appearance points (P60+)
+        EP_att  – Attacking points (xG/xA with Poisson adjustment)
+        EP_def  – Defensive points (CS + DefCon + xGC penalty)
+        EP_bonus – Bonus points expectation (~0.10 * xGI)
+
+    Uses Understat xG/xA when available; falls back to FPL expected_goals/expected_assists.
+    Applies npxG adjustment for non-penalty takers.
+    """
+    import math
+
+    if "expected_points" not in df.columns:
+        return df
+
+    result = df.copy()
+
+    # ── Position-specific scoring ──
+    GOAL_PTS = {"GKP": 10, "DEF": 6, "MID": 5, "FWD": 4}
+    ASSIST_PTS = 3
+    CS_PTS = {"GKP": 4, "DEF": 4, "MID": 1, "FWD": 0}
+    DEFCON_THRESHOLD = {"GKP": 12, "DEF": 10, "MID": 12, "FWD": 12}
+    DEFCON_BONUS = 2  # Capped at 2 pts per match
+
+    # ── Helper: Poisson P(k>=1) for xG ──
+    def p_score_at_least_one(xg: float) -> float:
+        if xg <= 0:
+            return 0.0
+        return 1.0 - math.exp(-xg)
+
+    # ── Determine data sources ──
+    # IMPORTANT: Use PER-90 stats for single-GW EP, not season totals
+    has_ustat = "us_xG_per90" in result.columns and result["us_xG_per90"].sum() > 0
+    xg_col = "us_xG_per90" if has_ustat else "expected_goals_per_90"
+    xa_col = "us_xA_per90" if has_ustat else "expected_assists_per_90"
+    npxg_col = "us_npxG_per90" if has_ustat else None  # FPL doesn't have npxG
+
+    for c in (xg_col, xa_col):
+        if c not in result.columns:
+            # Fall back to season totals divided by games
+            if c == "us_xG_per90" and "us_xG" in result.columns:
+                games = pd.to_numeric(result.get("us_games", 1), errors="coerce").fillna(1).clip(lower=1)
+                result[c] = pd.to_numeric(result["us_xG"], errors="coerce").fillna(0) / games
+            elif c == "us_xA_per90" and "us_xA" in result.columns:
+                games = pd.to_numeric(result.get("us_games", 1), errors="coerce").fillna(1).clip(lower=1)
+                result[c] = pd.to_numeric(result["us_xA"], errors="coerce").fillna(0) / games
+            elif "expected_goals" in result.columns and "per_90" not in c:
+                # FPL fallback: season totals / games
+                minutes = pd.to_numeric(result.get("minutes", 90), errors="coerce").fillna(90)
+                games = (minutes / 90).clip(lower=1)
+                result["expected_goals_per_90"] = pd.to_numeric(result.get("expected_goals", 0), errors="coerce").fillna(0) / games
+                result["expected_assists_per_90"] = pd.to_numeric(result.get("expected_assists", 0), errors="coerce").fillna(0) / games
+            else:
+                result[c] = 0.0
+        result[c] = pd.to_numeric(result[c], errors="coerce").fillna(0.0)
+
+    if npxg_col and npxg_col in result.columns:
+        result[npxg_col] = pd.to_numeric(result[npxg_col], errors="coerce").fillna(0.0)
+    elif npxg_col and "us_npxG" in result.columns:
+        games = pd.to_numeric(result.get("us_games", 1), errors="coerce").fillna(1).clip(lower=1)
+        result[npxg_col] = pd.to_numeric(result["us_npxG"], errors="coerce").fillna(0) / games
+
+    # ── EP_app: Appearance probability ──
+    # Use minutes / (games_played * 90) as proxy for P(60+)
+    if "minutes" in result.columns:
+        result["minutes"] = pd.to_numeric(result["minutes"], errors="coerce").fillna(0)
+        # Approx games from Understat or FPL
+        games_col = "us_games" if "us_games" in result.columns else None
+        if games_col is None:
+            # Estimate from minutes
+            result["_games_est"] = (result["minutes"] / 90).clip(lower=0.1)
+        else:
+            result["_games_est"] = pd.to_numeric(result[games_col], errors="coerce").fillna(1).clip(lower=0.1)
+        result["_p60"] = (result["minutes"] / (result["_games_est"] * 90)).clip(upper=1.0)
+    else:
+        result["_p60"] = 0.9  # Default for nailed starters
+
+    result["EP_app"] = result["_p60"].apply(lambda p: 2.0 if p >= 0.67 else 1.0 * p / 0.67)
+
+    # ── EP_att: Attacking points ──
+    result["_goal_pts"] = result["position"].map(GOAL_PTS).fillna(4)
+
+    # Use npxG if player isn't primary penalty taker (penalty_order > 1 or unavailable)
+    if npxg_col and npxg_col in result.columns:
+        penalty_order = result.get("penalty_order", pd.Series([99] * len(result)))
+        penalty_order = pd.to_numeric(penalty_order, errors="coerce").fillna(99)
+        result["_xg_adj"] = result.apply(
+            lambda r: r[npxg_col] if penalty_order.get(r.name, 99) > 1 else r[xg_col], axis=1
+        )
+    else:
+        result["_xg_adj"] = result[xg_col]
+
+    # Poisson-adjusted goal expectation: sum over k of k * P(k goals)
+    # Approx: xG * 1.05 for small xG captures haul variance
+    result["EP_att"] = (
+        result["_xg_adj"] * result["_goal_pts"] * 1.05  # slight haul boost
+        + result[xa_col] * ASSIST_PTS
+    )
+
+    # ── EP_def: Defensive points ──
+    cs_col = "clean_sheets_per_90" if "clean_sheets_per_90" in result.columns else None
+    xgc_col = "expected_goals_conceded_per_90" if "expected_goals_conceded_per_90" in result.columns else None
+
+    result["_cs_pts"] = result["position"].map(CS_PTS).fillna(0)
+    if cs_col and cs_col in result.columns:
+        result[cs_col] = pd.to_numeric(result[cs_col], errors="coerce").fillna(0)
+        result["_p_cs"] = result[cs_col]  # Per-90 CS rate as probability proxy
+    else:
+        result["_p_cs"] = 0.0
+
+    # DefCon bonus (probability of reaching threshold)
+    cbit_prop_col = "cbit_propensity" if "cbit_propensity" in result.columns else None
+    if cbit_prop_col:
+        result[cbit_prop_col] = pd.to_numeric(result[cbit_prop_col], errors="coerce").fillna(0)
+        result["_defcon"] = result[cbit_prop_col] * DEFCON_BONUS
+    else:
+        result["_defcon"] = 0.0
+
+    # xGC penalty: -1 pt per 2 xGC for GKP/DEF
+    if xgc_col and xgc_col in result.columns:
+        result[xgc_col] = pd.to_numeric(result[xgc_col], errors="coerce").fillna(0)
+        result["_xgc_penalty"] = result.apply(
+            lambda r: -(r[xgc_col] / 2) if r["position"] in ("GKP", "DEF") else 0, axis=1
+        )
+    else:
+        result["_xgc_penalty"] = 0.0
+
+    result["EP_def"] = result["_p_cs"] * result["_cs_pts"] + result["_defcon"] + result["_xgc_penalty"]
+
+    # ── EP_bonus: Bonus expectation ~~0.10 * xGI ──
+    result["_xgi"] = result["_xg_adj"] + result[xa_col]
+    result["EP_bonus"] = result["_xgi"] * 0.10
+
+    # ── Total EP (single gameweek) ──
+    result["EP_advanced"] = (
+        result["EP_app"] + result["EP_att"] + result["EP_def"] + result["EP_bonus"]
+    ).clip(lower=0)
+
+    # ── Blend with FPL base EP (50/50) for stability ──
+    base_ep = pd.to_numeric(result.get("ep_next", result.get("expected_points", 0)), errors="coerce").fillna(0)
+    result["expected_points"] = (result["EP_advanced"] * 0.6 + base_ep * 0.4).clip(lower=0)
+
+    # ── Home advantage boost (10% if fixture data available) ──
+    if "is_home" in result.columns:
+        home_mask = result["is_home"] == True
+        result.loc[home_mask, "expected_points"] *= 1.10
+
+    # ── Cleanup temp columns ──
+    temp_cols = [
+        "_games_est", "_p60", "_goal_pts", "_xg_adj", "_cs_pts", "_p_cs",
+        "_defcon", "_xgc_penalty", "_xgi"
+    ]
+    result.drop(columns=[c for c in temp_cols if c in result.columns], inplace=True, errors="ignore")
+
+    return result
+
+
 def adjust_ep_with_understat(df: pd.DataFrame) -> pd.DataFrame:
-    """Adjust expected_points using Understat xG/xA regression signals.
+    """Wrapper: calculates advanced EP then applies regression adjustment."""
+    result = calculate_advanced_ep(df)
+    return apply_regression_adjustment(result)
+
+
+def apply_regression_adjustment(df: pd.DataFrame) -> pd.DataFrame:
+    """Apply regression signals (over/underperformance) to fine-tune EP.
 
     - Goals > xG (overperforming) -> slight EP decrease (regression risk)
     - Goals < xG (underperforming) -> slight EP increase (bounce-back)
     - Same for assists vs xA
-    - xGBuildup per 90 adds a small creativity/involvement bonus
-    - Adjustment capped at +/-20 %% of base EP
+    - Adjustment capped at +/-15% of EP
     """
-    if "us_xG" not in df.columns or "expected_points" not in df.columns:
+    if "us_goal_overperf" not in df.columns or "expected_points" not in df.columns:
         return df
 
     result = df.copy()
-    has_data = result["us_xG"] > 0
-    result["_ep_adj"] = 0.0
+    has_data = result.get("us_xG", pd.Series([0] * len(result))) > 0
+    result["_reg_adj"] = 0.0
 
     for pos, (gw, aw, bw) in POS_WEIGHTS.items():
         mask = has_data & (result["position"] == pos)
         if not mask.any():
             continue
 
-        # Negative overperf -> underperforming -> positive adjustment (bounce back)
-        goal_adj = -result.loc[mask, "us_goal_overperf"] * gw
-        assist_adj = -result.loc[mask, "us_assist_overperf"] * aw
-        buildup = result.loc[mask, "us_xGBuildup_per90"] * bw * 10
+        # Negative overperf -> underperforming -> positive adjustment
+        goal_adj = -result.loc[mask, "us_goal_overperf"] * gw * 0.5
+        assist_adj = -result.loc[mask, "us_assist_overperf"] * aw * 0.5
+        buildup = result.loc[mask, "us_xGBuildup_per90"] * bw * 5
 
         raw = goal_adj + assist_adj + buildup
-        cap = result.loc[mask, "expected_points"].clip(lower=0.1) * EP_ADJUST_CAP
-        result.loc[mask, "_ep_adj"] = raw.clip(lower=-cap, upper=cap)
+        cap = result.loc[mask, "expected_points"].clip(lower=0.1) * 0.15
+        result.loc[mask, "_reg_adj"] = raw.clip(lower=-cap, upper=cap)
 
-    result["expected_points"] = (result["expected_points"] + result["_ep_adj"]).clip(lower=0)
-    result.drop(columns=["_ep_adj"], inplace=True)
+    result["expected_points"] = (result["expected_points"] + result["_reg_adj"]).clip(lower=0)
+    result.drop(columns=["_reg_adj"], inplace=True)
     return result
 
 
@@ -290,20 +620,37 @@ def adjust_ep_with_understat(df: pd.DataFrame) -> pd.DataFrame:
 def enrich_with_understat(fpl_df: pd.DataFrame, force_refresh: bool = False) -> pd.DataFrame:
     """Fetch Understat data, match to FPL players, adjust EP.
 
-    Caches the raw Understat response in ``st.session_state`` so repeated
-    calls within a session do not trigger additional HTTP requests.
+    Caches both player and **team** Understat data in ``st.session_state``
+    so repeated calls within a session do not trigger additional HTTP
+    requests.  Team-level stats (xG-for, xGA) are stored at
+    ``st.session_state['_understat_team_stats']`` for the Poisson engine.
     """
     import streamlit as st
 
-    cache_key = "_understat_raw"
-    if not force_refresh and cache_key in st.session_state:
-        raw = st.session_state[cache_key]
+    cache_players = "_understat_raw"
+    cache_teams = "_understat_teams_raw"
+    cache_team_stats = "_understat_team_stats"
+
+    if not force_refresh and cache_players in st.session_state:
+        raw = st.session_state[cache_players]
+        teams_raw = st.session_state.get(cache_teams, {})
     else:
-        raw = fetch_understat_league_players()
-        st.session_state[cache_key] = raw
+        raw, teams_raw = fetch_understat_league_data()
+        st.session_state[cache_players] = raw
+        st.session_state[cache_teams] = teams_raw
 
     if not raw:
+        st.session_state["_understat_active"] = False
         return fpl_df
+
+    st.session_state["_understat_active"] = True
+
+    # Build and cache team-level stats for the Poisson engine
+    if teams_raw and cache_team_stats not in st.session_state:
+        team_stats_df = build_team_stats_df(teams_raw)
+        st.session_state[cache_team_stats] = team_stats_df
+    elif not teams_raw and cache_team_stats not in st.session_state:
+        st.session_state[cache_team_stats] = pd.DataFrame()
 
     ustat_df = _build_understat_df(raw)
     merged = match_understat_to_fpl(fpl_df, ustat_df)

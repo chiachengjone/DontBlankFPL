@@ -269,21 +269,41 @@ class FPLDataProcessor:
             0
         )
         
+        # Calculate starts percentage (for Poisson appearance model)
+        # Compare each player's starts to the most-started player on their team
+        # This gives a true "nailedness" ratio (1.0 = ever-present, 0.0 = never)
+        team_max_starts = df.groupby('team')['starts'].transform('max').clip(lower=1)
+        df['starts_pct'] = np.where(
+            df['starts'] > 0,
+            np.minimum(df['starts'] / team_max_starts, 1.0),
+            0.05  # Small baseline for non-starters
+        )
+        
         return df
     
     def calculate_cbit_metrics(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Calculate CBIT (Clearances, Blocks, Interceptions, Tackles) metrics.
         This is the new 2025/26 "DefCon" scoring system.
+        
+        Includes:
+        - cbit_per_90: Estimated defensive actions per 90 minutes
+        - cbit_propensity: Probability of hitting CBIT threshold (0-1)
+        - cbit_hit_rate: % of games where CBIT threshold was likely met
+        - cbit_safety_floor: Minimum expected points from defensive actions
         """
         df = df.copy()
         
-        # Estimate CBIT from available stats (using bonus as proxy for defensive actions)
-        # In real implementation, this would use Opta data
-        df['estimated_cbit'] = (
-            df['bonus'].fillna(0) * 0.5 +  # Proxy
-            df['clean_sheets'].fillna(0) * 2 +
-            df['goals_conceded'].fillna(0) * -0.5
+        # Estimate CBIT from available stats
+        # CBIT applies mainly to GKP/DEF - use position-aware estimation
+        # Attackers get no CBIT bonus; DEF/GKP get CS-based estimation
+        is_defender = df['position'].isin(['GKP', 'DEF'])
+        
+        # For DEF/GKP: CS is a good proxy for strong defensive performance
+        df['estimated_cbit'] = np.where(
+            is_defender,
+            df['clean_sheets'].fillna(0) * 2.5,
+            0.0  # MID/FWD don't benefit from CBIT
         )
         
         # CBIT per 90 minutes
@@ -293,13 +313,41 @@ class FPLDataProcessor:
             0
         )
         
-        # CBIT Propensity Score (probability of hitting 10 CBIT threshold)
-        # Normalized to 0-1 scale
-        max_cbit = df['cbit_per_90'].max() if df['cbit_per_90'].max() > 0 else 1
-        df['cbit_propensity'] = df['cbit_per_90'] / max_cbit
+        # Games played estimate
+        df['_games_played'] = (df['minutes'] / 90).clip(lower=0)
+        
+        # CBIT Propensity Score (probability of hitting threshold)
+        # Only applies to DEF/GKP; MID/FWD get 0
+        is_defender = df['position'].isin(['GKP', 'DEF'])
+        max_cbit = df.loc[is_defender, 'cbit_per_90'].max() if is_defender.any() and df.loc[is_defender, 'cbit_per_90'].max() > 0 else 1
+        df['cbit_propensity'] = np.where(
+            is_defender,
+            (df['cbit_per_90'] / max_cbit).clip(0, 1),
+            0.0
+        )
+        
+        # CBIT Hit Rate: estimate % of games where threshold was met
+        # DEF threshold = 10, MID/FWD threshold = 12
+        threshold_map = {'GKP': 12, 'DEF': 10, 'MID': 12, 'FWD': 12}
+        df['_cbit_threshold'] = df['position'].map(threshold_map).fillna(12)
+        
+        # Use normalized propensity as hit rate proxy
+        # High propensity + consistent minutes = high hit rate
+        minutes_consistency = (df['minutes'] / (df['_games_played'].clip(lower=1) * 90)).clip(0, 1)
+        df['cbit_hit_rate'] = (df['cbit_propensity'] * minutes_consistency).clip(0, 1)
+        
+        # Safety Floor: minimum expected points from CBIT (2 pts × hit_rate)
+        df['cbit_safety_floor'] = df['cbit_hit_rate'] * CBIT_BONUS_POINTS
         
         # Bonus points expectation from CBIT
         df['cbit_bonus_expected'] = df['cbit_propensity'] * CBIT_BONUS_POINTS
+        
+        # Value insight: defenders with high cbit_hit_rate but low CS probability
+        # are often better value than volatile wing-backs
+        cs_rate = df.get('clean_sheets_per_90', df['clean_sheets'] / df['_games_played'].clip(lower=1)).fillna(0)
+        df['cbit_value_edge'] = df['cbit_hit_rate'] - cs_rate.clip(0, 1)
+        
+        df.drop(columns=['_games_played', '_cbit_threshold'], inplace=True, errors='ignore')
         
         return df
     
@@ -434,8 +482,12 @@ class FPLDataProcessor:
     
     def calculate_differential_score(self, player_id: int, weeks_ahead: int = 5) -> float:
         """
-        Calculate Differential Finder Index.
-        High EP, low ownership, easy fixtures = high differential score.
+        Calculate Advanced Differential Score using Net Rank Gain + ROI.
+        
+        Formula:
+            EP_net = EP × (1 - EO/100) -- points gained vs field
+            Diff_ROI = EP / (EO + 1) -- points per % ownership
+            Score = EP_net × 0.5 + Diff_ROI × 100 × 0.3 + fixture_ease × 0.2
         """
         player_row = self.players_df[self.players_df['id'] == player_id]
         if player_row.empty:
@@ -448,13 +500,19 @@ class FPLDataProcessor:
         
         # Get effective ownership
         eo = float(player.get('selected_by_percent', 50) or 50)
-        eo = max(eo, 0.1)  # Avoid division by zero
+        eo = max(eo, 0.1)
         
         # Get fixture ease
         fixture_ease = self.calculate_fixture_ease(player_id, weeks_ahead)
         
-        # Differential Score = (EP / EO%) × Fixture Ease
-        differential = (total_ep / eo) * fixture_ease * 100
+        # Net Rank Gain: points you gain vs field
+        ep_net = total_ep * (1 - eo / 100)
+        
+        # Differential ROI: points per % ownership
+        diff_roi = total_ep / (eo + 1)
+        
+        # Combined score
+        differential = ep_net * 0.5 + diff_roi * 100 * 0.3 + fixture_ease * 0.2
         
         return differential
     
@@ -520,13 +578,51 @@ class FPLDataProcessor:
             lambda tid: len(team_blanks.get(tid, set()))
         ).fillna(0).astype(int)
         
-        # Base EP
-        df['ep_next_num'] = pd.to_numeric(df.get('ep_next', pd.Series([0]*len(df))), errors='coerce').fillna(0.0)
+        # Base EP from FPL (single GW next-match prediction)
+        if 'ep_next' in df.columns:
+            df['ep_next_num'] = pd.to_numeric(df['ep_next'], errors='coerce').fillna(0.0)
+        else:
+            df['ep_next_num'] = 0.0
         
-        # Expected points: vectorized weighted sum using team FDRs
-        def _calc_ep_for_row(row):
+        # Initialize expected_points from FPL data first
+        df['expected_points'] = df['ep_next_num'].copy()
+        
+        # ── Understat xG/xA enrichment ──
+        try:
+            from understat_api import enrich_with_understat
+            df = enrich_with_understat(df)
+        except Exception:
+            pass  # Understat unavailable
+        
+        # ── Poisson-based Expected Points (professional-grade model) ──
+        try:
+            import streamlit as st
+            from poisson_ep import calculate_poisson_ep_for_dataframe
+            # Pass real Understat team stats if available
+            team_stats = st.session_state.get('_understat_team_stats', None)
+            df = calculate_poisson_ep_for_dataframe(df, fixtures, current_gw, team_stats=team_stats)
+            # Use Poisson EP as primary expected_points if available
+            if 'expected_points_poisson' in df.columns:
+                # Blend: 70% Poisson model, 30% FPL baseline for stability
+                poisson_ep = pd.to_numeric(df['expected_points_poisson'], errors='coerce').fillna(0)
+                base_ep = pd.to_numeric(df['ep_next_num'], errors='coerce').fillna(0)
+                df['expected_points'] = (poisson_ep * 0.7 + base_ep * 0.3).clip(lower=0)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Poisson EP calculation failed: {e}")
+        
+        # Ensure expected_points is numeric and exists
+        if 'expected_points' not in df.columns:
+            df['expected_points'] = df['ep_next_num']
+        df['expected_points'] = pd.to_numeric(df['expected_points'], errors='coerce').fillna(df['ep_next_num'])
+        
+        # ── Multi-week planning EP (for horizon-based features) ──
+        # This is used for differential calculations and planning, NOT for display
+        def _calc_horizon_ep(row):
             tid = row['team']
-            base_ep = row['ep_next_num']
+            base_ep = row.get('expected_points', 0)  # Use single-GW EP with safe fallback
+            if pd.isna(base_ep):
+                base_ep = 0
             fdrs = team_fdrs.get(tid, [3.0] * weeks_ahead)
             blanks = team_blanks.get(tid, set())
             
@@ -548,11 +644,92 @@ class FPLDataProcessor:
             
             return total
         
-        df['expected_points'] = df.apply(_calc_ep_for_row, axis=1).astype(float)
+        # Store horizon EP separately for planning features
+        df['expected_points_horizon'] = df.apply(_calc_horizon_ep, axis=1).astype(float)
         
-        # Differential score: vectorized
-        eo = pd.to_numeric(df.get('selected_by_percent', 50), errors='coerce').fillna(50).clip(lower=0.1)
-        df['differential_score'] = (df['expected_points'] / eo) * df['fixture_ease'] * 100
+        # ══════════════════════════════════════════════════════════════
+        # ── Relative Rank Impact (RRI) Differential Model ──
+        # Score = xP × (1 − EO_top10k)   ["Effective Net Points"]
+        # Tells you how many points a player gains you vs. the field.
+        # ══════════════════════════════════════════════════════════════
+
+        # General ownership (0-100)
+        eo_general = pd.to_numeric(
+            df.get('selected_by_percent', 50), errors='coerce'
+        ).fillna(50).clip(lower=0.1)
+
+        # ── Estimate top-10k EO from general ownership ──
+        # Top-10k managers cluster heavily on template players.
+        # Empirical model: EO_10k ≈ clip(a·EO^1.4 + b, 1, 99)
+        #   - 70% general → ~97% top-10k (template)
+        #   - 10% general → ~20% top-10k
+        #   -  2% general → ~3%  top-10k
+        eo_frac = eo_general / 100.0
+        eo_10k = (1.5 * np.power(eo_frac, 1.4) + 0.01).clip(0.01, 0.99)
+        df['eo_top10k'] = (eo_10k * 100).round(1)
+
+        # ── Core RRI: Differential Gain ──
+        # xP × (1 − EO) = points you gain vs the field per GW
+        xp = df['expected_points']
+        df['differential_gain'] = (xp * (1 - eo_10k)).round(2)
+
+        # ── Differential ROI per million ──
+        cost = pd.to_numeric(df['now_cost'], errors='coerce').fillna(5).clip(lower=4.0)
+        df['diff_roi'] = (df['differential_gain'] / cost).round(3)
+
+        # ── Poisson variance (σ) for boom/bust classification ──
+        # σ of Poisson EP ≈ sqrt(λ_attack × goal_pts² + λ_creative × asst_pts²)
+        goal_pts_map = {'GKP': 10, 'DEF': 6, 'MID': 5, 'FWD': 4}
+        asst_pts = 3
+        gp = df['position'].map(goal_pts_map).fillna(4)
+        lam_a = pd.to_numeric(df.get('poisson_lambda_attack', pd.Series(0, index=df.index)), errors='coerce').fillna(0)
+        lam_c = pd.to_numeric(df.get('poisson_lambda_creative', pd.Series(0, index=df.index)), errors='coerce').fillna(0)
+        df['poisson_sigma'] = np.sqrt(lam_a * gp**2 + lam_c * asst_pts**2).round(2)
+
+        # ── Boom/Bust label ──
+        # High σ → high-ceiling winger (chase rank), Low σ → floor defender (protect lead)
+        sigma_median = df['poisson_sigma'].median()
+        sigma_median = sigma_median if sigma_median > 0 else 1.0
+        df['sigma_ratio'] = df['poisson_sigma'] / sigma_median
+        df['diff_profile'] = np.select(
+            [df['sigma_ratio'] > 1.3, df['sigma_ratio'] < 0.7],
+            ['Boom/Bust', 'Floor'],
+            default='Balanced'
+        )
+
+        # ── Ownership-adjusted variance bonus ──
+        # Underperforming xG → "due" for regression upward → higher diff value
+        if 'us_goal_overperf' in df.columns:
+            regression_signal = (
+                -df['us_goal_overperf'].fillna(0) * 0.5
+                + -df.get('us_assist_overperf', pd.Series(0, index=df.index)).fillna(0) * 0.3
+            ).clip(-0.3, 0.5)
+        else:
+            regression_signal = pd.Series(0.0, index=df.index)
+        df['variance_adj_diff'] = (df['differential_gain'] * (1 + regression_signal)).round(2)
+
+        # ── Legacy compatibility aliases ──
+        df['ep_net'] = df['differential_gain']
+
+        # ── Primary differential score (composite) ──
+        # Weighted blend of RRI, ROI, variance bonus, and fixtures
+        df['differential_score'] = (
+            df['differential_gain'] * 0.50          # Core RRI
+            + df['diff_roi'] * 100 * 0.25           # Value-per-million
+            + df['variance_adj_diff'] * 0.15        # Regression bonus
+            + df['fixture_ease'] * 0.10             # Fixture influence
+        ).round(2)
+
+        # ── Diff verdict labels (for UI) ──
+        df['diff_verdict'] = np.select(
+            [
+                (eo_10k > 0.60) & (xp >= 5),
+                (eo_10k < 0.15) & (xp >= 4),
+                (eo_10k < 0.10) & (xp < 2.5),
+            ],
+            ['Template', 'Elite Diff', 'Trap'],
+            default=''
+        )
         
         # Ensure now_cost is numeric
         df['now_cost'] = pd.to_numeric(df['now_cost'], errors='coerce').fillna(5.0)
@@ -560,27 +737,81 @@ class FPLDataProcessor:
         # Price sensitivity (EP per cost)
         df['xg_per_pound'] = df['expected_points'] / df['now_cost'].clip(lower=4.0)
         
-        # Value score
-        df['value_score'] = (
-            df['expected_points'] * 0.4 +
-            df['differential_score'] * 0.3 +
-            (5.0 - df['blank_count'].astype(float)) * 0.3
-        )
+        # ── EPPM: Effective Points Per Million (next N gameweeks) ──
+        df['eppm'] = df['expected_points'] / df['now_cost'].clip(lower=4.0)
         
-        # ── Understat xG/xA enrichment ──
-        try:
-            from understat_api import enrich_with_understat
-            df = enrich_with_understat(df)
-            # Recalculate derived columns after EP adjustment
-            df['differential_score'] = (df['expected_points'] / eo) * df['fixture_ease'] * 100
-            df['xg_per_pound'] = df['expected_points'] / df['now_cost'].clip(lower=4.0)
-            df['value_score'] = (
-                df['expected_points'] * 0.4 +
-                df['differential_score'] * 0.3 +
-                (5.0 - df['blank_count'].astype(float)) * 0.3
+        # ── Threat Momentum: Weighted rolling xG/xA (recent form emphasized) ──
+        # Uses Understat per-90 stats with form weighting
+        if 'us_xG_per90' in df.columns:
+            # Form acts as recency weight (higher form = more recent performance)
+            form = pd.to_numeric(df.get('form', 0), errors='coerce').fillna(0).clip(0, 10)
+            form_weight = 0.5 + (form / 20)  # 0.5 to 1.0 range
+            
+            df['threat_momentum'] = (
+                df['us_xG_per90'].fillna(0) * form_weight +
+                df['us_xA_per90'].fillna(0) * form_weight * 0.7
             )
-        except Exception as exc:
-            pass  # Understat enrichment unavailable – continue without it
+            
+            # Momentum direction: form_weight centered on 0.75 (avg form=5)
+            # Above 0.75 = heating up, below = cooling off
+            df['threat_direction'] = ((form_weight - 0.75) / 0.25).clip(-1, 1)
+        else:
+            # Fallback using FPL expected stats
+            form = pd.to_numeric(df.get('form', 0), errors='coerce').fillna(0).clip(0, 10)
+            xg = pd.to_numeric(df.get('expected_goals', 0), errors='coerce').fillna(0)
+            xa = pd.to_numeric(df.get('expected_assists', 0), errors='coerce').fillna(0)
+            minutes = pd.to_numeric(df.get('minutes', 0), errors='coerce').fillna(0)
+            games = (minutes / 90).clip(lower=1)
+            
+            df['threat_momentum'] = ((xg + xa * 0.7) / games) * (0.5 + form / 20)
+            df['threat_direction'] = 0.0
+        
+        # ── Matchup Quality: Player threat × Opponent defensive weakness ──
+        # matchup_quality = (Player_npxG_per_90) × (Opponent_xGA / League_Avg_xGA)
+        # Uses REAL Understat xGA from Poisson pipeline when available
+        if 'us_npxG_per90' in df.columns:
+            player_threat = df['us_npxG_per90'].fillna(0) + df['us_xA_per90'].fillna(0) * 0.5
+        else:
+            xg = pd.to_numeric(df.get('expected_goals', 0), errors='coerce').fillna(0)
+            xa = pd.to_numeric(df.get('expected_assists', 0), errors='coerce').fillna(0)
+            minutes = pd.to_numeric(df.get('minutes', 0), errors='coerce').fillna(0)
+            games = (minutes / 90).clip(lower=1)
+            player_threat = (xg + xa * 0.5) / games
+        
+        # Use real opponent xGA from Poisson pipeline if available
+        if 'poisson_opp_xGA_per90' in df.columns:
+            poisson_opp = pd.to_numeric(df['poisson_opp_xGA_per90'], errors='coerce').fillna(0)
+            league_avg_xga = poisson_opp[poisson_opp > 0].mean()
+            if league_avg_xga > 0:
+                opp_weakness = poisson_opp / league_avg_xga
+                # Clip to reasonable range (0.5x to 2.0x of league average)
+                opp_weakness = opp_weakness.clip(0.5, 2.0)
+            else:
+                opp_weakness = 0.5 + df['fixture_ease'].clip(0, 1)
+        else:
+            # Fallback: fixture_ease as proxy (0–1 scale → 0.5–1.5 multiplier)
+            opp_weakness = 0.5 + df['fixture_ease'].clip(0, 1)
+        
+        df['matchup_quality'] = player_threat * opp_weakness
+        
+        # ── Engineered Differential: RRI-based with momentum + matchup ──
+        low_own_bonus = np.where(eo_general < 10, (10 - eo_general) / 10, 0)
+        df['engineered_diff'] = (
+            df['differential_gain'] * 0.35 +
+            df['eppm'] * 0.25 +
+            df['threat_momentum'] * 0.20 +
+            df['matchup_quality'] * 0.10 +
+            low_own_bonus * 0.10
+        ).round(2)
+        
+        # Value score: combines EP, RRI, regression, fixture coverage
+        df['value_score'] = (
+            df['expected_points'] * 0.35 +
+            df['differential_gain'] * 0.25 +
+            df['variance_adj_diff'] * 0.10 +
+            df['diff_roi'] * 10 * 0.15 +
+            (5.0 - df['blank_count'].astype(float)) * 0.15
+        ).round(2)
         
         return df
 

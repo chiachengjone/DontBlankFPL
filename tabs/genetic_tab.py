@@ -81,7 +81,7 @@ def render_genetic_tab(processor, players_df: pd.DataFrame):
                         "Player": player.get("web_name", f"ID:{pid}"),
                         "Position": player.get("position", "?"),
                         "Cost": round(float(player.get("now_cost", 0)), 1),
-                        "EP": round(float(safe_numeric(pd.Series([player.get("ep_next", 0)])).iloc[0]), 2),
+                        "EP": round(float(safe_numeric(pd.Series([player.get("expected_points", player.get("ep_next", 0))])).iloc[0]), 2),
                         "Status": "(C)" if is_captain else "XI" if is_starting else "Bench",
                     }
                 )

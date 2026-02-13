@@ -33,8 +33,8 @@ def create_ep_ownership_scatter(
     
     df['selected_by_percent'] = safe_numeric(df.get('selected_by_percent', pd.Series([0]*len(df))))
     
-    # Use ep_next or expected_points, whichever exists
-    if 'expected_points' in df.columns:
+    # Use expected_points (advanced EP) if available, else ep_next
+    if 'expected_points' in df.columns and df['expected_points'].notna().any():
         df['ep'] = safe_numeric(df['expected_points'])
     elif 'ep_next' in df.columns:
         df['ep'] = safe_numeric(df['ep_next'])

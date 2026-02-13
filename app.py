@@ -37,7 +37,7 @@ _SESSION_DEFAULTS = {
     'injury_highlight': True,
     'fpl_team_id': 0,
     # Preferences
-    'pref_weeks_ahead': 5,
+    'pref_weeks_ahead': 1,
     'pref_strategy': 'Balanced',
     'pref_max_price': 15.0,
     'pref_position': 'All',
@@ -87,7 +87,8 @@ def main():
     
     # Get players data
     try:
-        players_df = processor.players_df.copy()
+        # Use engineered features DataFrame (includes EPPM, threat momentum, matchup quality, etc.)
+        players_df = processor.get_engineered_features_df(weeks_ahead=st.session_state.pref_weeks_ahead)
         st.session_state.players_df = players_df
     except Exception as e:
         st.error(f"Error loading players: {e}")
@@ -114,14 +115,14 @@ def main():
         )
         st.session_state.fpl_team_id = team_id_input
     with settings_mid:
-        pref_horizon = st.slider(
-            "Default Horizon (GWs)",
-            min_value=3, max_value=10,
-            value=st.session_state.pref_weeks_ahead,
-            key="header_horizon",
-            help="Default planning horizon used across tabs"
-        )
-        st.session_state.pref_weeks_ahead = pref_horizon
+        # Understat data status indicator
+        ustat_active = st.session_state.get('_understat_active', None)
+        if ustat_active is True:
+            st.success("Understat xG ✓", icon="📊")
+        elif ustat_active is False:
+            st.warning("Understat offline — using FPL fallback", icon="⚠️")
+        else:
+            st.info("Loading data…", icon="⏳")
     with settings_right:
         st.session_state.injury_highlight = st.toggle(
             "Injury highlights",
