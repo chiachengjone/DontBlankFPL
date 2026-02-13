@@ -289,7 +289,21 @@ def render_expected_vs_actual(players_df: pd.DataFrame):
     df = df[df['minutes'] > 500]
     
     df['games_played'] = df['minutes'] / 90
-    df['expected_total'] = df['ep_next'] * df['games_played'] * 0.6
+
+    # xG-based expected total – use Understat if available, fall back to FPL xG/xA
+    _GOAL_PTS = {'GKP': 6, 'DEF': 6, 'MID': 5, 'FWD': 4}
+    _xg = 'us_xG' if 'us_xG' in df.columns and df['us_xG'].sum() > 0 else 'expected_goals'
+    _xa = 'us_xA' if 'us_xA' in df.columns and df['us_xA'].sum() > 0 else 'expected_assists'
+    for _c in (_xg, _xa):
+        if _c not in df.columns:
+            df[_c] = 0.0
+        df[_c] = safe_numeric(df[_c])
+
+    df['expected_total'] = (
+        df[_xg] * df['position'].map(_GOAL_PTS).fillna(4)
+        + df[_xa] * 3
+        + df['games_played'] * 2   # appearance-points baseline
+    )
     df['diff'] = df['total_points'] - df['expected_total']
 
     # ── Filters ──

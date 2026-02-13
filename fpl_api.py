@@ -567,6 +567,21 @@ class FPLDataProcessor:
             (5.0 - df['blank_count'].astype(float)) * 0.3
         )
         
+        # ── Understat xG/xA enrichment ──
+        try:
+            from understat_api import enrich_with_understat
+            df = enrich_with_understat(df)
+            # Recalculate derived columns after EP adjustment
+            df['differential_score'] = (df['expected_points'] / eo) * df['fixture_ease'] * 100
+            df['xg_per_pound'] = df['expected_points'] / df['now_cost'].clip(lower=4.0)
+            df['value_score'] = (
+                df['expected_points'] * 0.4 +
+                df['differential_score'] * 0.3 +
+                (5.0 - df['blank_count'].astype(float)) * 0.3
+            )
+        except Exception as exc:
+            pass  # Understat enrichment unavailable – continue without it
+        
         return df
 
 
