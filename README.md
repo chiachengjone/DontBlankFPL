@@ -16,38 +16,104 @@ A high-performance Streamlit application for Fantasy Premier League strategy opt
 
 ### Core Functionality
 
-####  Tab 1: My Strategy
+####  Strategy Tab
 - AI-powered squad optimization using Integer Linear Programming (PuLP)
 - Adjustable look-ahead window (3-10 gameweeks) with decay weighting
 - **Ghost Points Logic**: Automatically penalizes players with blank gameweeks
-- Multiple optimization modes:
-  - Maximum Points
-  - Differential Focus  
-  - Value Picks
-  - Balanced
+- **Team Fixture Difficulty Ranking**: Sort teams by schedule difficulty, filter for detailed team analysis
+- Multiple optimization modes: Maximum Points, Differential Focus, Value Picks, Balanced
 
-####  Tab 2: Rival Scout
-- Direct comparison of two Team IDs
-- **Jaccard Similarity** calculation for squad overlap
-- **Tactical Delta**: Identifies the biggest threat player in your rival's squad
-- Visual overlap analysis
+####  Squad Builder Tab
+- Transfer optimizer based on current team
+- Multi-gameweek planning horizon
+- Free transfer modeling
+- Budget constraints
 
-####  Tab 3: Feature Factory
+####  Analytics Tab
 - Searchable player database with engineered features
 - **Differential Finder Index**: $\text{Differential Score} = \frac{EP}{EO\%} \times \text{Fixture Ease}$
 - CBIT Propensity Scores for defenders
 - Price sensitivity (xG/£) analysis
 - Interactive Plotly visualizations
 
+####  Rival Scout Tab
+- Direct comparison of two Team IDs
+- **Jaccard Similarity** calculation for squad overlap
+- **Tactical Delta**: Identifies the biggest threat player in your rival's squad
+- Visual overlap analysis
+
+### Advanced Features
+
+#### 🤖 Machine Learning Predictions
+- Ensemble model combining XGBoost, Random Forest, and Gradient Boosting
+- 50+ engineered features (form momentum, goal involvement, risk metrics)
+- Confidence intervals and uncertainty quantification
+- Feature importance analysis
+- Cross-validation metrics
+
+**How it works:**
+```python
+from ml_predictor import create_ml_pipeline
+
+predictor = create_ml_pipeline(players_df)
+predictions = predictor.predict_gameweek_points(n_gameweeks=5)
+```
+
+#### 🎲 Monte Carlo Simulations
+- 10,000+ stochastic simulations per player
+- Multiple probability distributions (Gamma, Truncated Normal, Poisson, Mixed)
+- Risk metrics: VaR (95%), Expected Shortfall, Sharpe Ratio
+- Portfolio-level squad simulations
+- Probability of Top 10k/100k finishes
+
+**How it works:**
+```python
+from monte_carlo import create_monte_carlo_engine
+
+engine = create_monte_carlo_engine(players_df, n_simulations=10000)
+result = engine.simulate_player(player_id, n_gameweeks=5)
+```
+
+#### 🧬 Genetic Algorithm Optimizer
+- Evolutionary squad optimization (alternative to ILP)
+- Tournament selection with elitism
+- Multi-point crossover and adaptive mutation
+- Real-time convergence visualization
+- Explores diverse solution space
+
+**How it works:**
+```python
+from genetic_optimizer import create_genetic_optimizer
+
+optimizer = create_genetic_optimizer(players_df, population_size=100, n_generations=50)
+best_individual = optimizer.evolve()
+```
+
 ##  Project Structure
 
 ```
 DontBlankFPL/
-├── app.py              # Streamlit main application
-├── fpl_api.py          # FPL API integration & data processing
-├── optimizer.py        # PuLP optimization engine
-├── requirements.txt    # Python dependencies
-└── README.md           # This file
+├── app.py                    # Streamlit main application
+├── fpl_api.py                # FPL API integration & data processing
+├── optimizer.py              # PuLP ILP optimization engine
+├── ml_predictor.py           # ML prediction ensemble
+├── monte_carlo.py            # Monte Carlo simulation engine
+├── genetic_optimizer.py      # Genetic algorithm optimizer
+├── requirements.txt          # Python dependencies
+├── components/
+│   ├── cards.py              # UI card components
+│   ├── charts.py             # Plotly visualizations
+│   └── styles.py             # CSS styling
+├── tabs/
+│   ├── strategy.py           # Strategy tab (includes fixture difficulty)
+│   ├── optimization.py       # Squad builder tab
+│   ├── analytics.py          # Analytics tab
+│   ├── rival.py              # Rival scout tab
+│   ├── ml_tab.py             # ML predictions tab
+│   ├── montecarlo_tab.py     # Monte Carlo tab
+│   └── genetic_tab.py        # Genetic optimizer tab
+└── utils/
+    └── helpers.py
 ```
 
 ##  Installation
@@ -68,6 +134,15 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 ```bash
 pip install -r requirements.txt
 ```
+
+**Dependencies include:**
+- `streamlit` - Web application framework
+- `pandas`, `numpy` - Data manipulation
+- `plotly` - Interactive visualizations
+- `pulp` - Linear programming optimization
+- `xgboost` - Gradient boosting machine learning
+- `scikit-learn` - ML algorithms and preprocessing
+- `scipy` - Statistical functions
 
 ### 4. Run the application
 ```bash
@@ -110,12 +185,10 @@ Flags players with EP > 3.0 and ownership < 5%.
 
 $$\text{CBIT}_{per90} = \frac{\text{Estimated CBIT Actions}}{\text{Minutes}} \times 90$$
 
-Expected CBIT bonus = $P(\text{CBIT} \geq 10) \times 2$
+##  API Integrations
 
-##  API Integration
-
-### FPL Official API Endpoints
-- `/bootstrap-static/` - Player, team, and gameweek data
+### FPL Official API
+- `/bootstrap-static/` - All player & team data
 - `/entry/{team_id}/event/{gw}/picks/` - User squad picks
 - `/element-summary/{player_id}/` - Player history and fixtures
 - `/fixtures/` - Season fixtures
@@ -145,13 +218,13 @@ In `optimizer.py`:
 
 ##  Usage Tips
 
-1. **Start with Load Data**: Always click "Load/Refresh Data" first
+1. **Start with Load Data**: Data auto-loads on app start
 2. **Set Your Team ID**: Find it in your FPL URL (e.g., `/entry/123456/`)
 3. **Adjust Look-ahead Window**: 
    - 3-5 weeks for short-term gains
    - 6-10 weeks for long-term planning
 4. **Use Differential Mode** when chasing in mini-leagues
-5. **Check Feature Factory** for hidden gems before transfers
+5. **Check Analytics** for hidden gems before transfers
 
 ##  Contributing
 
@@ -170,4 +243,4 @@ This tool is for educational and entertainment purposes. It uses publicly availa
 
 ---
 
-Built with  for FPL managers who want an edge in 2025/26
+Built with ❤️ for FPL managers who want an edge in 2025/26

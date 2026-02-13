@@ -236,8 +236,23 @@ class FPLDataProcessor:
         players = self.bootstrap_data['elements']
         df = pd.DataFrame(players)
         
-        # Convert price to actual value
-        df['now_cost'] = df['now_cost'] / 10.0
+        # Convert price to actual value (API returns tenths, e.g. 106 = £10.6m)
+        df['now_cost'] = (pd.to_numeric(df['now_cost'], errors='coerce').fillna(50) / 10.0).round(1)
+        
+        # Convert all string-numeric columns the API returns as strings
+        _str_numeric_cols = [
+            'ep_next', 'ep_this', 'form', 'points_per_game',
+            'selected_by_percent', 'value_form', 'value_season',
+            'influence', 'creativity', 'threat', 'ict_index',
+            'expected_goals', 'expected_assists',
+            'expected_goal_involvements', 'expected_goals_conceded',
+            'expected_goals_per_90', 'expected_assists_per_90',
+            'expected_goal_involvements_per_90',
+            'expected_goals_conceded_per_90',
+        ]
+        for col in _str_numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
         
         # Add team names
         team_map = {t['id']: t['name'] for t in self.bootstrap_data['teams']}
@@ -298,6 +313,18 @@ class FPLDataProcessor:
             return [3.0] * weeks_ahead  # Default medium difficulty
         
         team_id = player_row.iloc[0]['team']
+        
+        # Use team-level cache to avoid repeated per-player lookups
+        return self._get_team_fdrs(team_id, weeks_ahead)
+    
+    def _get_team_fdrs(self, team_id: int, weeks_ahead: int = 5) -> List[float]:
+        """Get FDR list for a team, with caching."""
+        cache_key = (team_id, weeks_ahead)
+        if not hasattr(self, '_fdr_cache'):
+            self._fdr_cache = {}
+        if cache_key in self._fdr_cache:
+            return self._fdr_cache[cache_key]
+        
         current_gw = self.fetcher.get_current_gameweek()
         
         fixtures = self.fixtures_df[
@@ -313,11 +340,12 @@ class FPLDataProcessor:
             else:
                 fdrs.append(fixture.get('team_a_difficulty', 3))
         
-        # Pad with default if fewer fixtures
         while len(fdrs) < weeks_ahead:
             fdrs.append(3.0)
         
-        return fdrs[:weeks_ahead]
+        result = fdrs[:weeks_ahead]
+        self._fdr_cache[cache_key] = result
+        return result
     
     def calculate_fixture_ease(self, player_id: int, weeks_ahead: int = 5) -> float:
         """
@@ -433,48 +461,110 @@ class FPLDataProcessor:
     def get_engineered_features_df(self, weeks_ahead: int = 5) -> pd.DataFrame:
         """
         Build comprehensive DataFrame with all engineered features.
+        Uses vectorized operations per-team instead of per-player loops.
         """
         df = self.players_df.copy()
         
-        # Calculate CBIT metrics
+        # Calculate CBIT metrics (already vectorized)
         df = self.calculate_cbit_metrics(df)
         
-        # Calculate per-player metrics
-        eps_total = []
-        eps_weekly = []
-        fixture_ease_scores = []
-        differential_scores = []
-        blank_counts = []
+        # --- Vectorized: precompute per-TEAM data (20 teams, not 600 players) ---
+        current_gw = self.fetcher.get_current_gameweek()
+        fixtures = self.fixtures_df
         
-        for player_id in df['id']:
-            total_ep, weekly_ep = self.calculate_expected_points(player_id, weeks_ahead)
-            eps_total.append(total_ep)
-            eps_weekly.append(weekly_ep)
-            fixture_ease_scores.append(self.calculate_fixture_ease(player_id, weeks_ahead))
-            differential_scores.append(self.calculate_differential_score(player_id, weeks_ahead))
-            blank_counts.append(len(self.detect_blanks(player_id, weeks_ahead)))
+        # Build team-level lookups once
+        team_ids = df['team'].unique()
+        team_fdrs = {}        # team_id -> [fdr1, fdr2, ...]
+        team_blanks = {}      # team_id -> set of blank gw numbers
+        team_ease = {}        # team_id -> ease score
         
-        df['expected_points'] = pd.to_numeric(pd.Series(eps_total), errors='coerce').fillna(0.0).values
-        df['weekly_ep_breakdown'] = eps_weekly
-        df['fixture_ease'] = pd.to_numeric(pd.Series(fixture_ease_scores), errors='coerce').fillna(0.5).values
-        df['differential_score'] = pd.to_numeric(pd.Series(differential_scores), errors='coerce').fillna(0.0).values
-        df['blank_count'] = pd.to_numeric(pd.Series(blank_counts), errors='coerce').fillna(0).astype(int).values
+        decay_weights = [0.95 ** i for i in range(weeks_ahead)]
+        max_ease_denom = sum(5 * w for w in decay_weights)
+        
+        for tid in team_ids:
+            # FDR per gameweek
+            team_fixtures = fixtures[
+                (fixtures['event'] >= current_gw) &
+                (fixtures['event'] < current_gw + weeks_ahead) &
+                ((fixtures['team_h'] == tid) | (fixtures['team_a'] == tid))
+            ].sort_values('event')
+            
+            fdrs = []
+            fixture_gws = set()
+            for _, fx in team_fixtures.iterrows():
+                fixture_gws.add(fx['event'])
+                if fx['team_h'] == tid:
+                    fdrs.append(fx.get('team_h_difficulty', 3))
+                else:
+                    fdrs.append(fx.get('team_a_difficulty', 3))
+            
+            while len(fdrs) < weeks_ahead:
+                fdrs.append(3.0)
+            fdrs = fdrs[:weeks_ahead]
+            team_fdrs[tid] = fdrs
+            
+            # Blanks
+            blanks = set()
+            for gw in range(current_gw, current_gw + weeks_ahead):
+                if gw not in fixture_gws:
+                    blanks.add(gw)
+            team_blanks[tid] = blanks
+            
+            # Fixture ease (vectorized per team)
+            weighted_ease = sum((6 - fdr) * w for fdr, w in zip(fdrs, decay_weights))
+            team_ease[tid] = weighted_ease / max_ease_denom if max_ease_denom > 0 else 0.5
+        
+        # --- Vectorized: map team-level data to all players at once ---
+        df['fixture_ease'] = df['team'].map(team_ease).fillna(0.5).astype(float)
+        df['blank_count'] = df['team'].map(
+            lambda tid: len(team_blanks.get(tid, set()))
+        ).fillna(0).astype(int)
+        
+        # Base EP
+        df['ep_next_num'] = pd.to_numeric(df.get('ep_next', pd.Series([0]*len(df))), errors='coerce').fillna(0.0)
+        
+        # Expected points: vectorized weighted sum using team FDRs
+        def _calc_ep_for_row(row):
+            tid = row['team']
+            base_ep = row['ep_next_num']
+            fdrs = team_fdrs.get(tid, [3.0] * weeks_ahead)
+            blanks = team_blanks.get(tid, set())
+            
+            total = 0.0
+            for i in range(weeks_ahead):
+                gw = current_gw + i
+                if gw in blanks:
+                    continue
+                decay = decay_weights[i]
+                fdr_mult = (6 - fdrs[i]) / 5 if i < len(fdrs) else 0.6
+                total += base_ep * decay * fdr_mult
+            
+            # CBIT bonus for defenders
+            if row.get('position') == 'DEF':
+                cbit_bonus = row.get('cbit_bonus_expected', 0)
+                if pd.notna(cbit_bonus):
+                    active_weeks = weeks_ahead - len(blanks & set(range(current_gw, current_gw + weeks_ahead)))
+                    total += cbit_bonus * active_weeks
+            
+            return total
+        
+        df['expected_points'] = df.apply(_calc_ep_for_row, axis=1).astype(float)
+        
+        # Differential score: vectorized
+        eo = pd.to_numeric(df.get('selected_by_percent', 50), errors='coerce').fillna(50).clip(lower=0.1)
+        df['differential_score'] = (df['expected_points'] / eo) * df['fixture_ease'] * 100
         
         # Ensure now_cost is numeric
         df['now_cost'] = pd.to_numeric(df['now_cost'], errors='coerce').fillna(5.0)
         
         # Price sensitivity (EP per cost)
-        df['xg_per_pound'] = df['expected_points'].astype(float) / df['now_cost'].clip(lower=4.0).astype(float)
+        df['xg_per_pound'] = df['expected_points'] / df['now_cost'].clip(lower=4.0)
         
-        # Value score - ensure all values are numeric floats
-        ep_vals = df['expected_points'].astype(float)
-        diff_vals = df['differential_score'].astype(float)
-        blank_vals = df['blank_count'].astype(float)
-        
+        # Value score
         df['value_score'] = (
-            ep_vals * 0.4 +
-            diff_vals * 0.3 +
-            (5.0 - blank_vals) * 0.3
+            df['expected_points'] * 0.4 +
+            df['differential_score'] * 0.3 +
+            (5.0 - df['blank_count'].astype(float)) * 0.3
         )
         
         return df

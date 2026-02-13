@@ -26,23 +26,18 @@ DARK_THEME_CSS = """
     /* ── Google Fonts ── */
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
 
-    /* ── Hide ALL Streamlit chrome ── */
-    #MainMenu, footer, header,
-    [data-testid="stToolbar"],
+    /* ── Hide Streamlit sidebar and badges (keep toolbar/menu visible) ── */
+    footer,
     [data-testid="stDecoration"],
     [data-testid="stStatusWidget"],
     .reportview-container .main footer,
     div[data-testid="stSidebarNav"],
     [data-testid="stSidebar"],
     [data-testid="collapsedControl"],
-    .stDeployButton,
-    div[data-testid="stToolbar"],
     div[data-testid="stDecoration"],
     div[data-testid="stStatusWidget"],
-    button[kind="header"],
     section[data-testid="stSidebar"],
-    div.viewerBadge_container__r5tak,
-    div.stActionButton { display: none !important; }
+    div.viewerBadge_container__r5tak { display: none !important; }
 
     /* ── Root reset ── */
     .stApp {
@@ -58,7 +53,7 @@ DARK_THEME_CSS = """
     }
     
     /* ── Typography ── */
-    *, p, span, label, .stMarkdown, div {
+    p, span, label, div, .stMarkdown, input, select, textarea, button, td, th {
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
     }
     p, span, label, .stMarkdown { color: #b4b4b4; font-size: 0.875rem; line-height: 1.6; }
@@ -156,14 +151,15 @@ DARK_THEME_CSS = """
     }
     .stTabs [data-baseweb="tab"] {
         color: #6b6b6b;
-        font-size: 0.78rem;
+        font-size: 0.72rem;
         font-weight: 500;
         border-radius: 8px;
-        padding: 0.5rem 1rem;
+        padding: 0.45rem 0.7rem;
         background: transparent;
         border: none;
         transition: all 0.2s ease;
         letter-spacing: -0.01em;
+        white-space: nowrap;
     }
     .stTabs [data-baseweb="tab"]:hover {
         color: #b4b4b4;
@@ -214,14 +210,42 @@ DARK_THEME_CSS = """
         border-color: #ef4444 !important;
         box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.1) !important;
     }
-    .stSelectbox > div > div {
+    /* ── Select / MultiSelect ── */
+    .stSelectbox > div > div,
+    .stMultiSelect > div > div {
         background: #141416 !important; color: #e8e8e8 !important;
         border: 1px solid #2a2a2e !important; border-radius: 8px !important;
         font-size: 0.85rem !important;
     }
-    .stMultiSelect > div > div {
-        background: #141416 !important; color: #e8e8e8 !important;
-        border: 1px solid #2a2a2e !important; border-radius: 8px !important;
+    /* Force the baseweb select container to use proper flexbox so the
+       dropdown arrow sits on the far right instead of stacking on the label */
+    [data-testid="stSelectbox"] [data-baseweb="select"] > div,
+    [data-testid="stMultiSelect"] [data-baseweb="select"] > div {
+        display: flex !important;
+        flex-wrap: nowrap !important;
+        align-items: center !important;
+        width: 100% !important;
+    }
+    [data-testid="stSelectbox"] [data-baseweb="select"] > div > div:last-child,
+    [data-testid="stMultiSelect"] [data-baseweb="select"] > div > div:last-child {
+        margin-left: auto !important;
+        flex-shrink: 0 !important;
+    }
+    /* Ensure the value text doesn't push the arrow off-screen */
+    [data-testid="stSelectbox"] [data-baseweb="select"] > div > div:first-child,
+    [data-testid="stMultiSelect"] [data-baseweb="select"] > div > div:first-child {
+        flex: 1 1 auto !important;
+        min-width: 0 !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+        white-space: nowrap !important;
+        padding-right: 0.5rem !important;
+    }
+    /* Prevent parent column constraints from collapsing the select */
+    [data-testid="column"] .stSelectbox,
+    [data-testid="column"] .stMultiSelect {
+        min-width: 0 !important;
+        width: 100% !important;
     }
     .stSlider label { color: #e8e8e8 !important; font-size: 0.8rem !important; }
     .stCheckbox label span { font-size: 0.8rem !important; }
@@ -286,11 +310,19 @@ DARK_THEME_CSS = """
     /* ── Expander ── */
     .stExpander {
         background: #141416; border: 1px solid #2a2a2e;
-        border-radius: 10px !important; overflow: hidden;
+        border-radius: 10px !important;
     }
+    /* Hide the native HTML disclosure triangle */
     [data-testid="stExpander"] summary {
         color: #e8e8e8; font-size: 0.82rem; font-weight: 500;
         padding: 0.75rem 1rem;
+        list-style: none;
+    }
+    [data-testid="stExpander"] summary::-webkit-details-marker { display: none; }
+    [data-testid="stExpander"] summary::marker { display: none; content: ""; }
+    /* Hide Streamlit's built-in SVG toggle icon */
+    [data-testid="stExpander"] summary svg {
+        display: none !important;
     }
     [data-testid="stExpander"] summary:hover { background: #1c1c1f; }
     .stExpander > div[data-testid="stExpanderDetails"] {

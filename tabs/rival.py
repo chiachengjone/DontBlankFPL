@@ -16,9 +16,9 @@ def render_rival_tab(processor, players_df: pd.DataFrame):
     c1, c2 = st.columns(2)
     
     with c1:
-        your_id = st.number_input("Your Team ID", min_value=1, max_value=10000000, value=1, key="your_id")
+        your_id = st.number_input("Your Team ID", min_value=1, max_value=99999999, value=1, key="your_id")
     with c2:
-        rival_id = st.number_input("Rival Team ID", min_value=1, max_value=10000000, value=2, key="rival_id")
+        rival_id = st.number_input("Rival Team ID", min_value=1, max_value=99999999, value=2, key="rival_id")
     
     if st.button("Compare Teams", type="primary", use_container_width=True):
         if your_id == rival_id:

@@ -228,62 +228,263 @@ def render_captain_planning(players_df: pd.DataFrame, processor):
 
 
 def render_fixture_difficulty(processor):
-    """Render team fixture difficulty heatmap."""
+    """Render team fixture difficulty ranking with team filtering."""
     st.markdown('<p class="section-title">Team Fixture Difficulty</p>', unsafe_allow_html=True)
+    st.caption("Rank teams by schedule difficulty over upcoming gameweeks")
     
     try:
         current_gw = processor.fetcher.get_current_gameweek()
-        fixtures_df = processor.fixtures_df
+        fixtures = processor.fixtures_df
         teams_df = processor.teams_df
         
-        team_fixtures = []
+        if fixtures is None or fixtures.empty or teams_df is None:
+            st.info("Fixture data unavailable")
+            return
+        
+        fixtures = fixtures.copy()
+        fixtures['event'] = safe_numeric(fixtures.get('event', pd.Series([0]*len(fixtures))))
+        upcoming = fixtures[fixtures['event'] > current_gw].copy()
+        
+        # Configuration
+        cfg1, cfg2, cfg3 = st.columns([1, 1, 1])
+        
+        with cfg1:
+            gw_horizon = st.slider("GW Lookahead", min_value=3, max_value=10, value=6, key="strat_fdr_horizon")
+        
+        with cfg2:
+            team_names_list = ['All Teams'] + sorted([t['name'] for _, t in teams_df.iterrows()])
+            selected_team = st.selectbox("Filter Team", team_names_list, key="strat_fdr_team_filter")
+        
+        with cfg3:
+            sort_order = st.selectbox("Sort Order", ["Easiest First", "Hardest First"], key="strat_fdr_sort")
+        
+        # Calculate FDR for each team over the horizon
+        gw_range = list(range(current_gw + 1, min(current_gw + gw_horizon + 1, 39)))
+        team_fdr_data = []
+        
         for _, team in teams_df.iterrows():
             team_id = team['id']
-            team_fix = fixtures_df[
-                (fixtures_df['event'] >= current_gw) &
-                (fixtures_df['event'] < current_gw + 6) &
-                ((fixtures_df['team_h'] == team_id) | (fixtures_df['team_a'] == team_id))
-            ].sort_values('event')
+            team_name = team['name']
+            team_short = team['short_name']
             
-            fdrs = []
-            for _, fix in team_fix.iterrows():
-                is_home = fix['team_h'] == team_id
-                fdr = fix.get('team_h_difficulty', 3) if is_home else fix.get('team_a_difficulty', 3)
-                fdrs.append(int(fdr))
+            fixture_details = []
+            total_fdr = 0
+            game_count = 0
             
-            while len(fdrs) < 6:
-                fdrs.append(3)
+            for gw in gw_range:
+                gw_fixtures = upcoming[upcoming['event'] == gw]
+                
+                # Home fixtures
+                home_matches = gw_fixtures[gw_fixtures['team_h'] == team_id]
+                for _, match in home_matches.iterrows():
+                    opponent_id = match['team_a']
+                    opponent = teams_df[teams_df['id'] == opponent_id]['short_name'].values
+                    opponent = opponent[0] if len(opponent) > 0 else 'UNK'
+                    fdr = safe_numeric(pd.Series([match.get('team_h_difficulty', 3)]))[0]
+                    fixture_details.append({
+                        'GW': gw,
+                        'Opponent': f"{opponent} (H)",
+                        'FDR': int(fdr),
+                        'Home': True
+                    })
+                    total_fdr += fdr
+                    game_count += 1
+                
+                # Away fixtures
+                away_matches = gw_fixtures[gw_fixtures['team_a'] == team_id]
+                for _, match in away_matches.iterrows():
+                    opponent_id = match['team_h']
+                    opponent = teams_df[teams_df['id'] == opponent_id]['short_name'].values
+                    opponent = opponent[0] if len(opponent) > 0 else 'UNK'
+                    fdr = safe_numeric(pd.Series([match.get('team_a_difficulty', 3)]))[0]
+                    fixture_details.append({
+                        'GW': gw,
+                        'Opponent': f"{opponent} (A)",
+                        'FDR': int(fdr),
+                        'Home': False
+                    })
+                    total_fdr += fdr
+                    game_count += 1
             
-            team_fixtures.append({
-                'Team': team.get('short_name', team['name']),
-                'Avg FDR': round(np.mean(fdrs[:6]), 2),
-                **{f'GW{current_gw + i}': fdrs[i] for i in range(6)}
+            avg_fdr = total_fdr / game_count if game_count > 0 else 5.0
+            
+            team_fdr_data.append({
+                'team_id': team_id,
+                'team_name': team_name,
+                'team_short': team_short,
+                'avg_fdr': avg_fdr,
+                'total_fdr': total_fdr,
+                'games': game_count,
+                'fixture_details': fixture_details
             })
         
-        team_fix_df = pd.DataFrame(team_fixtures).sort_values('Avg FDR')
-        fdr_cols = [f'GW{current_gw + i}' for i in range(6)]
+        # Sort by average FDR
+        team_fdr_data.sort(key=lambda x: x['avg_fdr'], reverse=(sort_order == "Hardest First"))
         
-        fig = go.Figure(data=go.Heatmap(
-            z=team_fix_df[fdr_cols].values,
-            x=fdr_cols,
-            y=team_fix_df['Team'],
-            colorscale=[[0, '#22c55e'], [0.25, '#77c45e'], [0.5, '#f59e0b'], [0.75, '#ef6b4e'], [1, '#ef4444']],
-            showscale=True,
-            colorbar=dict(title='FDR', tickvals=[1, 2, 3, 4, 5]),
-            zmin=1, zmax=5
-        ))
+        if selected_team == 'All Teams':
+            # Show ranking table with heatmap
+            ranking_data = []
+            for rank, team_data in enumerate(team_fdr_data, 1):
+                fixtures_str = ', '.join([f["Opponent"] for f in team_data['fixture_details'][:gw_horizon]])
+                
+                avg = team_data['avg_fdr']
+                if avg <= 2.5:
+                    difficulty = "🟢 Easy"
+                elif avg <= 3.0:
+                    difficulty = "🟡 Medium"
+                elif avg <= 3.5:
+                    difficulty = "🟠 Tough"
+                else:
+                    difficulty = "🔴 Hard"
+                
+                ranking_data.append({
+                    'Rank': rank,
+                    'Team': team_data['team_short'],
+                    'Avg FDR': round(avg, 2),
+                    'Difficulty': difficulty,
+                    'Games': team_data['games'],
+                    'Next Fixtures': fixtures_str[:60] + ('...' if len(fixtures_str) > 60 else '')
+                })
+            
+            ranking_df = pd.DataFrame(ranking_data)
+            st.dataframe(ranking_df, hide_index=True, use_container_width=True)
+            
+            # Heatmap view
+            fdr_cols = [f'GW{gw}' for gw in gw_range]
+            heatmap_data = []
+            for team_data in team_fdr_data:
+                row = {'Team': team_data['team_short']}
+                for gw in gw_range:
+                    gw_fixtures = [f for f in team_data['fixture_details'] if f['GW'] == gw]
+                    if gw_fixtures:
+                        row[f'GW{gw}'] = int(np.mean([f['FDR'] for f in gw_fixtures]))
+                    else:
+                        row[f'GW{gw}'] = 3
+                heatmap_data.append(row)
+            
+            heatmap_df = pd.DataFrame(heatmap_data)
+            
+            fig = go.Figure(data=go.Heatmap(
+                z=heatmap_df[fdr_cols].values,
+                x=fdr_cols,
+                y=heatmap_df['Team'],
+                colorscale=[[0, '#22c55e'], [0.25, '#77c45e'], [0.5, '#f59e0b'], [0.75, '#ef6b4e'], [1, '#ef4444']],
+                showscale=True,
+                colorbar=dict(title='FDR', tickvals=[1, 2, 3, 4, 5]),
+                zmin=1, zmax=5,
+                text=heatmap_df[fdr_cols].values,
+                texttemplate='%{text}',
+                textfont=dict(size=10, color='white'),
+                hovertemplate='%{y} %{x}: FDR %{z}<extra></extra>'
+            ))
+            
+            fig.update_layout(
+                height=600,
+                template='plotly_dark',
+                paper_bgcolor='#0a0a0b',
+                plot_bgcolor='#111113',
+                font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
+                margin=dict(l=80, r=40, t=20, b=40),
+                yaxis=dict(autorange='reversed' if sort_order == "Easiest First" else True)
+            )
+            st.plotly_chart(fig, use_container_width=True, key='strategy_fixture_heatmap')
         
-        fig.update_layout(
-            height=600,
-            template='plotly_dark',
-            paper_bgcolor='#0a0a0b',
-            plot_bgcolor='#111113',
-            font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
-            margin=dict(l=80, r=40, t=20, b=40),
-            yaxis=dict(autorange='reversed')
-        )
-        st.plotly_chart(fig, use_container_width=True, key='strategy_fixture_heatmap')
-        
+        else:
+            # Show detailed view for selected team
+            team_data = next((t for t in team_fdr_data if t['team_name'] == selected_team), None)
+            
+            if team_data:
+                st.markdown(f"### {selected_team} Fixture Analysis")
+                
+                # Summary metrics
+                m1, m2, m3, m4 = st.columns(4)
+                
+                with m1:
+                    st.metric("Average FDR", f"{team_data['avg_fdr']:.2f}")
+                with m2:
+                    st.metric("Total Games", team_data['games'])
+                with m3:
+                    # Find rank
+                    sorted_by_fdr = sorted(team_fdr_data, key=lambda x: x['avg_fdr'])
+                    rank = next((i+1 for i, t in enumerate(sorted_by_fdr) if t['team_name'] == selected_team), 0)
+                    st.metric("Schedule Rank", f"{rank}/20", help="1 = easiest schedule")
+                with m4:
+                    easy_games = len([f for f in team_data['fixture_details'] if f['FDR'] <= 2])
+                    st.metric("Easy Fixtures (FDR ≤2)", easy_games)
+                
+                # Fixture table
+                st.markdown("**Upcoming Fixtures**")
+                if team_data['fixture_details']:
+                    fixture_df = pd.DataFrame(team_data['fixture_details'])
+                    
+                    def fdr_color(val):
+                        if val <= 2:
+                            return '🟢'
+                        elif val == 3:
+                            return '🟡'
+                        elif val == 4:
+                            return '🟠'
+                        else:
+                            return '🔴'
+                    
+                    fixture_df['Difficulty'] = fixture_df['FDR'].apply(fdr_color)
+                    fixture_df['Venue'] = fixture_df['Home'].apply(lambda x: 'Home' if x else 'Away')
+                    fixture_df = fixture_df[['GW', 'Opponent', 'Venue', 'FDR', 'Difficulty']]
+                    
+                    st.dataframe(fixture_df, hide_index=True, use_container_width=True)
+                    
+                    # FDR trend chart
+                    gw_fdr = {}
+                    for f in team_data['fixture_details']:
+                        gw = f['GW']
+                        if gw not in gw_fdr:
+                            gw_fdr[gw] = []
+                        gw_fdr[gw].append(f['FDR'])
+                    
+                    gws = sorted(gw_fdr.keys())
+                    avg_fdrs = [np.mean(gw_fdr[gw]) for gw in gws]
+                    
+                    colors = ['#22c55e' if fdr <= 2 else '#eab308' if fdr <= 3 
+                              else '#f97316' if fdr <= 4 else '#ef4444' for fdr in avg_fdrs]
+                    
+                    fig = go.Figure()
+                    fig.add_trace(go.Bar(
+                        x=[f'GW{gw}' for gw in gws],
+                        y=avg_fdrs,
+                        marker_color=colors,
+                        text=[f'{fdr:.1f}' for fdr in avg_fdrs],
+                        textposition='outside',
+                        hovertemplate='GW%{x}: FDR %{y:.1f}<extra></extra>'
+                    ))
+                    
+                    fig.add_hline(y=3.0, line_dash='dash', line_color='#6b6b6b', 
+                                  annotation_text='Average (3.0)')
+                    
+                    fig.update_layout(
+                        height=300,
+                        template='plotly_dark',
+                        paper_bgcolor='#0a0a0b',
+                        plot_bgcolor='#111113',
+                        font=dict(family='Inter, sans-serif', color='#6b6b6b', size=10),
+                        margin=dict(l=40, r=20, t=20, b=40),
+                        yaxis=dict(title='FDR', range=[0, 5.5]),
+                        xaxis=dict(title='')
+                    )
+                    st.plotly_chart(fig, use_container_width=True, key='team_fdr_trend_strategy')
+                    
+                    # Key players from this team
+                    st.markdown("**Key Players**")
+                    team_players = st.session_state.get('players_df', pd.DataFrame())
+                    if not team_players.empty and 'team_name' in team_players.columns:
+                        team_squad = team_players[team_players['team_name'] == selected_team].copy()
+                        if not team_squad.empty:
+                            team_squad['ep_next'] = safe_numeric(team_squad.get('ep_next', pd.Series([0]*len(team_squad))))
+                            top_players = team_squad.nlargest(5, 'ep_next')[['web_name', 'position', 'now_cost', 'ep_next', 'selected_by_percent']]
+                            top_players.columns = ['Player', 'Pos', 'Price', 'EP', 'Own%']
+                            st.dataframe(top_players, hide_index=True, use_container_width=True)
+                else:
+                    st.info("No upcoming fixtures found")
+    
     except Exception as e:
         st.info(f"Fixture data unavailable: {e}")
 
@@ -335,7 +536,7 @@ def render_injury_alerts(players_df: pd.DataFrame):
         display = flagged.head(15)[['web_name', 'team_name', 'position', 'selected_by_percent', 'chance_of_playing', 'news']].copy()
         display = display.reset_index(drop=True)
         display.columns = ['Player', 'Team', 'Pos', 'Own%', 'Chance', 'News']
-        display['Own%'] = display['Own%'].round(1)
+        display['Own%'] = display['Own%'].round(1).map(lambda x: f'{x:.1f}')
         # Store numeric chance for styling before converting to string
         chance_values = display['Chance'].astype(int).tolist()
         display['Chance'] = display['Chance'].astype(int).astype(str) + '%'

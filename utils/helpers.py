@@ -145,11 +145,21 @@ def get_fdr_color(fdr: int) -> str:
     return FDR_COLORS.get(fdr, '#888')
 
 
-def round_df(df: pd.DataFrame, max_dp: int = 3) -> pd.DataFrame:
-    """Round all numeric columns in a DataFrame to max_dp decimal places."""
+def round_df(df: pd.DataFrame, max_dp: int = 2) -> pd.DataFrame:
+    """Round all numeric float columns and format as strings for clean display.
+    
+    Converts floats to formatted strings so Streamlit's Arrow renderer
+    cannot add extra trailing decimals.
+    Columns named Price/Cost keep 1 dp; all other floats use max_dp.
+    """
     df = df.copy()
-    for col in df.select_dtypes(include=['float64', 'float32', 'float']).columns:
-        df[col] = df[col].round(max_dp)
+    _price_names = {'Price', 'Cost', 'price', 'cost', 'now_cost'}
+    for col in df.columns:
+        if pd.api.types.is_float_dtype(df[col]):
+            dp = 1 if col in _price_names else max_dp
+            df[col] = df[col].round(dp).map(
+                lambda x, d=dp: f'{x:.{d}f}' if pd.notna(x) else ''
+            )
     return df
 
 
@@ -167,7 +177,7 @@ def style_df_with_injuries(df: pd.DataFrame, players_df: pd.DataFrame = None, pl
     
     # Check if highlighting is disabled
     if not st.session_state.get('injury_highlight', True):
-        return df
+        return round_df(df)
     
     # Get players_df from session state if not provided
     if players_df is None:

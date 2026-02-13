@@ -13,17 +13,19 @@ def render_optimization_tab(processor, players_df: pd.DataFrame, fetcher):
     
     st.markdown('<p class="section-title">Transfer Optimizer</p>', unsafe_allow_html=True)
     
-    # Configuration
-    c1, c2, c3, c4 = st.columns(4)
+    # Configuration — Team ID comes from the header input
+    team_id = st.session_state.get('fpl_team_id', 0)
+    if team_id == 0:
+        st.warning("Enter your FPL Team ID in the header bar above to get personalised recommendations.")
+    
+    c1, c2, c3 = st.columns(3)
     
     with c1:
-        team_id = st.number_input("Your Team ID", min_value=1, max_value=10000000, value=1, key="opt_team_id")
-    with c2:
         weeks_ahead = st.slider("Planning Horizon", min_value=3, max_value=10, value=5, key="opt_horizon")
-    with c3:
+    with c2:
         from fpl_api import MAX_FREE_TRANSFERS
         free_transfers = st.slider("Free Transfers", min_value=1, max_value=MAX_FREE_TRANSFERS, value=1, key="opt_fts")
-    with c4:
+    with c3:
         strategy = st.selectbox("Strategy", ['Balanced', 'Maximum Points', 'Differential', 'Value'], key="opt_strategy")
     
     bank = st.number_input("Bank (remaining budget)", min_value=0.0, max_value=50.0, value=0.0, step=0.1, key="opt_bank")
@@ -306,7 +308,7 @@ def render_ai_transfer_plan(current_squad_df, available_df, ep_col, free_transfe
                     <div class="rule-label">{t['out_team']} | {t['out_pos']} | {t['out_price']:.1f}m | EP {t['out_ep']:.1f}</div>
                 </div>''', unsafe_allow_html=True)
             with tc2:
-                st.markdown('<div style="text-align:center;padding-top:1rem;color:#fff;font-size:1.5rem;">→</div>', unsafe_allow_html=True)
+                st.markdown('<div style="text-align:center;padding-top:1rem;color:#fff;font-size:1.5rem;">></div>', unsafe_allow_html=True)
             with tc3:
                 st.markdown(f'''<div class="rule-card">
                     <div style="color:#22c55e;font-weight:600;">IN: {t['in_name']}</div>
@@ -335,10 +337,10 @@ def render_position_recommendations(available_df, ep_col):
     for pos in ['GKP', 'DEF', 'MID', 'FWD']:
         pos_df = available_df[available_df['position'] == pos].nlargest(5, 'transfer_score')
         if not pos_df.empty:
-            with st.expander(f"{pos} Recommendations", expanded=True):
-                display_df = pos_df[['web_name', 'team_name', 'now_cost', ep_col, 'form', 'selected_by_percent', 'transfer_score']].copy()
-                display_df.columns = ['Player', 'Team', 'Price', 'EP', 'Form', 'Owned%', 'Score']
-                st.dataframe(style_df_with_injuries(display_df), hide_index=True, use_container_width=True)
+            st.markdown(f"**{pos} Recommendations**")
+            display_df = pos_df[['web_name', 'team_name', 'now_cost', ep_col, 'form', 'selected_by_percent', 'transfer_score']].copy()
+            display_df.columns = ['Player', 'Team', 'Price', 'EP', 'Form', 'Owned%', 'Score']
+            st.dataframe(style_df_with_injuries(display_df), hide_index=True, use_container_width=True)
 
 
 def render_top_picks(available_df, ep_col):

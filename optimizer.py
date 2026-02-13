@@ -1,17 +1,36 @@
 """
 Optimizer Module - Multi-Objective Optimization using PuLP for FPL Strategy Engine.
 Implements the Knapsack Problem solver for 2025/26 rules.
+PuLP is lazy-loaded to avoid slow startup.
 """
 
-from pulp import (
-    LpProblem, LpMaximize, LpVariable, LpBinary, lpSum, 
-    LpStatus, PULP_CBC_CMD, value
-)
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
+
+# Lazy PuLP import
+_pulp_loaded = False
+
+def _ensure_pulp():
+    global _pulp_loaded, LpProblem, LpMaximize, LpVariable, LpBinary, lpSum, LpStatus, PULP_CBC_CMD, value
+    if not _pulp_loaded:
+        from pulp import (
+            LpProblem as _LpProblem, LpMaximize as _LpMaximize,
+            LpVariable as _LpVariable, LpBinary as _LpBinary,
+            lpSum as _lpSum, LpStatus as _LpStatus,
+            PULP_CBC_CMD as _PULP_CBC_CMD, value as _value
+        )
+        LpProblem = _LpProblem
+        LpMaximize = _LpMaximize
+        LpVariable = _LpVariable
+        LpBinary = _LpBinary
+        lpSum = _lpSum
+        LpStatus = _LpStatus
+        PULP_CBC_CMD = _PULP_CBC_CMD
+        value = _value
+        _pulp_loaded = True
 
 # 2025/26 Season Constants
 MAX_BUDGET = 100.0
@@ -83,6 +102,7 @@ class FPLOptimizer:
             players_df: DataFrame with player info and expected points
             weeks_ahead: Number of weeks for the optimization horizon
         """
+        _ensure_pulp()
         self.players_df = players_df.copy()
         self.weeks_ahead = weeks_ahead
         self._prepare_data()

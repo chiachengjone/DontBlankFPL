@@ -109,7 +109,7 @@ def render_captain_pick_card(player_row: Dict, rank: int = 1):
     ep = safe_numeric(pd.Series([player_row.get('ep_next', 0)])).iloc[0]
     form = safe_numeric(pd.Series([player_row.get('form', 0)])).iloc[0]
     
-    medal = '🥇' if rank == 1 else '🥈' if rank == 2 else '🥉' if rank == 3 else f'#{rank}'
+    medal = '#1' if rank == 1 else '#2' if rank == 2 else '#3' if rank == 3 else f'#{rank}'
     
     st.markdown(f'''
     <div style="background:#1a1a1a;padding:0.75rem;border:1px solid #333;margin-bottom:0.5rem;">
