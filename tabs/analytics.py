@@ -6,9 +6,8 @@ import plotly.graph_objects as go
 
 from utils.helpers import (
     safe_numeric, style_df_with_injuries, round_df,
-    classify_ownership_column, add_availability_columns,
+    classify_ownership_column,
 )
-from fpl_api import get_differential_picks
 from components.charts import create_cbit_chart, create_ownership_trends_chart
 
 
@@ -128,9 +127,6 @@ def render_analytics_tab(processor, players_df: pd.DataFrame):
     # Advanced Metrics (Threat Momentum, EPPM, Matchup Quality)
     render_advanced_metrics(players_df)
     
-    # Differential picks
-    render_differential_picks(processor)
-    
     # Set & Forget finder
     render_set_and_forget(players_df)
     
@@ -142,31 +138,35 @@ def render_analytics_tab(processor, players_df: pd.DataFrame):
 
 
 def render_player_table(df: pd.DataFrame):
-    """Render the main player table with RRI differential columns."""
-    display_cols = ['web_name', 'team_name', 'position', 'now_cost', 'selected_by_percent',
-                   'expected_points', 'differential_gain', 'diff_roi', 'eppm',
-                   'threat_momentum', 'diff_verdict', 'ownership_tier']
-    display_cols = [c for c in display_cols if c in df.columns]
+    """Render the main player table with RRI differential columns and CBIT score (DEF/GKP only)."""
+    base_cols = ['web_name', 'team_name', 'position', 'now_cost', 'selected_by_percent',
+                 'expected_points', 'ep_next', 'xnp', 'diff_roi', 'eppm', 'threat_momentum']
+    # Only show CBIT score if we have defenders/keepers (otherwise misleading)
+    if 'cbit_score' in df.columns and df['position'].isin(['DEF', 'GKP']).any():
+        base_cols.append('cbit_score')
     
-    numeric_cols = ['now_cost', 'selected_by_percent', 'expected_points', 'differential_gain',
-                   'diff_roi', 'eppm', 'threat_momentum']
+    display_cols = [c for c in base_cols if c in df.columns]
+    
+    numeric_cols = ['now_cost', 'selected_by_percent', 'expected_points', 'ep_next',
+                   'xnp', 'diff_roi', 'eppm', 'threat_momentum', 'cbit_score']
     for col in numeric_cols:
         if col in df.columns:
             df[col] = safe_numeric(df[col])
     
+    # Set CBIT to 0 for non-DEF/GKP to avoid NaN display issues
+    if 'cbit_score' in df.columns:
+        is_defensive = df['position'].isin(['DEF', 'GKP'])
+        df.loc[~is_defensive, 'cbit_score'] = 0.0
+    
     rename = {
         'web_name': 'Player', 'team_name': 'Team', 'position': 'Pos',
         'now_cost': 'Price', 'selected_by_percent': 'Own%',
-        'expected_points': 'EP', 'differential_gain': 'xNP',
+        'expected_points': 'EP', 'ep_next': 'FPL EP', 'xnp': 'xNP',
         'diff_roi': 'ROI/m', 'eppm': 'EPPM', 'threat_momentum': 'Threat',
-        'diff_verdict': 'Verdict', 'ownership_tier': 'Tier',
+        'cbit_score': 'CBIT',
     }
     
     display_df = df[display_cols].head(50).copy()
-    display_df = add_availability_columns(display_df)
-    # Drop raw ownership_tier if add_availability_columns already added a Tier column
-    if 'Tier' in display_df.columns and 'ownership_tier' in display_df.columns:
-        display_df = display_df.drop(columns=['ownership_tier'])
     
     renamed = display_df.rename(columns=rename)
     # Ensure no duplicate column names (Styler requirement)
@@ -253,15 +253,40 @@ def render_value_by_position(players_df: pd.DataFrame):
 
 
 def render_cbit_analysis(players_df: pd.DataFrame):
-    """Render CBIT (Clean sheet Bonus If Team) analysis chart for defenders."""
-    st.markdown('<p class="section-title">CBIT Propensity (Defenders)</p>', unsafe_allow_html=True)
-    st.caption("CBIT measures likelihood of clean sheet bonus points — higher = better for defender picks")
+    """Render CBIT (Clearances, Blocks, Interceptions, Tackles) analysis for DEF/GKP."""
+    st.markdown('<p class="section-title">CBIT Analysis (Defenders)</p>', unsafe_allow_html=True)
+    st.caption("2025/26 DefCon scoring: DEF needs 10+ actions, GKP/MID/FWD need 12+ for +2 pts bonus")
     
+    # Show chart
     fig = create_cbit_chart(players_df)
     if fig:
         st.plotly_chart(fig, use_container_width=True, key='analytics_cbit_chart')
+    
+    # Show CBIT metrics table for top defenders
+    df = players_df[players_df['position'].isin(['DEF', 'GKP'])].copy()
+    
+    cbit_cols = ['cbit_aa90', 'cbit_prob', 'cbit_floor', 'cbit_dtt', 'cbit_matchup', 'cbit_score']
+    if any(c in df.columns for c in cbit_cols):
+        for col in cbit_cols:
+            if col not in df.columns:
+                df[col] = 0.0
+            df[col] = safe_numeric(df[col])
+        
+        df['now_cost'] = safe_numeric(df['now_cost'], 5)
+        df = df.nlargest(12, 'cbit_score' if 'cbit_score' in df.columns else 'cbit_aa90')
+        
+        if not df.empty:
+            team_col = 'team_name' if 'team_name' in df.columns else 'team'
+            display_df = df[['web_name', team_col, 'now_cost', 'cbit_aa90', 'cbit_prob', 'cbit_floor', 'cbit_dtt', 'cbit_score']].copy()
+            display_df.columns = ['Player', 'Team', 'Price', 'AA90', 'P(CBIT)', 'Floor', 'DTT', 'Score']
+            display_df['Price'] = display_df['Price'].apply(lambda x: f"£{x:.1f}m")
+            display_df['P(CBIT)'] = display_df['P(CBIT)'].apply(lambda x: f"{x:.0%}")
+            display_df['Floor'] = display_df['Floor'].apply(lambda x: f"{x:.1f}")
+            display_df['DTT'] = display_df['DTT'].apply(lambda x: f"{x:+.1f}")
+            
+            st.dataframe(style_df_with_injuries(display_df, players_df), hide_index=True, use_container_width=True, key='cbit_table')
     else:
-        st.info("CBIT data unavailable - requires clean sheet history")
+        st.info("CBIT metrics unavailable - requires defensive action data")
 
 
 def render_advanced_metrics(players_df: pd.DataFrame):
@@ -501,63 +526,6 @@ def render_advanced_metrics(players_df: pd.DataFrame):
                     )
 
 
-def render_differential_picks(processor):
-    """Render differential picks using RRI-based engineered_diff metric."""
-    st.markdown('<p class="section-title">Differential Picks (RRI)</p>', unsafe_allow_html=True)
-    st.caption("Score = xP × (1 − EO_top10k) — points gained vs the elite managers")
-    
-    try:
-        df = processor.get_engineered_features_df()
-        df['selected_by_percent'] = safe_numeric(df['selected_by_percent'])
-        df['expected_points'] = safe_numeric(df.get('expected_points', pd.Series([0]*len(df))))
-        df['differential_gain'] = safe_numeric(df.get('differential_gain', pd.Series([0]*len(df))))
-        df['diff_roi'] = safe_numeric(df.get('diff_roi', pd.Series([0]*len(df))))
-        df['engineered_diff'] = safe_numeric(df.get('engineered_diff', pd.Series([0]*len(df))))
-        df['minutes'] = safe_numeric(df.get('minutes', pd.Series([0]*len(df))))
-        
-        sort_col = 'engineered_diff' if 'engineered_diff' in df.columns else 'differential_gain'
-        
-        # Filter: <10% ownership, >200 mins, EP > 2
-        diffs = df[
-            (df['selected_by_percent'] < 10) & 
-            (df['minutes'] > 200) &
-            (df['expected_points'] > 2)
-        ].nlargest(12, sort_col)
-        
-        if not diffs.empty:
-            display_cols = ['web_name', 'team_name', 'position', 'now_cost', 'selected_by_percent',
-                           'expected_points', 'differential_gain', 'diff_roi', 'eo_top10k',
-                           'diff_verdict', 'diff_profile', 'engineered_diff']
-            display_cols = [c for c in display_cols if c in diffs.columns]
-            diffs_display = diffs[display_cols].copy()
-            rename_map = {
-                'web_name': 'Player', 'team_name': 'Team', 'position': 'Pos',
-                'now_cost': 'Price', 'selected_by_percent': 'Own%',
-                'expected_points': 'EP', 'differential_gain': 'xNP',
-                'diff_roi': 'ROI/m', 'eo_top10k': 'EO10k%',
-                'diff_verdict': 'Verdict', 'diff_profile': 'Profile',
-                'engineered_diff': 'Score',
-            }
-            diffs_display = diffs_display.rename(columns=rename_map)
-            for c in ['Price', 'Own%', 'EP', 'xNP', 'ROI/m', 'EO10k%', 'Score']:
-                if c in diffs_display.columns:
-                    diffs_display[c] = diffs_display[c].round(2)
-            st.dataframe(style_df_with_injuries(diffs_display, player_col='Player'), hide_index=True, use_container_width=True)
-        else:
-            st.info("No engineered differentials matching criteria")
-    except Exception as e:
-        # Fallback to old method
-        try:
-            diffs = get_differential_picks(processor, min_ep=3.0, max_ownership=5.0)
-            if diffs is not None and not diffs.empty:
-                diffs_display = round_df(diffs.head(10))
-                st.dataframe(style_df_with_injuries(diffs_display, player_col='web_name'), hide_index=True, use_container_width=True)
-            else:
-                st.info("No differentials matching criteria")
-        except:
-            st.warning(f"Could not load differentials: {e}")
-
-
 def render_set_and_forget(players_df: pd.DataFrame):
     """Render Set & Forget finder."""
     st.markdown('<p class="section-title">Set & Forget Picks</p>', unsafe_allow_html=True)
@@ -587,31 +555,81 @@ def render_set_and_forget(players_df: pd.DataFrame):
 def render_expected_vs_actual(players_df: pd.DataFrame):
     """Render Expected vs Actual performance analysis with filters."""
     st.markdown('<p class="section-title">Expected vs Actual (Over/Under Performers)</p>', unsafe_allow_html=True)
-    st.caption("Comparing total points vs what was expected - find unlucky players worth targeting")
+    st.caption("Comprehensive xPts model: xG, xA, CS probability, CBIT, saves, goals conceded — find undervalued players")
     
     df = players_df.copy()
     df['total_points'] = safe_numeric(df.get('total_points', pd.Series([0]*len(df))))
-    df['ep_next'] = safe_numeric(df.get('ep_next', pd.Series([0]*len(df))))
     df['minutes'] = safe_numeric(df.get('minutes', pd.Series([0]*len(df))))
     df = df[df['minutes'] > 500]
     
     df['games_played'] = df['minutes'] / 90
-
-    # xG-based expected total – use Understat if available, fall back to FPL xG/xA
-    _GOAL_PTS = {'GKP': 6, 'DEF': 6, 'MID': 5, 'FWD': 4}
-    _xg = 'us_xG' if 'us_xG' in df.columns and df['us_xG'].sum() > 0 else 'expected_goals'
-    _xa = 'us_xA' if 'us_xA' in df.columns and df['us_xA'].sum() > 0 else 'expected_assists'
-    for _c in (_xg, _xa):
-        if _c not in df.columns:
-            df[_c] = 0.0
-        df[_c] = safe_numeric(df[_c])
-
+    
+    # ── Position-based point values ──
+    GOAL_PTS = {'GKP': 6, 'DEF': 6, 'MID': 5, 'FWD': 4}
+    CS_PTS = {'GKP': 4, 'DEF': 4, 'MID': 1, 'FWD': 0}
+    GC_PENALTY = {'GKP': -0.5, 'DEF': -0.5, 'MID': 0, 'FWD': 0}  # per goal conceded (every 2)
+    
+    # ── xG/xA: prefer Understat, fallback to FPL ──
+    xg_col = 'us_xG' if 'us_xG' in df.columns and df['us_xG'].sum() > 0 else 'expected_goals'
+    xa_col = 'us_xA' if 'us_xA' in df.columns and df['us_xA'].sum() > 0 else 'expected_assists'
+    for col in (xg_col, xa_col):
+        if col not in df.columns:
+            df[col] = 0.0
+        df[col] = safe_numeric(df[col])
+    
+    # ── Clean Sheet Rate (season average) ──
+    # Use Poisson p_cs if available, else historical CS rate
+    if 'poisson_p_cs' in df.columns:
+        df['_p_cs'] = safe_numeric(df['poisson_p_cs']).clip(0, 0.7)
+    else:
+        df['clean_sheets'] = safe_numeric(df.get('clean_sheets', pd.Series([0]*len(df))))
+        df['_p_cs'] = (df['clean_sheets'] / df['games_played'].clip(lower=1)).clip(0, 0.7)
+    
+    # ── CBIT Probability (season average, not next-match specific) ──
+    # Use hit rate if available (season %), else position baseline
+    if 'cbit_hit_rate' in df.columns:
+        df['_p_cbit'] = safe_numeric(df['cbit_hit_rate']).clip(0, 1)
+    elif 'cbit_prob' in df.columns:
+        # cbit_prob is next-match, but better than nothing
+        df['_p_cbit'] = safe_numeric(df['cbit_prob']).clip(0, 1) * 0.8  # Discount 20% for season average
+    else:
+        # Position baseline estimates
+        df['_p_cbit'] = df['position'].map({'GKP': 0.30, 'DEF': 0.40, 'MID': 0.10, 'FWD': 0.05}).fillna(0.1)
+    
+    # ── Saves (GKP only) ──
+    df['saves'] = safe_numeric(df.get('saves', pd.Series([0]*len(df))))
+    
+    # ── Goals Conceded ──
+    df['goals_conceded'] = safe_numeric(df.get('goals_conceded', pd.Series([0]*len(df))))
+    
+    # ── Bonus Points Estimate ──
+    # Higher xG+xA involvement correlates with bonus; ~0.8 bonus per xG+xA combo
+    df['_xbonus'] = ((df[xg_col] + df[xa_col]) * 0.8).clip(0, df['games_played'] * 3)
+    
+    # ══════════════════════════════════════════════════════════════
+    # COMPREHENSIVE EXPECTED POINTS FORMULA
+    # ══════════════════════════════════════════════════════════════
+    df['xpts_appearance'] = df['games_played'] * 2  # 2 pts per 60+ min appearance
+    df['xpts_goals'] = df[xg_col] * df['position'].map(GOAL_PTS).fillna(4)
+    df['xpts_assists'] = df[xa_col] * 3
+    df['xpts_cs'] = df['games_played'] * df['_p_cs'] * df['position'].map(CS_PTS).fillna(0)
+    df['xpts_cbit'] = df['games_played'] * df['_p_cbit'] * 2  # CBIT bonus = 2 pts
+    df['xpts_saves'] = (df['saves'] / 3).clip(lower=0)  # 1 pt per 3 saves
+    df['xpts_gc_penalty'] = df['goals_conceded'] * df['position'].map(GC_PENALTY).fillna(0)
+    df['xpts_bonus'] = df['_xbonus']
+    
     df['expected_total'] = (
-        df[_xg] * df['position'].map(_GOAL_PTS).fillna(4)
-        + df[_xa] * 3
-        + df['games_played'] * 2   # appearance-points baseline
-    )
-    df['diff'] = df['total_points'] - df['expected_total']
+        df['xpts_appearance'] +
+        df['xpts_goals'] +
+        df['xpts_assists'] +
+        df['xpts_cs'] +
+        df['xpts_cbit'] +
+        df['xpts_saves'] +
+        df['xpts_gc_penalty'] +
+        df['xpts_bonus']
+    ).round(1)
+    
+    df['diff'] = (df['total_points'] - df['expected_total']).round(1)
 
     # ── Filters ──
     ef1, ef2, ef3 = st.columns([1, 1, 2])
@@ -697,20 +715,20 @@ def render_expected_vs_actual(players_df: pd.DataFrame):
     
     with xva1:
         st.markdown("**Underperformers** (unlucky, may bounce back)")
-        st.caption("Players with positive threat momentum are primed for regression upward")
-        under = df.nsmallest(8, 'diff')[['web_name', 'team_name', 'total_points', 'expected_total', 'diff', 'threat_momentum']].copy()
-        under.columns = ['Player', 'Team', 'Actual', 'Expected', 'Diff', 'Threat']
-        under['Expected'] = under['Expected'].round(0).astype(int)
+        st.caption("Comprehensive xPts includes CS, CBIT, saves, bonus — positive threat = heating up")
+        under = df.nsmallest(8, 'diff')[['web_name', 'position', 'total_points', 'expected_total', 'diff', 'threat_momentum']].copy()
+        under.columns = ['Player', 'Pos', 'Actual', 'xPts', 'Diff', 'Threat']
+        under['xPts'] = under['xPts'].round(0).astype(int)
         under['Diff'] = under['Diff'].round(0).astype(int)
         under['Threat'] = under['Threat'].round(2)
         st.dataframe(style_df_with_injuries(under), hide_index=True, use_container_width=True)
     
     with xva2:
         st.markdown("**Overperformers** (may regress)")
-        st.caption("Players with negative threat momentum are cooling off")
-        over = df.nlargest(8, 'diff')[['web_name', 'team_name', 'total_points', 'expected_total', 'diff', 'threat_momentum']].copy()
-        over.columns = ['Player', 'Team', 'Actual', 'Expected', 'Diff', 'Threat']
-        over['Expected'] = over['Expected'].round(0).astype(int)
+        st.caption("Players outperforming xPts model — negative threat = cooling off")
+        over = df.nlargest(8, 'diff')[['web_name', 'position', 'total_points', 'expected_total', 'diff', 'threat_momentum']].copy()
+        over.columns = ['Player', 'Pos', 'Actual', 'xPts', 'Diff', 'Threat']
+        over['xPts'] = over['xPts'].round(0).astype(int)
         over['Diff'] = over['Diff'].round(0).astype(int)
         over['Threat'] = over['Threat'].round(2)
         st.dataframe(style_df_with_injuries(over), hide_index=True, use_container_width=True)

@@ -123,11 +123,12 @@ def render_quick_stats(df: pd.DataFrame):
             st.metric("Most Owned", top_owned.iloc[0]['web_name'], f"{top_owned.iloc[0]['selected_by_percent']:.1f}%")
     
     with stat2:
-        if 'ep_next' in df.columns:
-            df['ep_next'] = safe_numeric(df['ep_next'])
-            top_ep = df.nlargest(1, 'ep_next')
+        ep_col = 'expected_points' if 'expected_points' in df.columns else 'ep_next'
+        if ep_col in df.columns:
+            df[ep_col] = safe_numeric(df[ep_col])
+            top_ep = df.nlargest(1, ep_col)
             if not top_ep.empty:
-                st.metric("Top EP", top_ep.iloc[0]['web_name'], f"{top_ep.iloc[0]['ep_next']:.1f}")
+                st.metric("Top EP", top_ep.iloc[0]['web_name'], f"{top_ep.iloc[0][ep_col]:.1f}")
     
     with stat3:
         st.metric("Players Shown", len(df))
@@ -144,7 +145,7 @@ def render_form_vs_ep_chart(df: pd.DataFrame):
     
     chart_df = df.copy()
     chart_df['form'] = safe_numeric(chart_df.get('form', pd.Series([0]*len(chart_df))))
-    chart_df['ep'] = safe_numeric(chart_df.get('ep_next', chart_df.get('expected_points', pd.Series([2]*len(chart_df)))))
+    chart_df['ep'] = safe_numeric(chart_df.get('expected_points', chart_df.get('ep_next', pd.Series([2]*len(chart_df)))))
     chart_df['minutes'] = safe_numeric(chart_df.get('minutes', pd.Series([0]*len(chart_df))))
     chart_df = chart_df[chart_df['minutes'] > 200]
     
@@ -200,14 +201,14 @@ def render_captain_planning(players_df: pd.DataFrame, processor):
     st.caption("Top captain options based on EP, form, and fixture difficulty")
     
     cap_df = players_df.copy()
-    cap_df['ep_next'] = safe_numeric(cap_df.get('ep_next', pd.Series([0]*len(cap_df))))
+    cap_df['ep'] = safe_numeric(cap_df.get('expected_points', cap_df.get('ep_next', pd.Series([0]*len(cap_df)))))
     cap_df['form'] = safe_numeric(cap_df.get('form', pd.Series([0]*len(cap_df))))
     cap_df['selected_by_percent'] = safe_numeric(cap_df['selected_by_percent'])
     cap_df['minutes'] = safe_numeric(cap_df.get('minutes', pd.Series([0]*len(cap_df))))
     cap_df = cap_df[cap_df['minutes'] > 500]
     
-    cap_df['captain_score'] = cap_df['ep_next'] * CAPTAIN_MULTIPLIER + cap_df['form'] * 0.3
-    cap_df['captain_ev'] = cap_df['ep_next'] * CAPTAIN_MULTIPLIER
+    cap_df['captain_score'] = cap_df['ep'] * CAPTAIN_MULTIPLIER + cap_df['form'] * 0.3
+    cap_df['captain_ev'] = cap_df['ep'] * CAPTAIN_MULTIPLIER
     
     cap_cols = st.columns(5)
     top_caps = cap_df.nlargest(5, 'captain_score')
@@ -329,13 +330,13 @@ def render_fixture_difficulty(processor):
                 
                 avg = team_data['avg_fdr']
                 if avg <= 2.5:
-                    difficulty = "🟢 Easy"
+                    difficulty = "Easy"
                 elif avg <= 3.0:
-                    difficulty = "🟡 Medium"
+                    difficulty = "Medium"
                 elif avg <= 3.5:
-                    difficulty = "🟠 Tough"
+                    difficulty = "Tough"
                 else:
-                    difficulty = "🔴 Hard"
+                    difficulty = "Hard"
                 
                 ranking_data.append({
                     'Rank': rank,
@@ -419,13 +420,13 @@ def render_fixture_difficulty(processor):
                     
                     def fdr_color(val):
                         if val <= 2:
-                            return '🟢'
+                            return 'Easy'
                         elif val == 3:
-                            return '🟡'
+                            return 'Med'
                         elif val == 4:
-                            return '🟠'
+                            return 'Tough'
                         else:
-                            return '🔴'
+                            return 'Hard'
                     
                     fixture_df['Difficulty'] = fixture_df['FDR'].apply(fdr_color)
                     fixture_df['Venue'] = fixture_df['Home'].apply(lambda x: 'Home' if x else 'Away')
@@ -478,8 +479,8 @@ def render_fixture_difficulty(processor):
                     if not team_players.empty and 'team_name' in team_players.columns:
                         team_squad = team_players[team_players['team_name'] == selected_team].copy()
                         if not team_squad.empty:
-                            team_squad['ep_next'] = safe_numeric(team_squad.get('ep_next', pd.Series([0]*len(team_squad))))
-                            top_players = team_squad.nlargest(5, 'ep_next')[['web_name', 'position', 'now_cost', 'ep_next', 'selected_by_percent']]
+                            team_squad['ep'] = safe_numeric(team_squad.get('expected_points', team_squad.get('ep_next', pd.Series([0]*len(team_squad)))))
+                            top_players = team_squad.nlargest(5, 'ep')[['web_name', 'position', 'now_cost', 'ep', 'selected_by_percent']]
                             top_players.columns = ['Player', 'Pos', 'Price', 'EP', 'Own%']
                             st.dataframe(top_players, hide_index=True, use_container_width=True)
                 else:

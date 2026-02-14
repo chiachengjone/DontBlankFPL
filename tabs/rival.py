@@ -107,7 +107,7 @@ def calculate_team_ep(squad_ids: list, players_df: pd.DataFrame) -> float:
     for pid in squad_ids[:11]:  # Starting 11
         p = players_df[players_df['id'] == pid]
         if not p.empty:
-            ep = safe_numeric(pd.Series([p.iloc[0].get('ep_next', p.iloc[0].get('expected_points', 2))])).iloc[0]
+            ep = safe_numeric(pd.Series([p.iloc[0].get('expected_points', p.iloc[0].get('ep_next', 2))])).iloc[0]
             total_ep += ep
     return total_ep
 

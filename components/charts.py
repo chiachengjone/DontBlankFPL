@@ -179,32 +179,59 @@ def create_ep_ownership_scatter(
 
 
 def create_cbit_chart(players_df: pd.DataFrame) -> Optional[go.Figure]:
-    """Create CBIT analysis chart."""
-    df = players_df[players_df['position'] == 'DEF'].copy()
+    """Create enhanced CBIT analysis chart with AA90, Hit Rate, and Floor."""
+    df = players_df[players_df['position'].isin(['DEF', 'GKP'])].copy()
     
-    if 'cbit_propensity' not in df.columns:
+    # Prefer new metrics, fallback to legacy
+    score_col = 'cbit_score' if 'cbit_score' in df.columns else 'cbit_propensity'
+    if score_col not in df.columns:
         if 'clean_sheets' in df.columns:
-            df['cbit_propensity'] = safe_numeric(df['clean_sheets']) / 10
+            df['cbit_score'] = safe_numeric(df['clean_sheets']) / 10
+            score_col = 'cbit_score'
         else:
             return None
     
-    df['cbit_propensity'] = safe_numeric(df['cbit_propensity'])
-    df = df.nlargest(15, 'cbit_propensity')
+    df[score_col] = safe_numeric(df[score_col])
+    df = df.nlargest(15, score_col)
     
     if df.empty:
         return None
     
+    # Ensure new columns exist for hover
+    for col in ['cbit_aa90', 'cbit_prob', 'cbit_floor', 'cbit_dtt']:
+        if col not in df.columns:
+            df[col] = 0.0
+        else:
+            df[col] = safe_numeric(df[col])
+    
+    # Hover data
+    hover_text = df.apply(
+        lambda r: f"<b>{r['web_name']}</b><br>"
+                  f"AA90: {r.get('cbit_aa90', 0):.1f}<br>"
+                  f"P(CBIT): {r.get('cbit_prob', 0):.0%}<br>"
+                  f"Floor: {r.get('cbit_floor', 0):.1f} pts<br>"
+                  f"DTT: {r.get('cbit_dtt', 0):+.1f}",
+        axis=1
+    )
+    
     fig = go.Figure()
     fig.add_trace(go.Bar(
         x=df['web_name'],
-        y=df['cbit_propensity'],
-        marker=dict(color=df['cbit_propensity'].tolist(), colorscale=[[0, '#22c55e'], [1, '#00ff87']]),
-        text=df['cbit_propensity'].round(2),
-        textposition='outside'
+        y=df[score_col],
+        marker=dict(
+            color=df['cbit_prob'].tolist() if 'cbit_prob' in df.columns else df[score_col].tolist(),
+            colorscale=[[0, '#2563eb'], [0.5, '#22c55e'], [1, '#00ff87']],
+            showscale=True,
+            colorbar=dict(title='P(CBIT)', thickness=12)
+        ),
+        text=df[score_col].round(1),
+        textposition='outside',
+        hovertemplate='%{customdata}<extra></extra>',
+        customdata=hover_text
     ))
     
     fig.update_layout(
-        title=dict(text='CBIT Propensity Score', font=dict(color='#fff', size=16)),
+        title=dict(text='CBIT Score (AA90 + Floor + Matchup)', font=dict(color='#fff', size=16)),
         xaxis_title='', yaxis_title='Score',
         height=350,
         template='plotly_dark',

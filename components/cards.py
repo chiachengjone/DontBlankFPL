@@ -36,7 +36,7 @@ def render_player_detail_card(player_row: Dict, processor, players_df: pd.DataFr
         ''', unsafe_allow_html=True)
     
     with col2:
-        ep = safe_numeric(pd.Series([player_row.get('ep_next', player_row.get('expected_points', 0))])).iloc[0]
+        ep = safe_numeric(pd.Series([player_row.get('expected_points', player_row.get('ep_next', 0))])).iloc[0]
         form = safe_numeric(pd.Series([player_row.get('form', 0)])).iloc[0]
         st.metric("Expected Points", f"{ep:.1f}")
         st.metric("Form", f"{form:.1f}")
@@ -53,9 +53,10 @@ def render_player_detail_card(player_row: Dict, processor, players_df: pd.DataFr
     fixtures = get_player_fixtures(player_id, processor, 5)
     
     if fixtures:
-        fix_cols = st.columns(5)
+        n = min(len(fixtures), 5)
+        fix_cols = st.columns(n)
         
-        for i, fix in enumerate(fixtures):
+        for i, fix in enumerate(fixtures[:n]):
             with fix_cols[i]:
                 venue = 'H' if fix['is_home'] else 'A'
                 fdr = fix['fdr']

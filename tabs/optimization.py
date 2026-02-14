@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 
-from utils.helpers import safe_numeric, style_df_with_injuries, round_df, add_availability_columns
+from utils.helpers import safe_numeric, style_df_with_injuries, round_df
 from optimizer import MAX_PLAYERS_PER_TEAM
 from config import TRANSFER_HIT_COST
 
@@ -19,6 +19,9 @@ def render_optimization_tab(processor, players_df: pd.DataFrame, fetcher):
     team_id = st.session_state.get('fpl_team_id', 0)
     if team_id == 0:
         st.warning("Enter your FPL Team ID in the header bar above to get personalised recommendations.")
+    elif team_id < 1 or team_id > 99999999:
+        st.error("Invalid Team ID. Must be between 1 and 99999999.")
+        team_id = 0
     
     c1, c2, c3 = st.columns(3)
     
@@ -45,6 +48,8 @@ def render_optimization_tab(processor, players_df: pd.DataFrame, fetcher):
         with st.spinner("Analyzing your squad..."):
             try:
                 analyze_transfers(processor, players_df, fetcher, team_id, weeks_ahead, free_transfers, strategy, bank)
+            except ValueError as e:
+                st.error(f"Team data error: {e}")
             except Exception as e:
                 st.error(f"Error: {e}")
     else:
@@ -62,15 +67,18 @@ def analyze_transfers(processor, players_df, fetcher, team_id, weeks_ahead, free
         picks_data = fetcher.get_team_picks(team_id, gw)
         if isinstance(picks_data, dict) and 'picks' in picks_data:
             your_squad = [p['element'] for p in picks_data['picks']]
+            has_real_team = True
         elif isinstance(picks_data, list):
             your_squad = [p.get('element', p) for p in picks_data]
+            has_real_team = len(your_squad) > 0
         else:
             your_squad = []
-        has_real_team = len(your_squad) > 0
+            has_real_team = False
+            st.warning(f"Team ID {team_id}: No squad data found. Team may be private or ID invalid. Showing general recommendations.")
     except Exception as e:
         your_squad = []
         has_real_team = False
-        st.warning(f"Could not fetch team data: {e}. Showing general recommendations.")
+        st.warning(f"Could not fetch team data for ID {team_id}: {str(e)}. Showing general recommendations.")
     
     # Prepare EP column
     if 'expected_points' in featured_df.columns:

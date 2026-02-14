@@ -46,7 +46,7 @@ def render_monte_carlo_tab(processor, players_df: pd.DataFrame):
                 selected_player = st.selectbox(
                     "Select Player",
                     options=matched["id"].tolist(),
-                    format_func=lambda x: matched[matched["id"] == x]["web_name"].iloc[0],
+                    format_func=lambda x: matched[matched["id"] == x]["web_name"].iloc[0] if not matched[matched["id"] == x].empty else f"ID:{x}",
                     key="mc_player_select",
                 )
 
@@ -93,7 +93,11 @@ def render_monte_carlo_tab(processor, players_df: pd.DataFrame):
                         gw = processor.fetcher.get_current_gameweek()
                         picks_data = processor.fetcher.get_team_picks(team_id, gw)
 
-                        if isinstance(picks_data, dict) and "picks" in picks_data:
+                        if not picks_data or not isinstance(picks_data, dict):
+                            st.error(f"Failed to fetch team data for ID {team_id}. Please verify your Team ID.")
+                        elif "picks" not in picks_data:
+                            st.error(f"No squad data found for Team ID {team_id}. Team may be private or ID is invalid.")
+                        else:
                             picks = picks_data["picks"]
                             starting_ids = [p["element"] for p in picks if p.get("position", p.get("multiplier", 0)) <= 11 or p.get("multiplier", 0) > 0][:11]
                             captain_id = next((p["element"] for p in picks if p.get("is_captain", False)), starting_ids[0] if starting_ids else 0)
@@ -110,8 +114,6 @@ def render_monte_carlo_tab(processor, players_df: pd.DataFrame):
                             st.session_state["mc_portfolio"] = portfolio
                             st.session_state["mc_portfolio_ids"] = starting_ids
                             st.session_state["mc_captain_id"] = captain_id
-                        else:
-                            st.error("Could not parse squad data. Check your Team ID.")
                     except ImportError:
                         st.error("Monte Carlo module not available. Install: pip install scipy")
                     except Exception as e:

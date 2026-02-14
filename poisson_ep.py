@@ -689,6 +689,8 @@ def calculate_poisson_ep_for_dataframe(
         total_xp_cs = 0.0
         total_xp_bonus = 0.0
         first_opp_xga = player_fixtures[0].get('opp_xGA_per90', LEAGUE_AVG_XGA_PER_MATCH)
+        first_opp_xg = player_fixtures[0].get('opp_xG_per90', LEAGUE_AVG_XG_PER_MATCH)
+        total_p_cs = 0.0
         
         for fx in player_fixtures:
             opponent_dict = {
@@ -703,6 +705,10 @@ def calculate_poisson_ep_for_dataframe(
             total_xp_assists += fx_result.get('xp_assists', 0)
             total_xp_cs += fx_result.get('xp_cs', 0)
             total_xp_bonus += fx_result.get('xp_bonus', 0)
+            total_p_cs += fx_result.get('p_cs', 0)
+        
+        # Average p_cs across fixtures (for CBIT calculations)
+        avg_p_cs = total_p_cs / len(player_fixtures) if player_fixtures else 0.0
         
         results.append({
             'player_id': player.get('id', 0),
@@ -711,8 +717,10 @@ def calculate_poisson_ep_for_dataframe(
             'xp_assists': round(total_xp_assists, 2),
             'xp_cs': round(total_xp_cs, 2),
             'xp_bonus': round(total_xp_bonus, 2),
+            'p_cs': round(avg_p_cs, 3),
             'fixture_count': len(player_fixtures),
             'opp_xGA_per90': round(first_opp_xga, 3),
+            'opp_xG_per90': round(first_opp_xg, 3),
         })
     
     # ── Merge results back to DataFrame ──
@@ -723,7 +731,7 @@ def calculate_poisson_ep_for_dataframe(
         ep_df = ep_df.set_index('player_id')
         for col in ['xp_total', 'xp_goals', 'xp_assists', 'xp_cs', 'xp_bonus',
                      'lambda_attack', 'lambda_creative', 'p_cs', 'p_cbit',
-                     'opp_xGA_per90']:
+                     'opp_xGA_per90', 'opp_xG_per90']:
             if col in ep_df.columns:
                 result_df[f'poisson_{col}'] = result_df['id'].map(ep_df[col]).fillna(0)
         

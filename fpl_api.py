@@ -283,71 +283,121 @@ class FPLDataProcessor:
     
     def calculate_cbit_metrics(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Calculate CBIT (Clearances, Blocks, Interceptions, Tackles) metrics.
-        This is the new 2025/26 "DefCon" scoring system.
+        Calculate enhanced CBIT metrics (Clearances, Blocks, Interceptions, Tackles).
+        2025/26 "DefCon" scoring: DEF threshold=10, others=12 for +2 bonus.
         
-        Includes:
-        - cbit_per_90: Estimated defensive actions per 90 minutes
-        - cbit_propensity: Probability of hitting CBIT threshold (0-1)
-        - cbit_hit_rate: % of games where CBIT threshold was likely met
-        - cbit_safety_floor: Minimum expected points from defensive actions
+        New metrics:
+        - cbit_aa90: Average (estimated) actions per 90 minutes
+        - cbit_dtt: Distance to threshold (negative = below, positive = above)
+        - cbit_prob: Poisson probability of hitting CBIT threshold (0-1)
+        - cbit_hit_rate: Season % estimate of games hitting threshold
+        - cbit_floor: Defensive floor score = xCS × 4 + P(CBIT) × 2
+        - cbit_matchup: Opponent givingness factor (higher = more actions expected)
+        - cbit_score: Composite CBIT value metric for display
         """
+        from scipy.stats import poisson
         df = df.copy()
         
-        # Estimate CBIT from available stats
-        # CBIT applies mainly to GKP/DEF - use position-aware estimation
-        # Attackers get no CBIT bonus; DEF/GKP get CS-based estimation
-        is_defender = df['position'].isin(['GKP', 'DEF'])
-        
-        # For DEF/GKP: CS is a good proxy for strong defensive performance
-        df['estimated_cbit'] = np.where(
-            is_defender,
-            df['clean_sheets'].fillna(0) * 2.5,
-            0.0  # MID/FWD don't benefit from CBIT
-        )
-        
-        # CBIT per 90 minutes
-        df['cbit_per_90'] = np.where(
-            df['minutes'] > 0,
-            (df['estimated_cbit'] / df['minutes']) * 90,
-            0
-        )
-        
-        # Games played estimate
-        df['_games_played'] = (df['minutes'] / 90).clip(lower=0)
-        
-        # CBIT Propensity Score (probability of hitting threshold)
-        # Only applies to DEF/GKP; MID/FWD get 0
-        is_defender = df['position'].isin(['GKP', 'DEF'])
-        max_cbit = df.loc[is_defender, 'cbit_per_90'].max() if is_defender.any() and df.loc[is_defender, 'cbit_per_90'].max() > 0 else 1
-        df['cbit_propensity'] = np.where(
-            is_defender,
-            (df['cbit_per_90'] / max_cbit).clip(0, 1),
-            0.0
-        )
-        
-        # CBIT Hit Rate: estimate % of games where threshold was met
-        # DEF threshold = 10, MID/FWD threshold = 12
+        # Position-based thresholds
         threshold_map = {'GKP': 12, 'DEF': 10, 'MID': 12, 'FWD': 12}
-        df['_cbit_threshold'] = df['position'].map(threshold_map).fillna(12)
+        df['cbit_threshold'] = df['position'].map(threshold_map).fillna(12).astype(int)
         
-        # Use normalized propensity as hit rate proxy
-        # High propensity + consistent minutes = high hit rate
-        minutes_consistency = (df['minutes'] / (df['_games_played'].clip(lower=1) * 90)).clip(0, 1)
-        df['cbit_hit_rate'] = (df['cbit_propensity'] * minutes_consistency).clip(0, 1)
+        # Games played
+        df['_games'] = (df['minutes'].fillna(0) / 90).clip(lower=0.1)
         
-        # Safety Floor: minimum expected points from CBIT (2 pts × hit_rate)
-        df['cbit_safety_floor'] = df['cbit_hit_rate'] * CBIT_BONUS_POINTS
+        # ── Estimate Average Actions per 90 (AA90) ──
+        # FPL API doesn't provide tackles/interceptions/clearances/blocks directly
+        # Use position-based baseline + clean sheet rate as defensive solidity proxy
+        cs_rate = (df['clean_sheets'].fillna(0) / df['_games']).clip(0, 1)
         
-        # Bonus points expectation from CBIT
-        df['cbit_bonus_expected'] = df['cbit_propensity'] * CBIT_BONUS_POINTS
+        # Base defensive action rates by position (empirical estimates)
+        base_aa90 = {
+            'GKP': 4.0,   # GKs get fewer field actions but more saves
+            'DEF': 12.0,  # CBs average ~12 actions, WBs slightly less
+            'MID': 7.0,   # CDMs higher, CAMs lower
+            'FWD': 3.0,   # Minimal defensive work
+        }
+        df['_base_aa90'] = df['position'].map(base_aa90).fillna(5.0)
         
-        # Value insight: defenders with high cbit_hit_rate but low CS probability
-        # are often better value than volatile wing-backs
-        cs_rate = df.get('clean_sheets_per_90', df['clean_sheets'] / df['_games_played'].clip(lower=1)).fillna(0)
-        df['cbit_value_edge'] = df['cbit_hit_rate'] - cs_rate.clip(0, 1)
+        # Adjust by CS rate (good defenders do more defensive work in games they keep CS)
+        # Also adjust by minutes consistency (rotation = less reliable)
+        mins_consistency = (df['minutes'] / (df['_games'] * 90).clip(lower=1)).clip(0, 1)
         
-        df.drop(columns=['_games_played', '_cbit_threshold'], inplace=True, errors='ignore')
+        # For DEF: high CS rate correlates with solid defensive actions
+        # Scaling: 0.5 CS rate → +20% actions, 0.0 CS rate → -10%
+        cs_adjustment = np.where(
+            df['position'].isin(['GKP', 'DEF']),
+            1.0 + (cs_rate - 0.3) * 0.5,  # 30% CS is baseline
+            1.0  # No adjustment for MID/FWD
+        )
+        
+        df['cbit_aa90'] = (df['_base_aa90'] * cs_adjustment * mins_consistency).round(1)
+        
+        # ── Distance to Threshold (DTT) ──
+        # Positive = exceeds threshold, Negative = below threshold
+        # Players near 0 are "high variance" CBIT assets
+        df['cbit_dtt'] = (df['cbit_aa90'] - df['cbit_threshold']).round(1)
+        
+        # ── CBIT Probability (Poisson) ──
+        # P(actions >= threshold) = 1 - CDF(threshold - 1)
+        def calc_cbit_prob(aa90, threshold):
+            if aa90 <= 0:
+                return 0.0
+            return 1 - poisson.cdf(threshold - 1, aa90)
+        
+        df['cbit_prob'] = df.apply(
+            lambda r: calc_cbit_prob(r['cbit_aa90'], r['cbit_threshold']), axis=1
+        ).clip(0, 1).round(3)
+        
+        # ── Hit Rate (Season %) ──
+        # Combination of probability and minutes consistency
+        df['cbit_hit_rate'] = (df['cbit_prob'] * mins_consistency).round(2)
+        
+        # ── Clean Sheet Probability (xCS) ──
+        # Prefer Poisson p_cs from fixture-based calculation, fallback to CS rate
+        if 'poisson_p_cs' in df.columns:
+            p_cs = pd.to_numeric(df['poisson_p_cs'], errors='coerce').fillna(cs_rate)
+            df['_xcs'] = p_cs.clip(0, 0.7)  # Cap at 70%
+        else:
+            df['_xcs'] = cs_rate.clip(0, 0.6)  # Cap at 60%
+        
+        # ── Defensive Floor Score ──
+        # xP_floor = xCS × 4pts + P(CBIT) × 2pts
+        cs_pts = df['position'].map({'GKP': 4, 'DEF': 4, 'MID': 1, 'FWD': 0}).fillna(0)
+        df['cbit_floor'] = (df['_xcs'] * cs_pts + df['cbit_prob'] * CBIT_BONUS_POINTS).round(2)
+        
+        # ── Opponent Givingness / Matchup Factor ──
+        # Teams with high xG create more defensive action opportunities
+        # High xG opponents = more shots to block/clear/tackle
+        if 'poisson_opp_xG_per90' in df.columns:
+            opp_xg = pd.to_numeric(df['poisson_opp_xG_per90'], errors='coerce').fillna(1.35)
+            league_avg_xg = opp_xg[opp_xg > 0].mean() or 1.35
+            df['cbit_matchup'] = (opp_xg / league_avg_xg).clip(0.5, 2.0).round(2)
+        else:
+            df['cbit_matchup'] = 1.0
+        
+        # Adjust AA90 and probability by matchup
+        df['cbit_aa90_adj'] = (df['cbit_aa90'] * df['cbit_matchup']).round(1)
+        df['cbit_prob_adj'] = df.apply(
+            lambda r: calc_cbit_prob(r['cbit_aa90_adj'], r['cbit_threshold']), axis=1
+        ).clip(0, 1).round(3)
+        
+        # ── Composite CBIT Score (for display) ──
+        # Weighted: 40% prob, 30% floor, 20% consistency, 10% matchup bonus
+        df['cbit_score'] = (
+            df['cbit_prob'] * 0.4 * 10 +
+            df['cbit_floor'] * 0.3 +
+            df['cbit_hit_rate'] * 0.2 * 10 +
+            (df['cbit_matchup'] - 1) * 0.1 * 5
+        ).round(2)
+        
+        # ── Legacy compatibility ──
+        df['cbit_propensity'] = df['cbit_prob']
+        df['cbit_bonus_expected'] = (df['cbit_prob'] * CBIT_BONUS_POINTS).round(2)
+        df['cbit_safety_floor'] = df['cbit_floor']
+        
+        # Clean up temp columns
+        df.drop(columns=['_games', '_base_aa90', '_xcs'], inplace=True, errors='ignore')
         
         return df
     
@@ -587,26 +637,43 @@ class FPLDataProcessor:
         # Initialize expected_points from FPL data first
         df['expected_points'] = df['ep_next_num'].copy()
         
+        # Import streamlit for session state access (handle all exceptions)
+        st = None
+        try:
+            import streamlit as st
+        except Exception:
+            pass
+        
         # ── Understat xG/xA enrichment ──
         try:
             from understat_api import enrich_with_understat
             df = enrich_with_understat(df)
-        except Exception:
-            pass  # Understat unavailable
+            if st is not None:
+                st.session_state['_understat_active'] = True
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Understat enrichment failed: {e}")
+            if st is not None:
+                st.session_state['_understat_active'] = False
         
         # ── Poisson-based Expected Points (professional-grade model) ──
         try:
-            import streamlit as st
-            from poisson_ep import calculate_poisson_ep_for_dataframe
-            # Pass real Understat team stats if available
-            team_stats = st.session_state.get('_understat_team_stats', None)
-            df = calculate_poisson_ep_for_dataframe(df, fixtures, current_gw, team_stats=team_stats)
-            # Use Poisson EP as primary expected_points if available
-            if 'expected_points_poisson' in df.columns:
-                # Blend: 70% Poisson model, 30% FPL baseline for stability
-                poisson_ep = pd.to_numeric(df['expected_points_poisson'], errors='coerce').fillna(0)
-                base_ep = pd.to_numeric(df['ep_next_num'], errors='coerce').fillna(0)
-                df['expected_points'] = (poisson_ep * 0.7 + base_ep * 0.3).clip(lower=0)
+            use_poisson = st.session_state.get('use_poisson_xp', True) if st is not None else True
+            
+            if use_poisson:
+                from poisson_ep import calculate_poisson_ep_for_dataframe
+                # Pass real Understat team stats if available
+                team_stats = st.session_state.get('_understat_team_stats', None) if st is not None else None
+                df = calculate_poisson_ep_for_dataframe(df, fixtures, current_gw, team_stats=team_stats)
+                # Use Poisson EP as primary expected_points if available
+                if 'expected_points_poisson' in df.columns:
+                    # Blend: 70% Poisson model, 30% FPL baseline for stability
+                    poisson_ep = pd.to_numeric(df['expected_points_poisson'], errors='coerce').fillna(0)
+                    base_ep = pd.to_numeric(df['ep_next_num'], errors='coerce').fillna(0)
+                    df['expected_points'] = (poisson_ep * 0.7 + base_ep * 0.3).clip(lower=0)
+            else:
+                # Use raw FPL ep_next
+                df['expected_points'] = df['ep_next_num']
         except Exception as e:
             import logging
             logging.getLogger(__name__).warning(f"Poisson EP calculation failed: {e}")

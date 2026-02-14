@@ -78,7 +78,7 @@ class MonteCarloEngine:
         
         # Ensure numeric columns
         df['form'] = pd.to_numeric(df.get('form', 2), errors='coerce').fillna(2.0)
-        df['ep_next'] = pd.to_numeric(df.get('ep_next', 2), errors='coerce').fillna(2.0)
+        df['ep_next'] = pd.to_numeric(df.get('expected_points', df.get('ep_next', 2)), errors='coerce').fillna(2.0)
         df['total_points'] = pd.to_numeric(df.get('total_points', 0), errors='coerce').fillna(0)
         df['minutes'] = pd.to_numeric(df.get('minutes', 0), errors='coerce').fillna(0)
         
