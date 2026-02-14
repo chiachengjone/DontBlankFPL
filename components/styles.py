@@ -413,3 +413,118 @@ def render_rule_card(value: str, label: str):
         <div class="rule-label">{label}</div>
     </div>
     ''', unsafe_allow_html=True)
+
+
+def render_stat_card(value: str, label: str, color: str = '#fff', sub_text: str = None):
+    """Render a consistent stat/metric card following the theme.
+    
+    Args:
+        value: The main value to display
+        label: The label above the value
+        color: Color for the value text (default white)
+        sub_text: Optional smaller text below the value
+    """
+    sub_html = f'<div style="color:#6b6b6b;font-size:0.75rem;margin-top:0.25rem;">{sub_text}</div>' if sub_text else ''
+    st.markdown(f'''
+    <div style="background:#141416;border:1px solid #2a2a2e;border-radius:10px;padding:1rem;text-align:center;">
+        <div style="color:#6b6b6b;font-size:0.72rem;font-weight:500;text-transform:uppercase;letter-spacing:0.04em;">{label}</div>
+        <div style="color:{color};font-size:1.5rem;font-weight:700;font-family:'JetBrains Mono',monospace;letter-spacing:-0.03em;margin-top:0.25rem;">{value}</div>
+        {sub_html}
+    </div>
+    ''', unsafe_allow_html=True)
+
+
+def render_player_card(name: str, team: str, position: str, price: str, 
+                       metrics: list = None, badge: str = None, badge_color: str = '#22c55e',
+                       border_color: str = '#2a2a2e'):
+    """Render a consistent player card.
+    
+    Args:
+        name: Player web_name
+        team: Team name
+        position: Position code (GKP/DEF/MID/FWD)
+        price: Price string (e.g. '£12.5m')
+        metrics: List of dicts with 'label', 'value', 'color' keys
+        badge: Optional badge text (e.g. 'DIFFERENTIAL')
+        badge_color: Color for the badge
+        border_color: Border highlight color
+    """
+    pos_colors = {'GKP': '#3b82f6', 'DEF': '#22c55e', 'MID': '#f59e0b', 'FWD': '#ef4444'}
+    pos_color = pos_colors.get(position, '#888')
+    
+    badge_html = f'<span style="color:{badge_color};font-size:0.65rem;font-weight:600;margin-left:0.5rem;text-transform:uppercase;">{badge}</span>' if badge else ''
+    
+    metrics_html = ''
+    if metrics:
+        metrics_html = '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:0.5rem;margin-top:0.75rem;text-align:center;">'
+        for m in metrics:
+            metrics_html += f'''
+            <div>
+                <div style="color:#6b6b6b;font-size:0.65rem;text-transform:uppercase;">{m["label"]}</div>
+                <div style="color:{m.get("color", "#fff")};font-weight:600;font-family:'JetBrains Mono',monospace;">{m["value"]}</div>
+            </div>'''
+        metrics_html += '</div>'
+    
+    st.markdown(f'''
+    <div style="background:#141416;border:1px solid {border_color};border-radius:10px;padding:1rem;text-align:center;">
+        <div style="color:{pos_color};font-size:0.65rem;font-weight:600;text-transform:uppercase;">{position}</div>
+        <div style="color:#e8e8e8;font-size:1.1rem;font-weight:700;margin:0.25rem 0;">{name}{badge_html}</div>
+        <div style="color:#6b6b6b;font-size:0.8rem;">{team} | {price}</div>
+        {metrics_html}
+    </div>
+    ''', unsafe_allow_html=True)
+
+
+def render_fixture_badge(gw: int, opponent: str, venue: str, fdr: int):
+    """Render a fixture badge with FDR coloring.
+    
+    Args:
+        gw: Gameweek number
+        opponent: Opponent short name
+        venue: 'H' or 'A'
+        fdr: Fixture difficulty rating (1-5)
+    """
+    fdr_colors = {
+        1: '#22c55e',  # Very easy
+        2: '#4ade80',  # Easy
+        3: '#f59e0b',  # Medium
+        4: '#ef4444',  # Hard
+        5: '#dc2626'   # Very hard
+    }
+    color = fdr_colors.get(int(fdr), '#888')
+    
+    st.markdown(f'''
+    <div style="background:{color};border-radius:8px;padding:0.5rem;text-align:center;">
+        <div style="color:#fff;font-size:0.65rem;font-weight:500;">GW{gw}</div>
+        <div style="color:#fff;font-size:0.9rem;font-weight:600;">{opponent}</div>
+        <div style="color:rgba(255,255,255,0.8);font-size:0.65rem;">({venue})</div>
+    </div>
+    ''', unsafe_allow_html=True)
+
+
+def render_summary_stat(value: str, label: str, color: str = '#fff', icon: str = None):
+    """Render a compact summary stat for dashboards.
+    
+    Args:
+        value: The value to display
+        label: Label for the stat
+        color: Color for the value
+        icon: Optional emoji/icon before label
+    """
+    icon_html = f'{icon} ' if icon else ''
+    st.markdown(f'''
+    <div style="background:#141416;border:1px solid #2a2a2e;border-radius:8px;padding:0.75rem;text-align:center;">
+        <div style="color:#6b6b6b;font-size:0.7rem;text-transform:uppercase;">{icon_html}{label}</div>
+        <div style="color:{color};font-size:1.25rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{value}</div>
+    </div>
+    ''', unsafe_allow_html=True)
+
+
+def render_divider():
+    """Render a consistent divider."""
+    st.markdown('<hr style="border:none;border-top:1px solid #1e1e21;margin:1.5rem 0;">', unsafe_allow_html=True)
+
+
+def render_subsection_title(title: str):
+    """Render a subsection title (smaller than section-title)."""
+    st.markdown(f'<p style="color:#e8e8e8;font-size:1rem;font-weight:600;margin:1.5rem 0 0.75rem 0;">{title}</p>', unsafe_allow_html=True)

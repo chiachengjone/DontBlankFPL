@@ -20,6 +20,11 @@ from tabs.analytics import render_analytics_tab
 from tabs.ml_tab import render_ml_tab
 from tabs.montecarlo_tab import render_monte_carlo_tab
 from tabs.genetic_tab import render_genetic_tab
+from tabs.captain_tab import render_captain_tab
+from tabs.team_analysis_tab import render_team_analysis_tab
+from tabs.price_predictor_tab import render_price_predictor_tab
+from tabs.history_tab import render_history_tab
+from tabs.wildcard_tab import render_wildcard_tab
 
 # Page configuration
 st.set_page_config(
@@ -140,11 +145,16 @@ def main():
             )
     
     # Navigation tabs
-    tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12 = st.tabs([
         "Dashboard",
         "Strategy", 
         "Squad Builder", 
         "Analytics", 
+        "Captain",
+        "Teams",
+        "Prices",
+        "Wildcard",
+        "History",
         "Rival Scout",
         "ML Predictions",
         "Monte Carlo",
@@ -164,15 +174,30 @@ def main():
         render_analytics_tab(processor, players_df)
     
     with tab4:
-        render_rival_tab(processor, players_df)
+        render_captain_tab(processor, players_df)
     
     with tab5:
-        render_ml_tab(processor, players_df)
+        render_team_analysis_tab(processor, players_df)
     
     with tab6:
-        render_monte_carlo_tab(processor, players_df)
+        render_price_predictor_tab(processor, players_df)
     
     with tab7:
+        render_wildcard_tab(processor, players_df)
+    
+    with tab8:
+        render_history_tab(processor, players_df, fetcher)
+    
+    with tab9:
+        render_rival_tab(processor, players_df)
+    
+    with tab10:
+        render_ml_tab(processor, players_df)
+    
+    with tab11:
+        render_monte_carlo_tab(processor, players_df)
+    
+    with tab12:
         render_genetic_tab(processor, players_df)
 
 

@@ -14,37 +14,6 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
 
     st.markdown('<p class="section-title">ML Predictions</p>', unsafe_allow_html=True)
     
-    # ── Intro section for first-time users ──
-    st.markdown("""
-    <style>
-    .ml-help-box {
-        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-        border: 1px solid #3b82f6;
-        border-radius: 8px;
-        padding: 16px;
-        margin-bottom: 16px;
-    }
-    .ml-help-box h4 { color: #60a5fa; margin-bottom: 8px; }
-    .ml-help-box p { color: #9ca3af; font-size: 14px; margin: 4px 0; }
-    </style>
-    """, unsafe_allow_html=True)
-    
-    with st.expander("How does ML Predictions work?", expanded=False):
-        st.markdown("""
-        **ML Predictions uses machine learning to forecast player points.**
-        
-        | Column | Description |
-        |--------|-------------|
-        | **ML Pred** | ML model's expected points for selected gameweeks |
-        | **FPL EP** | Raw FPL API estimate (official FPL prediction) |
-        | **vs FPL** | ML prediction minus FPL's estimate |
-        | **Poisson EP** | Our Poisson model estimate (xG/xA based) |
-        | **vs Poisson** | ML prediction minus Poisson estimate |
-        | **Range** | Min-Max predicted range (tighter = more certain) |
-        
-        **Best used for:** Captain picks, finding undervalued players, validating transfers
-        """)
-    
     # ── Controls ──
     st.markdown("---")
     

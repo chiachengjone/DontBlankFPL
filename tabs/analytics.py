@@ -166,14 +166,15 @@ def render_player_table(df: pd.DataFrame):
         'cbit_score': 'CBIT',
     }
     
-    display_df = df[display_cols].head(50).copy()
+    # Show all players in scrollable table
+    display_df = df[display_cols].copy()
     
     renamed = display_df.rename(columns=rename)
     # Ensure no duplicate column names (Styler requirement)
     renamed = renamed.loc[:, ~renamed.columns.duplicated()]
     
     st.markdown(f'<p class="section-title">Players ({len(df)} found)</p>', unsafe_allow_html=True)
-    st.dataframe(style_df_with_injuries(renamed), hide_index=True, use_container_width=True)
+    st.dataframe(style_df_with_injuries(renamed), hide_index=True, use_container_width=True, height=600)
 
 
 def render_points_distribution(players_df: pd.DataFrame):
@@ -254,8 +255,12 @@ def render_value_by_position(players_df: pd.DataFrame):
 
 def render_cbit_analysis(players_df: pd.DataFrame):
     """Render CBIT (Clearances, Blocks, Interceptions, Tackles) analysis for DEF/GKP."""
-    st.markdown('<p class="section-title">CBIT Analysis (Defenders)</p>', unsafe_allow_html=True)
-    st.caption("2025/26 DefCon scoring: DEF needs 10+ actions, GKP/MID/FWD need 12+ for +2 pts bonus")
+    cbit_hdr_cols = st.columns([3, 1])
+    with cbit_hdr_cols[0]:
+        st.markdown('<p class="section-title">CBIT Analysis (Defenders)</p>', unsafe_allow_html=True)
+        st.caption("2025/26 DefCon scoring: DEF needs 10+ actions, GKP/MID/FWD need 12+ for +2 pts bonus")
+    with cbit_hdr_cols[1]:
+        show_all_cbit = st.button("Show All", key="show_all_cbit", help="Show all defenders sorted by CBIT score")
     
     # Show chart
     fig = create_cbit_chart(players_df)
@@ -273,7 +278,12 @@ def render_cbit_analysis(players_df: pd.DataFrame):
             df[col] = safe_numeric(df[col])
         
         df['now_cost'] = safe_numeric(df['now_cost'], 5)
-        df = df.nlargest(12, 'cbit_score' if 'cbit_score' in df.columns else 'cbit_aa90')
+        
+        if show_all_cbit or st.session_state.get('cbit_show_all', False):
+            st.session_state['cbit_show_all'] = True
+            df = df.sort_values('cbit_score' if 'cbit_score' in df.columns else 'cbit_aa90', ascending=False)
+        else:
+            df = df.nlargest(20, 'cbit_score' if 'cbit_score' in df.columns else 'cbit_aa90')
         
         if not df.empty:
             team_col = 'team_name' if 'team_name' in df.columns else 'team'
@@ -284,7 +294,8 @@ def render_cbit_analysis(players_df: pd.DataFrame):
             display_df['Floor'] = display_df['Floor'].apply(lambda x: f"{x:.1f}")
             display_df['DTT'] = display_df['DTT'].apply(lambda x: f"{x:+.1f}")
             
-            st.dataframe(style_df_with_injuries(display_df, players_df), hide_index=True, use_container_width=True, key='cbit_table')
+            table_height = 600 if st.session_state.get('cbit_show_all', False) else min(400, len(display_df) * 40 + 40)
+            st.dataframe(style_df_with_injuries(display_df, players_df), hide_index=True, use_container_width=True, height=table_height, key='cbit_table')
     else:
         st.info("CBIT metrics unavailable - requires defensive action data")
 
@@ -313,15 +324,25 @@ def render_advanced_metrics(players_df: pd.DataFrame):
     
     with am1:
         # EPPM: Effective Points Per Million
-        st.markdown("**Top EPPM (Value Picks)**")
-        st.caption("Highest expected points per million — best bang for your buck")
+        hdr_cols = st.columns([3, 1])
+        with hdr_cols[0]:
+            st.markdown("**Top EPPM (Value Picks)**")
+            st.caption("Highest expected points per million — best bang for your buck")
+        with hdr_cols[1]:
+            show_all_eppm = st.button("Show All", key="show_all_eppm", help="Show all players sorted by EPPM")
         
-        eppm_df = df.nlargest(15, 'eppm')[['web_name', 'team_name', 'position', 'now_cost', 'expected_points', 'eppm', 'selected_by_percent']]
-        eppm_df = eppm_df.copy()
+        if show_all_eppm or st.session_state.get('eppm_show_all', False):
+            st.session_state['eppm_show_all'] = True
+            eppm_df = df.sort_values('eppm', ascending=False)[['web_name', 'team_name', 'position', 'now_cost', 'expected_points', 'eppm', 'selected_by_percent']].copy()
+        else:
+            eppm_df = df.nlargest(20, 'eppm')[['web_name', 'team_name', 'position', 'now_cost', 'expected_points', 'eppm', 'selected_by_percent']].copy()
+        
         eppm_df.columns = ['Player', 'Team', 'Pos', 'Price', 'EP', 'EPPM', 'Own%']
         for c in ['Price', 'EP', 'EPPM', 'Own%']:
             eppm_df[c] = eppm_df[c].round(2)
-        st.dataframe(style_df_with_injuries(eppm_df), hide_index=True, use_container_width=True)
+        
+        table_height = 600 if st.session_state.get('eppm_show_all', False) else min(400, len(eppm_df) * 40 + 40)
+        st.dataframe(style_df_with_injuries(eppm_df), hide_index=True, use_container_width=True, height=table_height)
         
         # EPPM by position chart
         pos_colors = {'GKP': '#3b82f6', 'DEF': '#22c55e', 'MID': '#f59e0b', 'FWD': '#ef4444'}
@@ -478,11 +499,20 @@ def render_advanced_metrics(players_df: pd.DataFrame):
     
     with am3:
         # Engineered Differentials: RRI-based smart buys
-        st.markdown("**Engineered Differentials (RRI)**")
-        st.caption("Low ownership (<10%) + High net-points gain + Positive momentum — Smart Buys")
+        diff_hdr_cols = st.columns([3, 1])
+        with diff_hdr_cols[0]:
+            st.markdown("**Engineered Differentials (RRI)**")
+            st.caption("Low ownership (<10%) + High net-points gain + Positive momentum — Smart Buys")
+        with diff_hdr_cols[1]:
+            show_all_diff = st.button("Show All", key="show_all_diff", help="Show all differentials")
         
         eng_sort = 'engineered_diff' if 'engineered_diff' in df.columns else 'differential_gain'
-        eng_df = df[df['selected_by_percent'] < 10].nlargest(12, eng_sort)
+        
+        if show_all_diff or st.session_state.get('diff_show_all', False):
+            st.session_state['diff_show_all'] = True
+            eng_df = df[df['selected_by_percent'] < 10].sort_values(eng_sort, ascending=False)
+        else:
+            eng_df = df[df['selected_by_percent'] < 10].nlargest(20, eng_sort)
         if not eng_df.empty:
             eng_display_cols = ['web_name', 'team_name', 'position', 'now_cost', 'expected_points',
                                 'differential_gain', 'diff_roi', 'eo_top10k', 'diff_profile', 'selected_by_percent', eng_sort]
@@ -498,7 +528,9 @@ def render_advanced_metrics(players_df: pd.DataFrame):
             for c in ['Price', 'EP', 'xNP', 'ROI/m', 'EO10k%', 'Own%', 'Score']:
                 if c in display_eng.columns:
                     display_eng[c] = display_eng[c].round(2)
-            st.dataframe(style_df_with_injuries(display_eng), hide_index=True, use_container_width=True)
+            
+            table_height = 600 if st.session_state.get('diff_show_all', False) else min(400, len(display_eng) * 40 + 40)
+            st.dataframe(style_df_with_injuries(display_eng), hide_index=True, use_container_width=True, height=table_height)
         else:
             st.info("No engineered differentials found")
         

@@ -2,6 +2,7 @@
 
 import pandas as pd
 import numpy as np
+import unicodedata
 from typing import Dict, List
 
 from config import (
@@ -12,6 +13,47 @@ from config import (
     ROTATION_MODERATE_PCT,
     UNAVAILABLE_STATUSES,
 )
+
+
+def normalize_name(name: str) -> str:
+    """
+    Normalize player name by removing accents and special characters.
+    E.g., 'João Pedro' → 'Joao Pedro', 'Estêvão' → 'Estevao'
+    """
+    if not name:
+        return ''
+    # Normalize to NFD (decomposed form) then filter out combining marks
+    normalized = unicodedata.normalize('NFD', name)
+    # Remove combining diacritical marks (accents)
+    ascii_name = ''.join(c for c in normalized if unicodedata.category(c) != 'Mn')
+    return ascii_name
+
+
+def search_players(df: pd.DataFrame, query: str, limit: int = 10) -> pd.DataFrame:
+    """
+    Search players by name with accent normalization.
+    Returns matching players sorted by ownership (most popular first).
+    """
+    if not query or len(query) < 1:
+        return pd.DataFrame()
+    
+    query_normalized = normalize_name(query.lower().strip())
+    
+    # Create normalized name column for matching if not exists
+    if 'name_normalized' not in df.columns:
+        df = df.copy()
+        df['name_normalized'] = df['web_name'].apply(lambda x: normalize_name(str(x).lower()))
+    
+    # Match against normalized names
+    mask = df['name_normalized'].str.contains(query_normalized, na=False)
+    matches = df[mask].copy()
+    
+    if not matches.empty:
+        # Sort by ownership (most popular first) for autocomplete
+        if 'selected_by_percent' in matches.columns:
+            matches = matches.sort_values('selected_by_percent', ascending=False)
+    
+    return matches.head(limit)
 
 
 def safe_numeric(series, default=0):
