@@ -100,7 +100,7 @@ def render_team_analysis_tab(processor, players_df: pd.DataFrame):
         team_players = calculate_consensus_ep(team_players, active_models)
         con_label = get_consensus_label(active_models)
         
-        team_players['expected_points'] = safe_numeric(team_players['consensus_ep'])
+        # Use consensus_ep directly - avoid writing to deprecated 'expected_points' column
         team_players['now_cost'] = safe_numeric(team_players['now_cost'], 5)
         team_players['minutes'] = safe_numeric(team_players.get('minutes', pd.Series([0]*len(team_players))))
         team_players['form'] = safe_numeric(team_players.get('form', pd.Series([0]*len(team_players))))
@@ -112,7 +112,7 @@ def render_team_analysis_tab(processor, players_df: pd.DataFrame):
         sum_cols = st.columns(4)
         
         with sum_cols[0]:
-            total_ep = team_players['expected_points'].sum()
+            total_ep = safe_numeric(team_players['consensus_ep']).sum()
             st.markdown(f'''
             <div style="background:#ffffff;border:1px solid rgba(0,0,0,0.04);border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:1rem;text-align:center;">
                 <div style="color:#86868b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Total {con_label}</div>
@@ -121,7 +121,7 @@ def render_team_analysis_tab(processor, players_df: pd.DataFrame):
             ''', unsafe_allow_html=True)
         
         with sum_cols[1]:
-            avg_ep = team_players['expected_points'].mean()
+            avg_ep = safe_numeric(team_players['consensus_ep']).mean()
             st.markdown(f'''
             <div style="background:#ffffff;border:1px solid rgba(0,0,0,0.04);border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:1rem;text-align:center;">
                 <div style="color:#86868b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Avg Player {con_label}</div>
@@ -281,13 +281,13 @@ def render_team_analysis_tab(processor, players_df: pd.DataFrame):
         for i, pos in enumerate(["All", "GKP", "DEF", "MID", "FWD"]):
             with pos_tabs[i]:
                 if pos == "All":
-                    display_players = team_players.nlargest(20, 'expected_points')
+                    display_players = team_players.nlargest(20, 'consensus_ep')
                 else:
-                    display_players = team_players[team_players['position'] == pos].nlargest(10, 'expected_points')
+                    display_players = team_players[team_players['position'] == pos].nlargest(10, 'consensus_ep')
                 
                 if not display_players.empty:
                     # Add fixture ticker to display
-                    display_df = display_players[['web_name', 'position', 'now_cost', 'expected_points', 
+                    display_df = display_players[['web_name', 'position', 'now_cost', 'consensus_ep', 
                                                   'form', 'minutes', 'selected_by_percent']].copy()
                     display_df.columns = ['Player', 'Pos', 'Price', con_label, 'Form', 'Mins', 'EO%']
                     
@@ -360,7 +360,7 @@ def render_team_analysis_tab(processor, players_df: pd.DataFrame):
         st.caption("Best combinations of 2-3 players from this team")
         
         # Calculate stack value
-        viable_stack = team_players[team_players['minutes'] > 200].nlargest(6, 'expected_points')
+        viable_stack = team_players[team_players['minutes'] > 200].nlargest(6, 'consensus_ep')
         
         if len(viable_stack) >= 2:
             stack_options = []
@@ -369,7 +369,7 @@ def render_team_analysis_tab(processor, players_df: pd.DataFrame):
             for i, p1 in viable_stack.head(4).iterrows():
                 for j, p2 in viable_stack.iterrows():
                     if i < j:
-                        combined_ep = p1['expected_points'] + p2['expected_points']
+                        combined_ep = safe_numeric(pd.Series([p1['consensus_ep']])).iloc[0] + safe_numeric(pd.Series([p2['consensus_ep']])).iloc[0]
                         combined_cost = p1['now_cost'] + p2['now_cost']
                         stack_options.append({
                             'players': f"{p1['web_name']} + {p2['web_name']}",

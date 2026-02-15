@@ -266,21 +266,14 @@ def render_history_tab(processor, players_df: pd.DataFrame, fetcher):
             st.session_state[f"manual_transfers_{team_id}"] = get_manual_transfers(team_id, gw_history, fetcher)
     
     m_data = st.session_state[f"manual_transfers_{team_id}"]
-    free_transfers = [d['free'] for d in m_data]
-    hits_paid = [d['hits'] for d in m_data]
+    total_transfers = [d['total'] for d in m_data]
     
     fig2 = go.Figure()
     
-    # Free Transfers (Green)
+    # Total Transfers per GW
     fig2.add_trace(go.Bar(
-        x=gws, y=free_transfers, name='Free Transfers',
-        marker_color='#22c55e', opacity=0.8
-    ))
-    
-    # Paid/Hit Transfers (Red)
-    fig2.add_trace(go.Bar(
-        x=gws, y=hits_paid, name='Paid Hits',
-        marker_color='#ef4444', opacity=0.8
+        x=gws, y=total_transfers, name='Transfers',
+        marker_color='#3b82f6', opacity=0.8
     ))
     
     fig2.update_layout(

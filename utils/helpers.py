@@ -450,7 +450,43 @@ def add_availability_columns(df: pd.DataFrame, players_df: pd.DataFrame = None) 
     return df
 
 
-# ── Consensus EP Logic ──
+# ══════════════════════════════════════════════════════════════════════════════
+# EXPECTED POINTS (xP) COLUMN SEMANTICS - EXPLICIT DEFINITIONS
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# These column names have SPECIFIC meanings. Do NOT use them interchangeably:
+#
+# ┌─────────────────────────┬─────────────────────────────────────────────────────┐
+# │ Column Name             │ Description                                          │
+# ├─────────────────────────┼─────────────────────────────────────────────────────┤
+# │ consensus_ep            │ MODEL xP - Weighted blend (ML 40%, Poisson 40%,     │
+# │                         │ FPL 20%) based on active_models. THE PRIMARY xP.    │
+# │                         │ Use this for all UI displays labeled "Model xP".    │
+# ├─────────────────────────┼─────────────────────────────────────────────────────┤
+# │ avg_consensus_ep        │ MODEL xP / horizon - Per-GW average when horizon>1. │
+# ├─────────────────────────┼─────────────────────────────────────────────────────┤
+# │ expected_points_poisson │ POISSON xP - Single-model output from poisson_ep.py.│
+# │                         │ Statistical model using xG/xA and fixture data.     │
+# ├─────────────────────────┼─────────────────────────────────────────────────────┤
+# │ ml_pred                 │ ML xP - XGBoost ensemble prediction.               │
+# │                         │ Single-GW prediction, scale by horizon if needed.   │
+# ├─────────────────────────┼─────────────────────────────────────────────────────┤
+# │ ep_next / ep_next_num   │ FPL xP - FPL's official expected points estimate.   │
+# │                         │ Raw from API, single-GW only.                       │
+# ├─────────────────────────┼─────────────────────────────────────────────────────┤
+# │ expected_points         │ DEPRECATED - Legacy fallback column. Maps to        │
+# │                         │ expected_points_poisson in most contexts. Avoid.    │
+# └─────────────────────────┴─────────────────────────────────────────────────────┘
+#
+# USAGE RULES:
+# 1. For UI displays labeled "Model xP" → use consensus_ep
+# 2. For Poisson-specific charts → use expected_points_poisson  
+# 3. For ML-specific displays → use ml_pred
+# 4. For FPL official EP → use ep_next_num
+# 5. NEVER use expected_points or ep_next when consensus_ep is available
+#
+# ══════════════════════════════════════════════════════════════════════════════
+
 
 def calculate_consensus_ep(df: pd.DataFrame, active_models: List[str], horizon: int = 1) -> pd.DataFrame:
     """
@@ -462,6 +498,10 @@ def calculate_consensus_ep(df: pd.DataFrame, active_models: List[str], horizon: 
     - FPL: 20%
     
     Weights are normalized based on which models are enabled.
+    
+    This function auto-loads ML predictions from st.session_state['ml_predictions']
+    if ml_pred is not already present in the DataFrame. This ensures consistent
+    Model xP values across ALL tabs without requiring each tab to manually load ML.
     """
     df = df.copy()
     
@@ -493,22 +533,41 @@ def calculate_consensus_ep(df: pd.DataFrame, active_models: List[str], horizon: 
     
     normalized_weights = {m: w/total_weight for m, w in active_weights.items()}
     
-    # Ensure baseline columns exist for calculation
-    # poisson_ep usually from calculate_poisson_ep_for_dataframe
+    # ── Ensure baseline columns exist ──
+    
+    # Poisson EP: from calculate_poisson_ep_for_dataframe output
     if 'poisson_ep' not in df.columns:
         if 'expected_points_poisson' in df.columns:
             df['poisson_ep'] = safe_numeric(df['expected_points_poisson'])
         else:
-            df['poisson_ep'] = safe_numeric(df.get('expected_points', 0))
+            df['poisson_ep'] = safe_numeric(df.get('ep_next_num', df.get('ep_next', 0)))
             
     if 'ep_next_num' not in df.columns:
         df['ep_next_num'] = safe_numeric(df.get('ep_next', 0))
-        
+    
+    # ML Predictions: auto-load from session state if not already in DataFrame
+    # This is the SINGLE source of truth for ML predictions, ensuring all tabs
+    # get the same values without duplicating ML-loading boilerplate.
     if 'ml_pred' not in df.columns:
-        if 'ml_ep' in df.columns:
-            df['ml_pred'] = safe_numeric(df['ml_ep'])
-        else:
-            df['ml_pred'] = df['poisson_ep'] * 0.9 # Fallback if ML not loaded
+        _ml_loaded = False
+        try:
+            import streamlit as _st
+            if 'ml_predictions' in _st.session_state and 'id' in df.columns:
+                ml_preds = _st.session_state['ml_predictions']
+                if ml_preds:
+                    df['ml_pred'] = df['id'].apply(
+                        lambda pid: ml_preds[pid].predicted_points if pid in ml_preds else 0.0
+                    ).round(2)
+                    _ml_loaded = True
+        except Exception:
+            pass
+        
+        if not _ml_loaded:
+            if 'ml_ep' in df.columns:
+                df['ml_pred'] = safe_numeric(df['ml_ep'])
+            else:
+                # True fallback: no ML data available at all
+                df['ml_pred'] = df['poisson_ep'] * 0.9
     
     # Calculation
     consensus = pd.Series(0.0, index=df.index)

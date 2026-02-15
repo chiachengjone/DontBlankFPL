@@ -63,7 +63,6 @@ def render_price_predictor_tab(processor, players_df: pd.DataFrame):
     df['cost_change_event'] = safe_numeric(df.get('cost_change_event', pd.Series([0]*len(df))))
     df['cost_change_start'] = safe_numeric(df.get('cost_change_start', pd.Series([0]*len(df))))
     df['selected_by_percent'] = safe_numeric(df['selected_by_percent'])
-    df['expected_points'] = safe_numeric(df['consensus_ep'])
     
     # Price change thresholds (approximate)
     # Generally: ~80k net transfers for a price change, varies by ownership
@@ -124,7 +123,7 @@ def render_price_predictor_tab(processor, players_df: pd.DataFrame):
     if not rising.empty:
         rise_df = rising.nlargest(15, 'net_transfers')[
             ['web_name', 'team_name', 'position', 'now_cost', 'net_transfers', 
-             'transfers_in_event', 'expected_points', 'selected_by_percent']
+             'transfers_in_event', 'consensus_ep', 'selected_by_percent']
         ].copy()
         rise_df.columns = ['Player', 'Team', 'Pos', 'Price', 'Net Transfers', 'In', con_label, 'EO%']
         
@@ -152,7 +151,7 @@ def render_price_predictor_tab(processor, players_df: pd.DataFrame):
     if not falling.empty:
         fall_df = falling.nsmallest(15, 'net_transfers')[
             ['web_name', 'team_name', 'position', 'now_cost', 'net_transfers',
-             'transfers_out_event', 'expected_points', 'selected_by_percent']
+             'transfers_out_event', 'consensus_ep', 'selected_by_percent']
         ].copy()
         fall_df.columns = ['Player', 'Team', 'Pos', 'Price', 'Net Transfers', 'Out', con_label, 'EO%']
         
@@ -182,7 +181,7 @@ def render_price_predictor_tab(processor, players_df: pd.DataFrame):
     with watch_tabs[0]:
         if not watch_rise.empty:
             watch_r_df = watch_rise.nlargest(10, 'net_transfers')[
-                ['web_name', 'team_name', 'position', 'now_cost', 'net_transfers', 'expected_points']
+                ['web_name', 'team_name', 'position', 'now_cost', 'net_transfers', 'consensus_ep']
             ].copy()
             watch_r_df['threshold_pct'] = (watch_r_df['net_transfers'] / RISE_THRESHOLD * 100).round(0)
             watch_r_df.columns = ['Player', 'Team', 'Pos', 'Price', 'Net Transfers', con_label, '% to Rise']
@@ -203,7 +202,7 @@ def render_price_predictor_tab(processor, players_df: pd.DataFrame):
     with watch_tabs[1]:
         if not watch_fall.empty:
             watch_f_df = watch_fall.nsmallest(10, 'net_transfers')[
-                ['web_name', 'team_name', 'position', 'now_cost', 'net_transfers', 'expected_points']
+                ['web_name', 'team_name', 'position', 'now_cost', 'net_transfers', 'consensus_ep']
             ].copy()
             watch_f_df['threshold_pct'] = (abs(watch_f_df['net_transfers']) / abs(FALL_THRESHOLD) * 100).round(0)
             watch_f_df.columns = ['Player', 'Team', 'Pos', 'Price', 'Net Transfers', con_label, '% to Fall']
@@ -288,7 +287,7 @@ def render_price_predictor_tab(processor, players_df: pd.DataFrame):
         risers = df.nlargest(12, 'cost_change_start')
         if not risers.empty:
             risers_df = risers[['web_name', 'team_name', 'position', 'now_cost', 'cost_change_start', 
-                                'expected_points', 'selected_by_percent']].copy()
+                                'consensus_ep', 'selected_by_percent']].copy()
             risers_df['cost_change_start'] = risers_df['cost_change_start'] / 10
             risers_df.columns = ['Player', 'Team', 'Pos', 'Price', 'Season +/-', con_label, 'EO%']
             
@@ -307,7 +306,7 @@ def render_price_predictor_tab(processor, players_df: pd.DataFrame):
         fallers = df.nsmallest(12, 'cost_change_start')
         if not fallers.empty:
             fallers_df = fallers[['web_name', 'team_name', 'position', 'now_cost', 'cost_change_start',
-                                  'expected_points', 'selected_by_percent']].copy()
+                                  'consensus_ep', 'selected_by_percent']].copy()
             fallers_df['cost_change_start'] = fallers_df['cost_change_start'] / 10
             fallers_df.columns = ['Player', 'Team', 'Pos', 'Price', 'Season +/-', con_label, 'EO%']
             

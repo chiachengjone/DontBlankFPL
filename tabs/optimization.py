@@ -303,7 +303,7 @@ def render_transfer_recommendations(current_squad_df, available_df, ep_col):
         st.markdown("**Recommended OUT** (lowest score in your squad)", unsafe_allow_html=True)
         out_candidates = current_squad_df.nsmallest(5, 'transfer_score')
         out_display = out_candidates[['web_name', 'team_name', 'position', 'now_cost', 'poisson_ep', 'fpl_ep', 'consensus_ep', 'form', 'transfer_score']].copy()
-        out_display.columns = ['Player', 'Team', 'Pos', 'Price', 'Poisson xP', 'FPL xP', 'Model xP', 'Form', 'Score']
+        out_display.columns = ['Player', 'Team', 'Pos', 'Price', 'Poisson xP', 'FPL xP', get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])), 'Form', 'Score']
         st.dataframe(style_df_with_injuries(out_display), hide_index=True, use_container_width=True)
         
         st.markdown("**Recommended IN** (best available)", unsafe_allow_html=True)
@@ -451,14 +451,14 @@ def render_ai_transfer_plan(current_squad_df, available_df, ep_col, free_transfe
             with tc1:
                 st.markdown(f'''<div class="rule-card">
                     <div style="color:#ef4444;font-weight:600;">OUT: {t['out_name']}</div>
-                    <div class="rule-label">{t['out_team']} | {t['out_pos']} | {t['out_price']:.1f}m | Model xP {t['out_ep']:.2f}</div>
+                    <div class="rule-label">{t['out_team']} | {t['out_pos']} | {t['out_price']:.1f}m | {get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl']))} {t['out_ep']:.2f}</div>
                 </div>''', unsafe_allow_html=True)
             with tc2:
                 st.markdown('<div style="text-align:center;padding-top:1rem;color:#fff;font-size:1.5rem;">></div>', unsafe_allow_html=True)
             with tc3:
                 st.markdown(f'''<div class="rule-card">
                     <div style="color:#22c55e;font-weight:600;">IN: {t['in_name']}</div>
-                    <div class="rule-label">{t['in_team']} | {t['in_pos']} | {t['in_price']:.1f}m | Model xP {t['in_ep']:.2f}</div>
+                    <div class="rule-label">{t['in_team']} | {t['in_pos']} | {t['in_price']:.1f}m | {get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl']))} {t['in_ep']:.2f}</div>
                 </div>''', unsafe_allow_html=True)
 
         # Summary
@@ -503,7 +503,7 @@ def render_position_recommendations(available_df, ep_col):
         if not pos_df.empty:
             st.markdown(f"**{pos} Recommendations**")
             display_df = pos_df[['web_name', 'team_name', 'now_cost', 'poisson_ep', 'fpl_ep', 'consensus_ep', 'form', 'selected_by_percent', 'transfer_score']].copy()
-            display_df.columns = ['Player', 'Team', 'Price', 'Poisson xP', 'FPL xP', 'Model xP', 'Form', 'Owned%', 'Score']
+            display_df.columns = ['Player', 'Team', 'Price', 'Poisson xP', 'FPL xP', get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])), 'Form', 'Owned%', 'Score']
             st.dataframe(style_df_with_injuries(display_df), hide_index=True, use_container_width=True)
 
 
@@ -512,7 +512,7 @@ def render_top_picks(available_df, ep_col):
     st.markdown('<p class="section-title">Top 10 Overall Picks</p>', unsafe_allow_html=True)
     top_10 = available_df.nlargest(10, 'transfer_score')
     top_display = top_10[['web_name', 'team_name', 'position', 'now_cost', 'poisson_ep', 'fpl_ep', 'consensus_ep', 'form', 'selected_by_percent', 'transfer_score']].copy()
-    top_display.columns = ['Player', 'Team', 'Pos', 'Price', 'Poisson xP', 'FPL xP', 'Model xP', 'Form', 'Owned%', 'Score']
+    top_display.columns = ['Player', 'Team', 'Pos', 'Price', 'Poisson xP', 'FPL xP', get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])), 'Form', 'Owned%', 'Score']
     st.dataframe(style_df_with_injuries(top_display), hide_index=True, use_container_width=True)
 
 

@@ -6,7 +6,7 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from utils.helpers import safe_numeric, round_df, style_df_with_injuries
+from utils.helpers import safe_numeric, round_df, style_df_with_injuries, get_consensus_label
 
 
 def render_genetic_tab(processor, players_df: pd.DataFrame):
@@ -98,6 +98,7 @@ def render_genetic_tab(processor, players_df: pd.DataFrame):
 
             st.markdown("**Optimized Squad**")
 
+            con_label = get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl']))
             squad_data = []
             for pid in best.squad:
                 match = players_df[players_df["id"] == pid]

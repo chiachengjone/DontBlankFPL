@@ -38,30 +38,29 @@ def generate_wildcard_squad(
     # Full squad requirements (FPL rules)
     squad_req = {'GKP': 2, 'DEF': 5, 'MID': 5, 'FWD': 3}
     
-    # Use Model xP (Consensus)
+    # Use Model xP (Consensus) - consensus_ep is the single source of truth
     active_models = st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])
     players = calculate_consensus_ep(df.copy(), active_models)
-    players['expected_points'] = safe_numeric(players['consensus_ep'])
     players['now_cost'] = safe_numeric(players['now_cost'], 5)
     players['form'] = safe_numeric(players.get('form', pd.Series([0]*len(players))))
     players['selected_by_percent'] = safe_numeric(players['selected_by_percent'])
-    players['eppm'] = players['expected_points'] / players['now_cost'].clip(lower=4)
+    players['eppm'] = safe_numeric(players['consensus_ep']) / players['now_cost'].clip(lower=4)
     players['minutes'] = safe_numeric(players.get('minutes', pd.Series([0]*len(players))))
     
     # Filter to players with minutes (avoid non-starters)
     players = players[players['minutes'] > 90].copy()
     
-    # Sort players based on strategy
+    # Sort players based on strategy - use consensus_ep (Model xP)
     if strategy == 'Max Points':
-        players = players.sort_values('expected_points', ascending=False)
+        players = players.sort_values('consensus_ep', ascending=False)
     elif strategy == 'Value':
         players = players.sort_values('eppm', ascending=False)
     elif strategy == 'Differential':
         # Low ownership + good EP
-        players['diff_score'] = players['expected_points'] * (1 - players['selected_by_percent'] / 100)
+        players['diff_score'] = safe_numeric(players['consensus_ep']) * (1 - players['selected_by_percent'] / 100)
         players = players.sort_values('diff_score', ascending=False)
     else:  # Balanced
-        players['balanced_score'] = players['expected_points'] * 0.6 + players['eppm'] * 2 + players['form'] * 0.2
+        players['balanced_score'] = safe_numeric(players['consensus_ep']) * 0.6 + players['eppm'] * 2 + players['form'] * 0.2
         players = players.sort_values('balanced_score', ascending=False)
     
     # Greedy selection
@@ -230,8 +229,8 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
         
         # Summary stats
         total_cost = squad['now_cost'].sum()
-        total_ep = squad['expected_points'].sum()
-        starting_ep = squad[squad['is_starter']]['expected_points'].sum()
+        total_ep = safe_numeric(squad['consensus_ep']).sum()
+        starting_ep = safe_numeric(squad[squad['is_starter']]['consensus_ep']).sum()
         avg_ownership = squad['selected_by_percent'].mean()
         
         sum_cols = st.columns(4)
@@ -284,15 +283,16 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
             st.markdown(f"**{pos_names[pos]}**")
             
             # Format display
-            display_df = pos_players[['web_name', 'team_name', 'now_cost', 'expected_points', 
+            display_df = pos_players[['web_name', 'team_name', 'now_cost', 'consensus_ep', 
                                       'form', 'selected_by_percent', 'is_starter']].copy()
-            display_df.columns = ['Player', 'Team', 'Price', 'Model xP', 'Form', 'EO%', 'Starting']
+            con_label = get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl']))
+            display_df.columns = ['Player', 'Team', 'Price', con_label, 'Form', 'EO%', 'Starting']
             display_df['Starting'] = display_df['Starting'].apply(lambda x: 'Starting' if x else 'Bench')
             
             st.dataframe(
                 style_df_with_injuries(display_df, players_df, format_dict={
                     'Price': '£{:.1f}m',
-                    'Model xP': '{:.2f}',
+                    con_label: '{:.2f}',
                     'Form': '{:.1f}',
                     'EO%': '{:.1f}%'
                 }),
@@ -328,15 +328,16 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
         # Full squad table
         with st.expander("View Full Squad Table"):
             full_df = squad[['web_name', 'team_name', 'position', 'now_cost', 
-                            'expected_points', 'form', 'selected_by_percent', 'is_starter']].copy()
-            full_df.columns = ['Player', 'Team', 'Pos', 'Price', 'Model xP', 'Form', 'EO%', 'Starter']
+                            'consensus_ep', 'form', 'selected_by_percent', 'is_starter']].copy()
+            con_label = get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl']))
+            full_df.columns = ['Player', 'Team', 'Pos', 'Price', con_label, 'Form', 'EO%', 'Starter']
             full_df = full_df.sort_values(['Starter', 'Pos'], ascending=[False, True])
             full_df['Starter'] = full_df['Starter'].apply(lambda x: 'Yes' if x else 'Bench')
             
             st.dataframe(
                 style_df_with_injuries(full_df, players_df, format_dict={
                     'Price': '£{:.1f}m',
-                    'Model xP': '{:.2f}',
+                    con_label: '{:.2f}',
                     'Form': '{:.1f}',
                     'EO%': '{:.1f}%'
                 }),

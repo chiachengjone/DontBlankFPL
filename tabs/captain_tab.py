@@ -494,7 +494,7 @@ def render_captain_tab(processor, players_df: pd.DataFrame, fetcher):
     st.markdown("### Differential Captain Picks")
     st.caption("Low ownership (<10%) with high ceiling potential")
     
-    diff_captains = viable[(viable['selected_by_percent'] < 10) & (viable['expected_points'] > 3)].nlargest(8, 'captain_score')
+    diff_captains = viable[(viable['selected_by_percent'] < 10) & (safe_numeric(viable['consensus_ep']) > 3)].nlargest(8, 'captain_score')
     
     if not diff_captains.empty:
         diff_cols = st.columns(4)

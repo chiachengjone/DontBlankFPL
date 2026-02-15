@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 
-from utils.helpers import safe_numeric, round_df, style_df_with_injuries, normalize_name
+from utils.helpers import safe_numeric, round_df, style_df_with_injuries, normalize_name, get_consensus_label
 
 
 def render_monte_carlo_tab(processor, players_df: pd.DataFrame):

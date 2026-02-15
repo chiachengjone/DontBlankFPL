@@ -124,9 +124,9 @@ def render_strategy_tab(processor, players_df: pd.DataFrame):
             if len(matched) > 1:
                 st.caption(f"Other matches: {', '.join(matched['web_name'].tolist()[:10])}")
     
-    # Scatter plot
-    if 'expected_points' in df.columns or 'ep_next' in df.columns:
-        fig = create_ep_ownership_scatter(df, pos_filter, search_player=search_player)
+    # Scatter plot - uses consensus_ep (Model xP) calculated at top of tab
+    if 'consensus_ep' in df.columns or 'expected_points_poisson' in df.columns or 'ep_next' in df.columns:
+        fig = create_ep_ownership_scatter(df, pos_filter, search_player=search_player, ep_label=con_label)
         if fig:
             st.plotly_chart(fig, use_container_width=True, key='strategy_ep_ownership_scatter')
     else:
@@ -284,7 +284,7 @@ def render_captain_planning(players_df: pd.DataFrame, processor):
                 <div style="font-size:0.75rem;color:#888;">#{i+1}</div>
                 <div style="font-size:1.1rem;font-weight:600;color:#1d1d1f;">{cap["web_name"]}{injury_badge}</div>
                 <div style="color:#888;font-size:0.85rem;">{cap.get("team_name", "")} | {cap["now_cost"]:.1f}m</div>
-                <div style="color:#ef4444;font-weight:600;margin-top:0.5rem;">{cap["ep"]:.1f} Model xP</div>
+                <div style="color:#ef4444;font-weight:600;margin-top:0.5rem;">{cap["ep"]:.1f} {get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl']))}</div>
                 <div style="color:#888;font-size:0.75rem;">Form: {cap["form"]:.1f} | Own: {cap["selected_by_percent"]:.1f}%</div>
             </div>
             ''', unsafe_allow_html=True)
@@ -541,9 +541,10 @@ def render_fixture_difficulty(processor):
                     if not team_players.empty and 'team_name' in team_players.columns:
                         team_squad = team_players[team_players['team_name'] == selected_team].copy()
                         if not team_squad.empty:
-                            team_squad['ep'] = safe_numeric(team_squad.get('expected_points', team_squad.get('ep_next', pd.Series([0]*len(team_squad)))))
+                            # Use consensus_ep (Model xP) - the weighted blend of ML/Poisson/FPL
+                            team_squad['ep'] = safe_numeric(team_squad.get('consensus_ep', team_squad.get('expected_points_poisson', pd.Series([0]*len(team_squad)))))
                             top_players = team_squad.nlargest(5, 'ep')[['web_name', 'position', 'now_cost', 'ep', 'selected_by_percent']]
-                            top_players.columns = ['Player', 'Pos', 'Price', 'xP', 'Own%']
+                            top_players.columns = ['Player', 'Pos', 'Price', get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])), 'Own%']
                             st.dataframe(top_players, hide_index=True, use_container_width=True)
                 else:
                     st.info("No upcoming fixtures found")

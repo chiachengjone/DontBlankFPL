@@ -383,8 +383,8 @@ def render_value_by_position(players_df: pd.DataFrame, con_ep_label: str):
         st.info("**Value Distribution Formula:** `Value = xP ÷ Price` | Measures efficiency of point generation relative to cost.")
     
     df = players_df.copy()
-    # Use expected_points (advanced EP) if available
-    df['ep'] = safe_numeric(df.get('expected_points', df.get('ep_next', pd.Series([0]*len(df)))))
+    # Use consensus_ep (Model xP) - the weighted blend of ML/Poisson/FPL
+    df['ep'] = safe_numeric(df.get('consensus_ep', df.get('expected_points_poisson', pd.Series([0]*len(df)))))
     df['now_cost'] = safe_numeric(df['now_cost'], 5)
     df['minutes'] = safe_numeric(df.get('minutes', pd.Series([0]*len(df))))
     df = df[df['minutes'] > 200]
@@ -428,12 +428,11 @@ def render_value_by_position(players_df: pd.DataFrame, con_ep_label: str):
     val_table = df.copy()
     val_table['now_cost'] = safe_numeric(val_table['now_cost'], 5)
     val_table['minutes'] = safe_numeric(val_table.get('minutes', 0))
-    # Advanced EP is already calculated in the caller and passed in as 'expected_points' or 'ep'
-    # but we should ensure we use the same cumulative EP for ranking consistency
-    if 'expected_points' in val_table.columns:
-        val_table['ep_val'] = safe_numeric(val_table['expected_points'])
+    # Use consensus_ep (Model xP) - the weighted blend matching the main table
+    if 'consensus_ep' in val_table.columns:
+        val_table['ep_val'] = safe_numeric(val_table['consensus_ep'])
     else:
-        val_table['ep_val'] = safe_numeric(val_table.get('ep_next', 0))
+        val_table['ep_val'] = safe_numeric(val_table.get('expected_points_poisson', 0))
         
     val_table['eppm_val'] = val_table['ep_val'] / val_table['now_cost'].clip(lower=4)
     val_table['roi_val'] = safe_numeric(val_table.get('differential_gain', 0)) / val_table['now_cost'].clip(lower=4)
@@ -475,8 +474,8 @@ def render_value_by_position(players_df: pd.DataFrame, con_ep_label: str):
     for pos in ['GKP', 'DEF', 'MID', 'FWD']:
         pos_df = df[df['position'] == pos].copy()
         if pos_df.empty: continue
-        # Recalculate EPPM for the chart to be accurate
-        pos_ep = safe_numeric(pos_df.get('expected_points', pos_df.get('ep_next', 0)))
+        # Use consensus_ep (Model xP) - the weighted blend matching the main table
+        pos_ep = safe_numeric(pos_df.get('consensus_ep', pos_df.get('expected_points_poisson', 0)))
         pos_df['eppm_chart'] = pos_ep / safe_numeric(pos_df['now_cost'], 5).clip(lower=4)
         top_pos = pos_df.nlargest(10, 'eppm_chart')
         
@@ -597,7 +596,8 @@ def render_advanced_metrics(players_df: pd.DataFrame, con_ep_label: str):
     
     df['now_cost'] = safe_numeric(df['now_cost'], 5)
     df['selected_by_percent'] = safe_numeric(df['selected_by_percent'])
-    df['expected_points'] = safe_numeric(df.get('expected_points', df.get('ep_next', pd.Series([0]*len(df)))))
+    # Use consensus_ep (Model xP) - the weighted blend of ML/Poisson/FPL
+    df['model_xp'] = safe_numeric(df.get('consensus_ep', df.get('expected_points_poisson', pd.Series([0]*len(df)))))
     
     # ── Sub-tabs for different views ──
     am1, am2 = st.tabs(["Threat Momentum", "Engineered Differentials"])
@@ -819,8 +819,8 @@ def render_set_and_forget(players_df: pd.DataFrame, con_ep_label: str):
         st.info("**Set & Forget Formula:** `Score = xP × 0.5 + Form × 0.2 + MinutesReliability × 3` | Measures consistency and output.")
     
     df = players_df.copy()
-    # Use expected_points (advanced EP) for Set & Forget
-    df['ep'] = safe_numeric(df.get('expected_points', df.get('ep_next', pd.Series([0]*len(df)))))
+    # Use consensus_ep (Model xP) - the weighted blend of ML/Poisson/FPL
+    df['ep'] = safe_numeric(df.get('consensus_ep', df.get('expected_points_poisson', pd.Series([0]*len(df)))))
     df['minutes'] = safe_numeric(df.get('minutes', pd.Series([0]*len(df))))
     df['form'] = safe_numeric(df.get('form', pd.Series([0]*len(df))))
     df['now_cost'] = safe_numeric(df['now_cost'], 5)

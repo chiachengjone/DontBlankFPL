@@ -181,13 +181,13 @@ def render_squad_performance(processor, players_df, current_gw, team_id):
             return
 
         squad_df['total_points'] = safe_numeric(squad_df.get('total_points', pd.Series([0] * len(squad_df))))
-        # Use Consensus EP calculated in render_dashboard_tab
-        squad_df['expected_points'] = safe_numeric(squad_df['consensus_ep'])
+        # Use Consensus EP (Model xP) calculated in render_dashboard_tab
+        squad_df['model_xp'] = safe_numeric(squad_df['consensus_ep'])
         squad_df['minutes'] = safe_numeric(squad_df.get('minutes', pd.Series([0] * len(squad_df))))
         squad_df['form'] = safe_numeric(squad_df.get('form', pd.Series([0] * len(squad_df))))
         squad_df['games_played'] = (squad_df['minutes'] / 90).clip(lower=1)
         squad_df['pts_per_game'] = squad_df['total_points'] / squad_df['games_played']
-        squad_df['expected_per_game'] = squad_df['expected_points']
+        squad_df['expected_per_game'] = squad_df['model_xp']
         squad_df['perf_diff'] = squad_df['pts_per_game'] - squad_df['expected_per_game']
 
         st.markdown('<p class="section-title">Squad Performance</p>', unsafe_allow_html=True)

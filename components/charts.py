@@ -20,7 +20,8 @@ POSITION_COLORS = {
 def create_ep_ownership_scatter(
     players_df: pd.DataFrame, 
     position_filter: str = "All", 
-    search_player: str = ""
+    search_player: str = "",
+    ep_label: str = "Model xP"
 ) -> Optional[go.Figure]:
     """Create interactive Expected Points vs Ownership scatter plot - dark theme."""
     df = players_df.copy()
@@ -33,11 +34,14 @@ def create_ep_ownership_scatter(
     
     df['selected_by_percent'] = safe_numeric(df.get('selected_by_percent', pd.Series([0]*len(df))))
     
-    # Use consensus_ep (Model xP) as primary, then expected_points (advanced EP), then ep_next
+    # Use consensus_ep (Model xP) as primary - the weighted blend of ML/Poisson/FPL
+    # Fallback chain: consensus_ep → expected_points_poisson → ep_next_num
     if 'consensus_ep' in df.columns:
         df['ep'] = safe_numeric(df['consensus_ep'])
-    elif 'expected_points' in df.columns and df['expected_points'].notna().any():
-        df['ep'] = safe_numeric(df['expected_points'])
+    elif 'expected_points_poisson' in df.columns and df['expected_points_poisson'].notna().any():
+        df['ep'] = safe_numeric(df['expected_points_poisson'])
+    elif 'ep_next_num' in df.columns:
+        df['ep'] = safe_numeric(df['ep_next_num'])
     elif 'ep_next' in df.columns:
         df['ep'] = safe_numeric(df['ep_next'])
     else:
@@ -167,7 +171,7 @@ def create_ep_ownership_scatter(
         plot_bgcolor='#ffffff',
         font=dict(family='Inter, sans-serif', color='#86868b', size=11),
         xaxis_title='Ownership %',
-        yaxis_title='Model xP',
+        yaxis_title=ep_label,
         xaxis=dict(gridcolor='#e5e5ea', zerolinecolor='#e5e5ea'),
         yaxis=dict(gridcolor='#e5e5ea', zerolinecolor='#e5e5ea'),
         legend=dict(

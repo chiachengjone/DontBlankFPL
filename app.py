@@ -156,9 +156,10 @@ def main():
         if use_poisson: new_active.append('poisson')
         if use_fpl: new_active.append('fpl')
         
-        # Ensure at least one is selected - if none, revert to previous or default
+        # Enforce at least one model is always selected
         if not new_active:
             new_active = st.session_state.active_models if st.session_state.active_models else ['fpl']
+            st.warning("At least one model must be selected.")
             
         if new_active != st.session_state.active_models:
             st.session_state.active_models = new_active

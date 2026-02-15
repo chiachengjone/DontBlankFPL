@@ -65,14 +65,23 @@ def calculate_team_ep(squad_ids: list, players_df: pd.DataFrame, selected_models
 
 
 def get_weighted_ep(player_row, selected_models: list) -> float:
-    """Helper to calculate weighted EP based on selected models."""
+    """Helper to calculate weighted EP based on selected models.
+    
+    Prefer consensus_ep if already calculated (avoids recalculating).
+    Falls back to manual weighting if consensus_ep is not present.
+    """
+    # Use pre-calculated consensus_ep if available (from calculate_consensus_ep)
+    consensus_val = player_row.get('consensus_ep', 0)
+    if consensus_val and safe_numeric(pd.Series([consensus_val])).iloc[0] > 0:
+        return safe_numeric(pd.Series([consensus_val])).iloc[0]
+    
     eps = []
     
     if 'fpl' in selected_models:
         eps.append(safe_numeric(pd.Series([player_row.get('ep_next', 2)])).iloc[0])
     
     if 'poisson' in selected_models:
-        val = player_row.get('expected_points_poisson', player_row.get('expected_points', 2))
+        val = player_row.get('expected_points_poisson', player_row.get('ep_next', 2))
         eps.append(safe_numeric(pd.Series([val])).iloc[0])
         
     if 'ml' in selected_models and 'ml_predictions' in st.session_state:
@@ -239,7 +248,7 @@ def render_unique_players_tables(result: dict, players_df: pd.DataFrame, selecte
     with tc1:
         st.markdown("**Your Unique Players**")
         if your_details:
-            your_df = pd.DataFrame(your_details)[['Player', 'Pos', 'Team', 'Price', 'EP', 'Form', 'Pts', 'Own%', 'Threat']]
+            your_df = pd.DataFrame(your_details)[['Player', 'Pos', 'Team', 'Price', 'xP', 'Form', 'Pts', 'Own%', 'Threat']]
             st.dataframe(style_df_with_injuries(your_df.sort_values('Threat', ascending=False)), hide_index=True, use_container_width=True)
         else:
             st.info("No unique players")
@@ -247,7 +256,7 @@ def render_unique_players_tables(result: dict, players_df: pd.DataFrame, selecte
     with tc2:
         st.markdown("**Rival's Unique Players**")
         if rival_details:
-            rival_df = pd.DataFrame(rival_details)[['Player', 'Pos', 'Team', 'Price', 'EP', 'Form', 'Pts', 'Own%', 'Threat']]
+            rival_df = pd.DataFrame(rival_details)[['Player', 'Pos', 'Team', 'Price', 'xP', 'Form', 'Pts', 'Own%', 'Threat']]
             st.dataframe(style_df_with_injuries(rival_df.sort_values('Threat', ascending=False)), hide_index=True, use_container_width=True)
         else:
             st.info("No unique players")

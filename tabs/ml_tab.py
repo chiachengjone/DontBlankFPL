@@ -145,17 +145,15 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
             horizon = n_gameweeks
             
             # Use processor's multi-GW calculator for FPL and Poisson if possible
-            # Otherwise fallback to scaling
+            # Otherwise fallback to using pre-calculated value
             try:
                 # Get weekly projections for Poisson
                 _, weekly_poisson = processor.calculate_expected_points(pid, weeks_ahead=horizon)
                 poisson_ep = sum(weekly_poisson)
             except:
-                # Fallback to simple decay scaling
-                poisson_ep_raw = player.get('expected_points_poisson', player.get('expected_points', fpl_ep_raw))
-                poisson_ep = 0.0
-                for i in range(horizon):
-                    poisson_ep += poisson_ep_raw * (0.9 ** i)
+                # Fallback: expected_points_poisson is already calculated for the horizon by the engine
+                # (processor.get_engineered_features_df handles multi-GW summing)
+                poisson_ep = player.get('expected_points_poisson', fpl_ep_raw)
             
             # FPL EP scaling
             fpl_ep = 0.0
