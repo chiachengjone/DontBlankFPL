@@ -8,6 +8,11 @@ from tabs.analytics import render_analytics_tab
 from tabs.ml_tab import render_ml_tab
 from tabs.montecarlo_tab import render_monte_carlo_tab
 from tabs.genetic_tab import render_genetic_tab
+from tabs.captain_tab import render_captain_tab
+from tabs.team_analysis_tab import render_team_analysis_tab
+from tabs.price_predictor_tab import render_price_predictor_tab
+from tabs.history_tab import render_history_tab
+from tabs.wildcard_tab import render_wildcard_tab
 
 __all__ = [
     'render_dashboard_tab',
@@ -18,4 +23,9 @@ __all__ = [
     'render_ml_tab',
     'render_monte_carlo_tab',
     'render_genetic_tab',
+    'render_captain_tab',
+    'render_team_analysis_tab',
+    'render_price_predictor_tab',
+    'render_history_tab',
+    'render_wildcard_tab',
 ]
