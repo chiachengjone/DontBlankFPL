@@ -580,48 +580,117 @@ def calculate_poisson_ep_for_dataframe(
     # ── Build FPL team_id → opponent xGA/xG map using Understat data ──
     # Maps each FPL team_id to {xGA_per90, xG_per90} for the real Understat stats
     team_xga_map: Dict[int, Dict[str, float]] = {}
+    fdr_fallback_teams: List[str] = []   # track which teams lacked real data
     
     if team_stats is not None and not team_stats.empty and 'understat_team' in team_stats.columns:
-        # Reverse the FPL->Understat name mapping
-        try:
-            from understat_api import TEAM_NAME_MAP
-            ustat_to_fpl = {v: k for k, v in TEAM_NAME_MAP.items()}
-        except ImportError:
-            ustat_to_fpl = {}
-        
-        # Build Understat team name -> stats lookup
-        ustat_stats: Dict[str, Dict[str, float]] = {}
-        for _, row in team_stats.iterrows():
-            ustat_stats[row['understat_team']] = {
-                'xGA_per90': float(row.get('xGA_per90', LEAGUE_AVG_XGA_PER_MATCH)),
-                'xG_per90': float(row.get('xG_for_per90', LEAGUE_AVG_XG_PER_MATCH)),
-            }
-        
-        # Map FPL team_name -> stats via reverse name mapping
-        fpl_name_stats: Dict[str, Dict[str, float]] = {}
-        for ustat_name, stats in ustat_stats.items():
-            fpl_name = ustat_to_fpl.get(ustat_name, ustat_name)
-            fpl_name_stats[fpl_name] = stats
-        
-        # Finally map FPL team_id -> stats using the df's team/team_name columns
-        if 'team_name' in df.columns:
-            name_to_id = (
-                df[['team', 'team_name']]
-                .drop_duplicates()
-                .set_index('team_name')['team']
-                .to_dict()
+        # Validate required columns exist
+        required_cols = {'understat_team', 'xGA_per90', 'xG_for_per90'}
+        missing_cols = required_cols - set(team_stats.columns)
+        if missing_cols:
+            logger.warning(
+                "team_stats DataFrame missing columns %s; "
+                "falling back to FDR for all teams", missing_cols
             )
-            for name, tid in name_to_id.items():
-                if name in fpl_name_stats:
-                    team_xga_map[tid] = fpl_name_stats[name]
-        
-        logger.info(
-            "Poisson engine: mapped real xGA for %d / %d teams",
-            len(team_xga_map), df['team'].nunique()
+        else:
+            # Reverse the FPL->Understat name mapping
+            try:
+                from understat_api import TEAM_NAME_MAP
+                ustat_to_fpl = {v: k for k, v in TEAM_NAME_MAP.items()}
+            except ImportError:
+                logger.warning("Could not import TEAM_NAME_MAP from understat_api")
+                ustat_to_fpl = {}
+            
+            # Build Understat team name -> stats lookup with NaN guards
+            ustat_stats: Dict[str, Dict[str, float]] = {}
+            for _, row in team_stats.iterrows():
+                xga_val = float(row.get('xGA_per90', 0) or 0)
+                xg_val = float(row.get('xG_for_per90', 0) or 0)
+                # Skip teams with invalid/zero stats
+                if xga_val <= 0 or xg_val <= 0:
+                    logger.debug(
+                        "Skipping team '%s': invalid stats (xGA=%.3f, xG=%.3f)",
+                        row['understat_team'], xga_val, xg_val
+                    )
+                    continue
+                ustat_stats[row['understat_team']] = {
+                    'xGA_per90': xga_val,
+                    'xG_per90': xg_val,
+                }
+            
+            # Map FPL team_name -> stats via reverse name mapping
+            # Also try case-insensitive fallback for promoted teams not in MAP
+            fpl_name_stats: Dict[str, Dict[str, float]] = {}
+            ustat_names_lower = {n.lower(): n for n in ustat_stats}
+            for ustat_name, stats in ustat_stats.items():
+                fpl_name = ustat_to_fpl.get(ustat_name, ustat_name)
+                fpl_name_stats[fpl_name] = stats
+            
+            # Finally map FPL team_id -> stats using the df's team/team_name columns
+            if 'team_name' in df.columns:
+                name_to_id = (
+                    df[['team', 'team_name']]
+                    .drop_duplicates()
+                    .set_index('team_name')['team']
+                    .to_dict()
+                )
+                for name, tid in name_to_id.items():
+                    if name in fpl_name_stats:
+                        team_xga_map[tid] = fpl_name_stats[name]
+                    else:
+                        # Fuzzy fallback: try case-insensitive substring match
+                        # for promoted teams whose names may differ slightly
+                        name_lower = name.lower()
+                        matched = False
+                        for ustat_lower, ustat_orig in ustat_names_lower.items():
+                            if (name_lower in ustat_lower
+                                    or ustat_lower in name_lower):
+                                team_xga_map[tid] = ustat_stats[ustat_orig]
+                                logger.info(
+                                    "Fuzzy-matched FPL '%s' -> Understat '%s'",
+                                    name, ustat_orig
+                                )
+                                matched = True
+                                break
+                        if not matched:
+                            fdr_fallback_teams.append(name)
+            
+            total_teams = df['team'].nunique()
+            mapped_count = len(team_xga_map)
+            logger.info(
+                "Poisson engine: mapped real xGA for %d / %d teams",
+                mapped_count, total_teams,
+            )
+            if fdr_fallback_teams:
+                logger.warning(
+                    "Poisson engine: FDR fallback for %d team(s): %s",
+                    len(fdr_fallback_teams), ', '.join(fdr_fallback_teams),
+                )
+    else:
+        reason = (
+            "team_stats is None" if team_stats is None
+            else "team_stats is empty" if team_stats.empty
+            else "missing 'understat_team' column"
+        )
+        logger.warning(
+            "Poisson engine: no Understat team data (%s); "
+            "using FDR proxy for ALL teams", reason,
         )
     
     # ── Get next-GW fixtures per team ──
     next_gw_fixtures = fixtures_df[fixtures_df['event'] == current_gw + 1]
+    
+    # Build id→name lookup for logging FDR fallback teams
+    id_to_name: Dict[int, str] = {}
+    if 'team_name' in df.columns:
+        id_to_name = (
+            df[['team', 'team_name']]
+            .drop_duplicates()
+            .set_index('team')['team_name']
+            .to_dict()
+        )
+    
+    fdr_fixture_count = 0
+    real_fixture_count = 0
     
     team_fixture_list: Dict[int, List[Dict]] = {}  # team_id -> list of fixture dicts
     for team_id in df['team'].unique():
@@ -640,6 +709,7 @@ def calculate_poisson_ep_for_dataframe(
             if opp_real is not None:
                 opp_xga = opp_real['xGA_per90']
                 opp_xg = opp_real['xG_per90']
+                real_fixture_count += 1
             else:
                 # FDR fallback (used only when Understat team data is missing)
                 fdr = (
@@ -651,6 +721,13 @@ def calculate_poisson_ep_for_dataframe(
                 xg_mult = 0.5 + ((6 - fdr) / 5) * 1.0
                 opp_xga = LEAGUE_AVG_XGA_PER_MATCH * xga_mult
                 opp_xg = LEAGUE_AVG_XG_PER_MATCH * xg_mult
+                fdr_fixture_count += 1
+                opp_name = id_to_name.get(opp_id, f"team_{opp_id}")
+                logger.debug(
+                    "FDR fallback for opponent %s (id=%d): FDR=%d -> "
+                    "xGA=%.3f, xG=%.3f",
+                    opp_name, opp_id, fdr, opp_xga, opp_xg,
+                )
             
             fixtures_list.append({
                 'is_home': is_home,
@@ -669,6 +746,14 @@ def calculate_poisson_ep_for_dataframe(
             }]
         
         team_fixture_list[team_id] = fixtures_list
+    
+    total_fixtures = real_fixture_count + fdr_fixture_count
+    if total_fixtures > 0:
+        logger.info(
+            "Poisson fixtures: %d real xGA, %d FDR fallback (%.0f%% real)",
+            real_fixture_count, fdr_fixture_count,
+            real_fixture_count / total_fixtures * 100,
+        )
     
     # ── Calculate Poisson EP for each player ──
     results = []

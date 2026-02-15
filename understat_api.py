@@ -624,35 +624,112 @@ def enrich_with_understat(fpl_df: pd.DataFrame, force_refresh: bool = False) -> 
     so repeated calls within a session do not trigger additional HTTP
     requests.  Team-level stats (xG-for, xGA) are stored at
     ``st.session_state['_understat_team_stats']`` for the Poisson engine.
+
+    Stores detailed data-source status in ``st.session_state['_understat_status']``
+    so downstream consumers (Poisson engine, diagnostics) can inspect
+    exactly what succeeded and what fell back.
     """
+    import time
+    import traceback
     import streamlit as st
 
     cache_players = "_understat_raw"
     cache_teams = "_understat_teams_raw"
     cache_team_stats = "_understat_team_stats"
 
+    status: dict = {
+        "players_fetched": 0,
+        "teams_fetched": 0,
+        "team_stats_built": False,
+        "team_stats_count": 0,
+        "player_match_rate": 0.0,
+        "errors": [],
+    }
+
+    # ── Fetch or use cached data ──
     if not force_refresh and cache_players in st.session_state:
         raw = st.session_state[cache_players]
         teams_raw = st.session_state.get(cache_teams, {})
+        logger.debug("Using cached Understat data (%d players)", len(raw))
     else:
-        raw, teams_raw = fetch_understat_league_data()
+        t0 = time.time()
+        try:
+            raw, teams_raw = fetch_understat_league_data()
+        except Exception as exc:
+            logger.error("Understat fetch raised unexpected error: %s\n%s",
+                         exc, traceback.format_exc())
+            status["errors"].append(f"fetch: {exc}")
+            raw, teams_raw = [], {}
+        elapsed = time.time() - t0
+        logger.info("Understat fetch completed in %.1fs (%d players, %d teams)",
+                     elapsed, len(raw), len(teams_raw))
         st.session_state[cache_players] = raw
         st.session_state[cache_teams] = teams_raw
 
+    status["players_fetched"] = len(raw)
+    status["teams_fetched"] = len(teams_raw)
+
     if not raw:
         st.session_state["_understat_active"] = False
+        status["errors"].append("No player data returned from Understat")
+        st.session_state["_understat_status"] = status
+        logger.warning("Understat enrichment skipped: no player data available")
         return fpl_df
 
     st.session_state["_understat_active"] = True
 
-    # Build and cache team-level stats for the Poisson engine
-    if teams_raw and cache_team_stats not in st.session_state:
-        team_stats_df = build_team_stats_df(teams_raw)
-        st.session_state[cache_team_stats] = team_stats_df
-    elif not teams_raw and cache_team_stats not in st.session_state:
+    # ── Build and cache team-level stats for the Poisson engine ──
+    # Rebuild if empty DataFrame was cached from a previous partial failure
+    existing_team_stats = st.session_state.get(cache_team_stats)
+    need_rebuild = (
+        existing_team_stats is None
+        or (isinstance(existing_team_stats, pd.DataFrame) and existing_team_stats.empty)
+    )
+    if teams_raw and (force_refresh or need_rebuild):
+        try:
+            team_stats_df = build_team_stats_df(teams_raw)
+            st.session_state[cache_team_stats] = team_stats_df
+            status["team_stats_built"] = not team_stats_df.empty
+            status["team_stats_count"] = len(team_stats_df)
+            if team_stats_df.empty:
+                logger.warning("build_team_stats_df returned empty DataFrame "
+                               "despite %d raw teams", len(teams_raw))
+                status["errors"].append("team_stats_df empty after build")
+        except Exception as exc:
+            logger.error("Failed to build team stats from Understat: %s\n%s",
+                         exc, traceback.format_exc())
+            status["errors"].append(f"team_stats_build: {exc}")
+            st.session_state[cache_team_stats] = pd.DataFrame()
+    elif not teams_raw and need_rebuild:
+        logger.warning("No Understat team data available; "
+                       "Poisson engine will use FDR fallback for all teams")
+        status["errors"].append("No team data from Understat")
         st.session_state[cache_team_stats] = pd.DataFrame()
+    else:
+        # Using previously cached team stats
+        cached = st.session_state.get(cache_team_stats, pd.DataFrame())
+        status["team_stats_built"] = isinstance(cached, pd.DataFrame) and not cached.empty
+        status["team_stats_count"] = len(cached) if isinstance(cached, pd.DataFrame) else 0
 
-    ustat_df = _build_understat_df(raw)
-    merged = match_understat_to_fpl(fpl_df, ustat_df)
-    adjusted = adjust_ep_with_understat(merged)
+    # ── Player enrichment ──
+    try:
+        ustat_df = _build_understat_df(raw)
+        merged = match_understat_to_fpl(fpl_df, ustat_df)
+
+        # Track match quality
+        if "us_xG" in merged.columns:
+            matched = (merged["us_xG"].fillna(0) > 0).sum()
+            status["player_match_rate"] = round(matched / max(len(merged), 1), 3)
+            logger.info("Understat player match rate: %d / %d (%.0f%%)",
+                        matched, len(merged),
+                        status["player_match_rate"] * 100)
+
+        adjusted = adjust_ep_with_understat(merged)
+    except Exception as exc:
+        logger.error("Understat player enrichment failed: %s\n%s",
+                     exc, traceback.format_exc())
+        status["errors"].append(f"enrichment: {exc}")
+        adjusted = fpl_df
+
+    st.session_state["_understat_status"] = status
     return adjusted

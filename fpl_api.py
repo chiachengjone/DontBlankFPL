@@ -656,11 +656,33 @@ class FPLDataProcessor:
             df = enrich_with_understat(df)
             if st is not None:
                 st.session_state['_understat_active'] = True
+                # Log data source quality summary
+                ustat_status = st.session_state.get('_understat_status', {})
+                team_count = ustat_status.get('team_stats_count', 0)
+                match_rate = ustat_status.get('player_match_rate', 0)
+                errs = ustat_status.get('errors', [])
+                import logging as _log
+                _ulog = _log.getLogger(__name__)
+                _ulog.info(
+                    "Understat enrichment OK: %d team stats, %.0f%% player match rate",
+                    team_count, match_rate * 100,
+                )
+                if errs:
+                    _ulog.warning("Understat enrichment warnings: %s", '; '.join(errs))
         except Exception as e:
             import logging
-            logging.getLogger(__name__).warning(f"Understat enrichment failed: {e}")
+            import traceback
+            logging.getLogger(__name__).error(
+                "Understat enrichment failed: %s\n%s", e, traceback.format_exc()
+            )
             if st is not None:
                 st.session_state['_understat_active'] = False
+                st.session_state['_understat_status'] = {
+                    'players_fetched': 0, 'teams_fetched': 0,
+                    'team_stats_built': False, 'team_stats_count': 0,
+                    'player_match_rate': 0.0,
+                    'errors': [f"top-level: {e}"],
+                }
         
         # ── Poisson-based Expected Points (professional-grade model) ──
         try:
@@ -670,6 +692,23 @@ class FPLDataProcessor:
                 from poisson_ep import calculate_poisson_ep_for_dataframe
                 # Pass real Understat team stats if available
                 team_stats = st.session_state.get('_understat_team_stats', None) if st is not None else None
+                has_real_xga = (
+                    team_stats is not None
+                    and isinstance(team_stats, pd.DataFrame)
+                    and not team_stats.empty
+                )
+                import logging as _plog
+                _plogger = _plog.getLogger(__name__)
+                if has_real_xga:
+                    _plogger.info(
+                        "Poisson EP: using real Understat team xGA (%d teams)",
+                        len(team_stats),
+                    )
+                else:
+                    _plogger.warning(
+                        "Poisson EP: no Understat team stats available; "
+                        "FDR proxy will be used for opponent strength"
+                    )
                 df = calculate_poisson_ep_for_dataframe(df, fixtures, current_gw, team_stats=team_stats)
                 # Use Poisson EP as primary expected_points if available
                 if 'expected_points_poisson' in df.columns:
@@ -682,7 +721,10 @@ class FPLDataProcessor:
                 df['expected_points'] = df['ep_next_num']
         except Exception as e:
             import logging
-            logging.getLogger(__name__).warning(f"Poisson EP calculation failed: {e}")
+            import traceback as _tb
+            logging.getLogger(__name__).error(
+                "Poisson EP calculation failed: %s\n%s", e, _tb.format_exc()
+            )
         
         # Ensure expected_points is numeric and exists
         if 'expected_points' not in df.columns:
