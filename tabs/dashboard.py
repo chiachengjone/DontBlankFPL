@@ -186,12 +186,12 @@ def render_squad_performance(processor, players_df, current_gw, team_id):
         ))
         fig.update_layout(
             height=max(280, len(chart_df) * 30),
-            template='plotly_dark',
-            paper_bgcolor='#0a0a0b', plot_bgcolor='#111113',
-            font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
-            xaxis=dict(title='Pts/Game vs Expected', gridcolor='#1e1e21', zeroline=True,
-                      zerolinecolor='rgba(255,255,255,0.15)', zerolinewidth=1),
-            yaxis=dict(gridcolor='#1e1e21'),
+            template='plotly_white',
+            paper_bgcolor='#ffffff', plot_bgcolor='#ffffff',
+            font=dict(family='Inter, sans-serif', color='#86868b', size=11),
+            xaxis=dict(title='Pts/Game vs Expected', gridcolor='#e5e5ea', zeroline=True,
+                      zerolinecolor='rgba(0,0,0,0.06)', zerolinewidth=1),
+            yaxis=dict(gridcolor='#e5e5ea'),
             margin=dict(l=120, r=50, t=20, b=40),
         )
         st.plotly_chart(fig, use_container_width=True, key='dash_squad_perf')
@@ -228,9 +228,9 @@ def render_top_picks_summary(players_df: pd.DataFrame):
                 avail_html = f' <span style="color:#f59e0b;font-size:0.7rem;">{avail}</span>' if avail else ''
                 tier = get_ownership_tier(safe_numeric(pd.Series([p['selected_by_percent']])).iloc[0])
                 st.markdown(
-                    f'<div style="background:#141416;border:1px solid #2a2a2e;border-radius:8px;'
+                    f'<div style="background:#fff;border:1px solid rgba(0,0,0,0.06);border-radius:8px;'
                     f'padding:0.5rem 0.7rem;margin-bottom:0.3rem;">'
-                    f'<div style="color:#e8e8e8;font-weight:600;font-size:0.85rem;">'
+                    f'<div style="color:#1d1d1f;font-weight:600;font-size:0.85rem;">'
                     f'{p["web_name"]}{flag}{avail_html}</div>'
                     f'<div style="color:#888;font-size:0.72rem;">'
                     f'{p.get("team_name", "")} | {p["now_cost"]:.1f}m | '
@@ -388,7 +388,7 @@ def render_fixture_swings(processor):
             text=sorted_swing['Swing'].apply(lambda x: f"{x:+.2f}"),
             textposition='outside',
         ))
-        fig.add_vline(x=0, line_color='#6b6b6b', line_dash='dot')
+        fig.add_vline(x=0, line_color='#86868b', line_dash='dot')
         fig.update_layout(**get_chart_layout(
             height=500,
             xaxis=dict(title='Fixture Swing (positive = getting easier)'),

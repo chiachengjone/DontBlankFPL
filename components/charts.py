@@ -75,7 +75,7 @@ def create_ep_ownership_scatter(
                     x=pos_non_match['selected_by_percent'],
                     y=pos_non_match['ep'],
                     mode='markers',
-                    marker=dict(size=6, color='#444', opacity=0.2),
+                    marker=dict(size=6, color='#c7c7cc', opacity=0.2),
                     name=pos,
                     legendgroup=pos,
                     showlegend=pos_match.empty,
@@ -92,11 +92,11 @@ def create_ep_ownership_scatter(
                         size=pos_match['now_cost'] * 2,
                         color=POSITION_COLORS.get(pos, '#ef4444'),
                         opacity=1.0,
-                        line=dict(width=2, color='#fff')
+                        line=dict(width=2, color='#1d1d1f')
                     ),
                     text=pos_match['web_name'],
                     textposition='top center',
-                    textfont=dict(size=11, color='#fff'),
+                    textfont=dict(size=11, color='#1d1d1f'),
                     name=pos,
                     legendgroup=pos,
                     showlegend=True,
@@ -136,7 +136,7 @@ def create_ep_ownership_scatter(
                     marker=dict(size=top['now_cost'] * 1.5, color=POSITION_COLORS[pos], opacity=1.0),
                     text=top['web_name'],
                     textposition='top center',
-                    textfont=dict(size=9, color='#ccc'),
+                    textfont=dict(size=9, color='#1d1d1f'),
                     name=pos,
                     legendgroup=pos,
                     showlegend=True,
@@ -153,24 +153,24 @@ def create_ep_ownership_scatter(
                 name=pos, legendgroup=pos, showlegend=True
             ))
     
-    fig.add_hline(y=avg_ep, line_dash="dash", line_color="rgba(255,255,255,0.2)", 
+    fig.add_hline(y=avg_ep, line_dash="dash", line_color="rgba(0,0,0,0.1)", 
                   annotation_text="Avg EP", annotation_font_color="#888")
-    fig.add_vline(x=avg_own, line_dash="dash", line_color="rgba(255,255,255,0.2)", 
+    fig.add_vline(x=avg_own, line_dash="dash", line_color="rgba(0,0,0,0.1)", 
                   annotation_text="Avg Own%", annotation_font_color="#888")
     
     fig.update_layout(
         height=500,
-        template='plotly_dark',
-        paper_bgcolor='#0a0a0b',
-        plot_bgcolor='#111113',
-        font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
+        template='plotly_white',
+        paper_bgcolor='#ffffff',
+        plot_bgcolor='#ffffff',
+        font=dict(family='Inter, sans-serif', color='#86868b', size=11),
         xaxis_title='Ownership %',
         yaxis_title='Expected Points',
-        xaxis=dict(gridcolor='#1e1e21', zerolinecolor='#1e1e21'),
-        yaxis=dict(gridcolor='#1e1e21', zerolinecolor='#1e1e21'),
+        xaxis=dict(gridcolor='#e5e5ea', zerolinecolor='#e5e5ea'),
+        yaxis=dict(gridcolor='#e5e5ea', zerolinecolor='#e5e5ea'),
         legend=dict(
             orientation="v", yanchor="bottom", y=0.02, xanchor="right", x=0.99,
-            font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11), bgcolor='rgba(13,13,13,0.8)'
+            font=dict(family='Inter, sans-serif', color='#86868b', size=11), bgcolor='rgba(255,255,255,0.9)'
         ),
         margin=dict(l=40, r=40, t=40, b=40)
     )
@@ -231,13 +231,13 @@ def create_cbit_chart(players_df: pd.DataFrame) -> Optional[go.Figure]:
     ))
     
     fig.update_layout(
-        title=dict(text='CBIT Score (AA90 + Floor + Matchup)', font=dict(color='#fff', size=16)),
+        title=dict(text='CBIT Score (AA90 + Floor + Matchup)', font=dict(color='#1d1d1f', size=16)),
         xaxis_title='', yaxis_title='Score',
         height=350,
-        template='plotly_dark',
-        paper_bgcolor='#0a0a0b',
-        plot_bgcolor='#111113',
-        font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
+        template='plotly_white',
+        paper_bgcolor='#ffffff',
+        plot_bgcolor='#ffffff',
+        font=dict(family='Inter, sans-serif', color='#86868b', size=11),
         margin=dict(l=40, r=40, t=60, b=40)
     )
     
@@ -276,12 +276,12 @@ def create_fixture_heatmap(players_df: pd.DataFrame, player_ids: List[int]) -> O
     ))
     
     fig.update_layout(
-        title=dict(text='Fixture Difficulty', font=dict(color='#fff', size=16)),
+        title=dict(text='Fixture Difficulty', font=dict(color='#1d1d1f', size=16)),
         height=350,
-        template='plotly_dark',
-        paper_bgcolor='#0a0a0b',
-        plot_bgcolor='#111113',
-        font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
+        template='plotly_white',
+        paper_bgcolor='#ffffff',
+        plot_bgcolor='#ffffff',
+        font=dict(family='Inter, sans-serif', color='#86868b', size=11),
         margin=dict(l=100, r=40, t=60, b=40)
     )
     
@@ -309,10 +309,10 @@ def create_form_timeline(players_df: pd.DataFrame, player_ids: List[int]) -> Opt
     
     fig.update_layout(
         height=300,
-        template='plotly_dark',
-        paper_bgcolor='#0a0a0b',
-        plot_bgcolor='#111113',
-        font=dict(color='#ccc', size=10),
+        template='plotly_white',
+        paper_bgcolor='#ffffff',
+        plot_bgcolor='#ffffff',
+        font=dict(color='#1d1d1f', size=10),
         margin=dict(l=40, r=40, t=20, b=80),
         xaxis_tickangle=-45
     )
@@ -334,14 +334,14 @@ def create_budget_breakdown_pie(players_df: pd.DataFrame, player_ids: List[int])
         values=costs.values,
         marker=dict(colors=[POSITION_COLORS.get(p, '#888') for p in costs.index]),
         textinfo='label+percent',
-        textfont=dict(color='#fff')
+        textfont=dict(color='#1d1d1f')
     ))
     
     fig.update_layout(
         height=300,
-        template='plotly_dark',
-        paper_bgcolor='#0a0a0b',
-        font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
+        template='plotly_white',
+        paper_bgcolor='#ffffff',
+        font=dict(family='Inter, sans-serif', color='#86868b', size=11),
         margin=dict(l=20, r=20, t=20, b=20),
         showlegend=False
     )
@@ -375,10 +375,10 @@ def create_ownership_trends_chart(players_df: pd.DataFrame, limit: int = 20) -> 
     fig.update_layout(
         barmode='relative',
         height=350,
-        template='plotly_dark',
-        paper_bgcolor='#0a0a0b',
-        plot_bgcolor='#111113',
-        font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
+        template='plotly_white',
+        paper_bgcolor='#ffffff',
+        plot_bgcolor='#ffffff',
+        font=dict(family='Inter, sans-serif', color='#86868b', size=11),
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
         margin=dict(l=40, r=40, t=40, b=80),
         xaxis_tickangle=-45

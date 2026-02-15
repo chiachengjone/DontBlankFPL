@@ -173,10 +173,10 @@ def render_unique_players_chart(result: dict, players_df: pd.DataFrame):
     
     fig.update_layout(
         height=400,
-        template='plotly_dark',
-        paper_bgcolor='#0a0a0b',
-        plot_bgcolor='#111113',
-        font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
+        template='plotly_white',
+        paper_bgcolor='#ffffff',
+        plot_bgcolor='#ffffff',
+        font=dict(family='Inter, sans-serif', color='#86868b', size=11),
         yaxis_title='Threat Score',
         barmode='group',
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),

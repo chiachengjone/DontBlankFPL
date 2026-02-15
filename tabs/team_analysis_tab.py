@@ -80,8 +80,8 @@ def render_team_analysis_tab(processor, players_df: pd.DataFrame):
         with sum_cols[0]:
             total_ep = team_players['expected_points'].sum()
             st.markdown(f'''
-            <div style="background:#141416;border:1px solid #2a2a2e;border-radius:10px;padding:1rem;text-align:center;">
-                <div style="color:#6b6b6b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Total Team EP</div>
+            <div style="background:#ffffff;border:1px solid rgba(0,0,0,0.04);border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:1rem;text-align:center;">
+                <div style="color:#86868b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Total Team EP</div>
                 <div style="color:#3b82f6;font-size:1.5rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{total_ep:.1f}</div>
             </div>
             ''', unsafe_allow_html=True)
@@ -89,8 +89,8 @@ def render_team_analysis_tab(processor, players_df: pd.DataFrame):
         with sum_cols[1]:
             avg_ep = team_players['expected_points'].mean()
             st.markdown(f'''
-            <div style="background:#141416;border:1px solid #2a2a2e;border-radius:10px;padding:1rem;text-align:center;">
-                <div style="color:#6b6b6b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Avg Player EP</div>
+            <div style="background:#ffffff;border:1px solid rgba(0,0,0,0.04);border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:1rem;text-align:center;">
+                <div style="color:#86868b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Avg Player EP</div>
                 <div style="color:#22c55e;font-size:1.5rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{avg_ep:.2f}</div>
             </div>
             ''', unsafe_allow_html=True)
@@ -101,19 +101,19 @@ def render_team_analysis_tab(processor, players_df: pd.DataFrame):
                 top_name = top_owned.iloc[0]['web_name']
                 top_eo = top_owned.iloc[0]['selected_by_percent']
                 st.markdown(f'''
-                <div style="background:#141416;border:1px solid #2a2a2e;border-radius:10px;padding:1rem;text-align:center;">
-                    <div style="color:#6b6b6b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Most Owned</div>
+                <div style="background:#ffffff;border:1px solid rgba(0,0,0,0.04);border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:1rem;text-align:center;">
+                    <div style="color:#86868b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Most Owned</div>
                     <div style="color:#f59e0b;font-size:1rem;font-weight:700;">{top_name}</div>
-                    <div style="color:#6b6b6b;font-size:0.8rem;">{top_eo:.1f}%</div>
+                    <div style="color:#86868b;font-size:0.8rem;">{top_eo:.1f}%</div>
                 </div>
                 ''', unsafe_allow_html=True)
         
         with sum_cols[3]:
             num_players = len(team_players)
             st.markdown(f'''
-            <div style="background:#141416;border:1px solid #2a2a2e;border-radius:10px;padding:1rem;text-align:center;">
-                <div style="color:#6b6b6b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Players Available</div>
-                <div style="color:#e8e8e8;font-size:1.5rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{num_players}</div>
+            <div style="background:#ffffff;border:1px solid rgba(0,0,0,0.04);border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:1rem;text-align:center;">
+                <div style="color:#86868b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Players Available</div>
+                <div style="color:#1d1d1f;font-size:1.5rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{num_players}</div>
             </div>
             ''', unsafe_allow_html=True)
         
@@ -263,9 +263,9 @@ def render_team_analysis_tab(processor, players_df: pd.DataFrame):
                 players_str = ', '.join(risk_players) if risk_players else 'None'
                 
                 st.markdown(f'''
-                <div style="background:#141416;border:1px solid {color};border-radius:8px;padding:0.75rem;">
+                <div style="background:#ffffff;box-shadow:0 2px 8px rgba(0,0,0,0.06);border:1px solid {color};border-radius:8px;padding:0.75rem;">
                     <div style="color:{color};font-weight:600;font-size:0.85rem;">{risk}</div>
-                    <div style="color:#6b6b6b;font-size:0.8rem;margin-top:0.3rem;">{players_str}</div>
+                    <div style="color:#86868b;font-size:0.8rem;margin-top:0.3rem;">{players_str}</div>
                 </div>
                 ''', unsafe_allow_html=True)
         
@@ -287,20 +287,20 @@ def render_team_analysis_tab(processor, players_df: pd.DataFrame):
             
             st.markdown(f'''
             <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:0.5rem;">
-                <div style="background:#141416;border:1px solid #2a2a2e;padding:0.75rem;border-radius:8px;text-align:center;">
-                    <div style="color:#6b6b6b;font-size:0.7rem;text-transform:uppercase;">Goals</div>
+                <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;text-align:center;">
+                    <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">Goals</div>
                     <div style="color:#22c55e;font-weight:600;font-family:'JetBrains Mono',monospace;">{int(total_goals)}</div>
                 </div>
-                <div style="background:#141416;border:1px solid #2a2a2e;padding:0.75rem;border-radius:8px;text-align:center;">
-                    <div style="color:#6b6b6b;font-size:0.7rem;text-transform:uppercase;">Assists</div>
+                <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;text-align:center;">
+                    <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">Assists</div>
                     <div style="color:#3b82f6;font-weight:600;font-family:'JetBrains Mono',monospace;">{int(total_assists)}</div>
                 </div>
-                <div style="background:#141416;border:1px solid #2a2a2e;padding:0.75rem;border-radius:8px;text-align:center;">
-                    <div style="color:#6b6b6b;font-size:0.7rem;text-transform:uppercase;">xG</div>
+                <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;text-align:center;">
+                    <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">xG</div>
                     <div style="color:#22c55e;font-weight:600;font-family:'JetBrains Mono',monospace;">{total_xg:.1f}</div>
                 </div>
-                <div style="background:#141416;border:1px solid #2a2a2e;padding:0.75rem;border-radius:8px;text-align:center;">
-                    <div style="color:#6b6b6b;font-size:0.7rem;text-transform:uppercase;">xA</div>
+                <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;text-align:center;">
+                    <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">xA</div>
                     <div style="color:#3b82f6;font-weight:600;font-family:'JetBrains Mono',monospace;">{total_xa:.1f}</div>
                 </div>
             </div>
@@ -316,20 +316,20 @@ def render_team_analysis_tab(processor, players_df: pd.DataFrame):
             
             st.markdown(f'''
             <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:0.5rem;">
-                <div style="background:#141416;border:1px solid #2a2a2e;padding:0.75rem;border-radius:8px;text-align:center;">
-                    <div style="color:#6b6b6b;font-size:0.7rem;text-transform:uppercase;">Avg CS</div>
+                <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;text-align:center;">
+                    <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">Avg CS</div>
                     <div style="color:#22c55e;font-weight:600;font-family:'JetBrains Mono',monospace;">{total_cs:.1f}</div>
                 </div>
-                <div style="background:#141416;border:1px solid #2a2a2e;padding:0.75rem;border-radius:8px;text-align:center;">
-                    <div style="color:#6b6b6b;font-size:0.7rem;text-transform:uppercase;">Total Saves</div>
+                <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;text-align:center;">
+                    <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">Total Saves</div>
                     <div style="color:#3b82f6;font-weight:600;font-family:'JetBrains Mono',monospace;">{int(total_saves)}</div>
                 </div>
-                <div style="background:#141416;border:1px solid #2a2a2e;padding:0.75rem;border-radius:8px;text-align:center;">
-                    <div style="color:#6b6b6b;font-size:0.7rem;text-transform:uppercase;">Avg CBIT</div>
+                <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;text-align:center;">
+                    <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">Avg CBIT</div>
                     <div style="color:#f59e0b;font-weight:600;font-family:'JetBrains Mono',monospace;">{avg_cbit:.2f}</div>
                 </div>
-                <div style="background:#141416;border:1px solid #2a2a2e;padding:0.75rem;border-radius:8px;text-align:center;">
-                    <div style="color:#6b6b6b;font-size:0.7rem;text-transform:uppercase;">Avg GC</div>
+                <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;text-align:center;">
+                    <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">Avg GC</div>
                     <div style="color:#ef4444;font-weight:600;font-family:'JetBrains Mono',monospace;">{goals_conceded:.1f}</div>
                 </div>
             </div>

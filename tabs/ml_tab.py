@@ -6,18 +6,16 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 
-from utils.helpers import safe_numeric, round_df, style_df_with_injuries
+from utils.helpers import safe_numeric, round_df, style_df_with_injuries, normalize_name
 
 
 def render_ml_tab(processor, players_df: pd.DataFrame):
     """Machine Learning Predictions tab — intuitive UI for all users."""
 
-    st.markdown('<p class="section-title">ML Predictions</p>', unsafe_allow_html=True)
-    
+
     # ── Controls ──
-    st.markdown("---")
     
-    ctrl1, ctrl2, ctrl3, ctrl4 = st.columns([1, 1, 1.5, 1.5])
+    ctrl1, ctrl2, ctrl3 = st.columns([1, 1, 1.5])
     
     with ctrl1:
         n_gameweeks = st.selectbox(
@@ -39,51 +37,14 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
         )
     
     with ctrl3:
-        # Player-specific search
-        player_names = ["-- All Players --"] + sorted(players_df["web_name"].dropna().unique().tolist())
-        selected_player = st.selectbox(
-            "Focus on player",
-            options=player_names,
-            index=0,
+        selected_player = st.text_input(
+            "Search player",
+            placeholder="Type player name...",
             key="ml_player_focus",
-            help="Get detailed ML breakdown for a specific player"
+            help="Search for a specific player by name"
         )
     
-    with ctrl4:
-        run_ml = st.button(
-            "Run ML Analysis",
-            type="primary",
-            use_container_width=True,
-            help="Takes ~10 seconds. Trains models on your data."
-        )
-    
-    # ── Run ML ──
-    if run_ml:
-        with st.spinner("Training ML models (this takes ~10 seconds)..."):
-            try:
-                from ml_predictor import create_ml_pipeline
 
-                predictor = create_ml_pipeline(players_df)
-                predictions = predictor.predict_gameweek_points(
-                    n_gameweeks=n_gameweeks,
-                    use_ensemble=True,
-                )
-
-                st.session_state["ml_predictions"] = predictions
-                st.session_state["ml_predictor"] = predictor
-                st.session_state["ml_gws"] = n_gameweeks
-                
-                # Cross-validation for accuracy metrics
-                cv_scores = predictor.cross_validate_predictions(n_splits=3)
-                st.session_state["ml_cv_scores"] = cv_scores
-                
-                st.success(f"Analyzed {len(predictions)} players.")
-
-            except ImportError:
-                st.error("ML libraries not installed. Run: `pip install xgboost scikit-learn`")
-            except Exception as e:
-                st.error(f"Error: {e}")
-    
     # ── Results section ──
     if "ml_predictions" in st.session_state:
         predictions = st.session_state["ml_predictions"]
@@ -152,10 +113,13 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
         pred_df = pd.DataFrame(pred_data)
         
         # ── Player-specific view ──
-        if selected_player != "-- All Players --":
-            player_row = pred_df[pred_df["Player"] == selected_player]
+        if selected_player and selected_player.strip():
+            query_norm = normalize_name(selected_player.lower().strip())
+            pred_df["_name_norm"] = pred_df["Player"].apply(lambda x: normalize_name(str(x).lower()))
+            player_row = pred_df[pred_df["_name_norm"].str.contains(query_norm, na=False)]
             if not player_row.empty:
-                st.markdown(f"### ML Analysis: {selected_player}")
+                player_row = player_row.head(1)
+                st.markdown(f"### ML Analysis: {player_row.iloc[0]['Player']}")
                 
                 p = player_row.iloc[0]
                 pid = p["id"]
@@ -202,10 +166,38 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
                         'team_strength': 'Team Quality',
                     }
                     
+                    factor_data = []
                     for feat, imp in sorted_imp:
                         display_name = feature_names.get(feat, feat.replace('_', ' ').title())
-                        bar_width = int(imp * 100)
-                        st.markdown(f"- {display_name}: {'█' * min(bar_width, 20)} ({imp:.1%})")
+                        factor_data.append({'Feature': display_name, 'Importance': imp})
+                    
+                    factor_df = pd.DataFrame(factor_data).sort_values('Importance', ascending=True)
+                    
+                    fig = go.Figure(go.Bar(
+                        x=factor_df['Importance'],
+                        y=factor_df['Feature'],
+                        orientation='h',
+                        marker_color='#3b82f6',
+                        text=factor_df['Importance'].apply(lambda x: f'{x:.1%}'),
+                        textposition='outside',
+                        textfont=dict(size=11, color='#1d1d1f'),
+                    ))
+                    fig.update_layout(
+                        height=max(180, len(factor_data) * 36),
+                        template='plotly_white',
+                        paper_bgcolor='#ffffff',
+                        plot_bgcolor='#ffffff',
+                        font=dict(family='Inter, sans-serif', color='#86868b', size=11),
+                        xaxis=dict(
+                            tickformat='.0%',
+                            gridcolor='#e5e5ea',
+                            range=[0, max(factor_df['Importance']) * 1.3],
+                        ),
+                        yaxis=dict(gridcolor='#e5e5ea'),
+                        margin=dict(l=10, r=40, t=10, b=20),
+                        bargap=0.3,
+                    )
+                    st.plotly_chart(fig, use_container_width=True, key='ml_player_factors')
                 
                 st.markdown("---")
         
@@ -378,10 +370,10 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
                             height=300,
                             showlegend=False,
                             coloraxis_showscale=False,
-                            template="plotly_dark",
-                            paper_bgcolor="#0a0a0b",
-                            plot_bgcolor="#111113",
-                            font=dict(family="Inter, sans-serif", color="#6b6b6b", size=11),
+                            template="plotly_white",
+                            paper_bgcolor="#ffffff",
+                            plot_bgcolor="#ffffff",
+                            font=dict(family="Inter, sans-serif", color="#86868b", size=11),
                             margin=dict(l=10, r=10, t=10, b=10),
                             xaxis_title="Importance",
                             yaxis_title="",

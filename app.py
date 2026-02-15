@@ -11,7 +11,7 @@ pd.set_option('display.float_format', lambda x: f'{x:.2f}')
 
 # Import from local modules
 from fpl_api import create_data_pipeline
-from components.styles import apply_theme, render_header, render_status_bar
+from components.styles import apply_theme, render_header, render_status_bar, render_tab_header
 from tabs.dashboard import render_dashboard_tab
 from tabs.strategy import render_strategy_tab
 from tabs.optimization import render_optimization_tab
@@ -100,6 +100,20 @@ def main():
         st.error(f"Error loading players: {e}")
         return
     
+    # Auto-run ML predictions on first load
+    if "ml_predictions" not in st.session_state:
+        try:
+            from ml_predictor import create_ml_pipeline
+            predictor = create_ml_pipeline(players_df)
+            predictions = predictor.predict_gameweek_points(n_gameweeks=1, use_ensemble=True)
+            st.session_state["ml_predictions"] = predictions
+            st.session_state["ml_predictor"] = predictor
+            st.session_state["ml_gws"] = 1
+            cv_scores = predictor.cross_validate_predictions(n_splits=3)
+            st.session_state["ml_cv_scores"] = cv_scores
+        except Exception:
+            pass  # Silently fall back — ML tab button still available
+
     # Status bar + settings on same row
     try:
         gw = fetcher.get_current_gameweek()
@@ -147,57 +161,70 @@ def main():
     # Navigation tabs
     tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12 = st.tabs([
         "Dashboard",
-        "Strategy", 
-        "Squad Builder", 
-        "Analytics", 
+        "Strategy",
+        "Squad Builder",
+        "Analytics",
         "Captain",
         "Teams",
         "Prices",
         "Wildcard",
         "History",
         "Rival Scout",
-        "ML Predictions",
+        "ML Predict",
         "Monte Carlo",
         "Genetic",
     ])
     
     with tab0:
+        render_tab_header("Dashboard", "At-a-glance overview of your gameweek — key metrics, top picks and alerts")
         render_dashboard_tab(processor, players_df)
     
     with tab1:
+        render_tab_header("Strategy", "Explore the player landscape, fixture difficulty and ownership trends")
         render_strategy_tab(processor, players_df)
     
     with tab2:
+        render_tab_header("Squad Builder", "Optimise transfers and build your best XV within budget")
         render_optimization_tab(processor, players_df, fetcher)
     
     with tab3:
+        render_tab_header("Analytics", "Deep-dive into player data, differentials and value metrics")
         render_analytics_tab(processor, players_df)
     
     with tab4:
+        render_tab_header("Captain", "Compare captain candidates using Poisson, ML and FPL estimates")
         render_captain_tab(processor, players_df)
     
     with tab5:
+        render_tab_header("Teams", "Team-level analysis — defensive stats, xG and fixture runs")
         render_team_analysis_tab(processor, players_df)
     
     with tab6:
+        render_tab_header("Prices", "Track price changes, net transfers and rise/fall predictions")
         render_price_predictor_tab(processor, players_df)
     
     with tab7:
+        render_tab_header("Wildcard", "Plan your wildcard squad with full-season optimisation")
         render_wildcard_tab(processor, players_df)
     
     with tab8:
+        render_tab_header("History", "Review past gameweek scores and season trajectory")
         render_history_tab(processor, players_df, fetcher)
     
     with tab9:
+        render_tab_header("Rival Scout", "Compare squads head-to-head and spot tactical differences")
         render_rival_tab(processor, players_df)
     
     with tab10:
+        render_tab_header("ML Predictions", "Ensemble machine learning forecasts with confidence intervals")
         render_ml_tab(processor, players_df)
     
     with tab11:
+        render_tab_header("Monte Carlo", "Stochastic simulations for risk analysis and upside potential")
         render_monte_carlo_tab(processor, players_df)
     
     with tab12:
+        render_tab_header("Genetic Optimizer", "Evolutionary algorithm for exploring diverse squad solutions")
         render_genetic_tab(processor, players_df)
 
 

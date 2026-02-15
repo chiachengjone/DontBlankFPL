@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 
-from utils.helpers import safe_numeric, style_df_with_injuries
+from utils.helpers import safe_numeric, style_df_with_injuries, normalize_name
 from components.styles import render_section_title
 
 
@@ -45,37 +45,37 @@ def render_price_predictor_tab(processor, players_df: pd.DataFrame):
     
     with sum_cols[0]:
         st.markdown(f'''
-        <div style="background:#141416;border:1px solid #22c55e;border-radius:10px;padding:1rem;text-align:center;">
+        <div style="background:#ffffff;box-shadow:0 2px 8px rgba(0,0,0,0.06);border:1px solid #22c55e;border-radius:10px;padding:1rem;text-align:center;">
             <div style="color:#6ee7b7;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Likely to Rise</div>
             <div style="color:#22c55e;font-size:2rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{len(rising)}</div>
-            <div style="color:#6b6b6b;font-size:0.75rem;">players</div>
+            <div style="color:#86868b;font-size:0.75rem;">players</div>
         </div>
         ''', unsafe_allow_html=True)
     
     with sum_cols[1]:
         st.markdown(f'''
-        <div style="background:#141416;border:1px solid #ef4444;border-radius:10px;padding:1rem;text-align:center;">
+        <div style="background:#ffffff;box-shadow:0 2px 8px rgba(0,0,0,0.06);border:1px solid #ef4444;border-radius:10px;padding:1rem;text-align:center;">
             <div style="color:#fca5a5;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Likely to Fall</div>
             <div style="color:#ef4444;font-size:2rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{len(falling)}</div>
-            <div style="color:#6b6b6b;font-size:0.75rem;">players</div>
+            <div style="color:#86868b;font-size:0.75rem;">players</div>
         </div>
         ''', unsafe_allow_html=True)
     
     with sum_cols[2]:
         st.markdown(f'''
-        <div style="background:#141416;border:1px solid #4ade80;border-radius:10px;padding:1rem;text-align:center;">
+        <div style="background:#ffffff;box-shadow:0 2px 8px rgba(0,0,0,0.06);border:1px solid #4ade80;border-radius:10px;padding:1rem;text-align:center;">
             <div style="color:#bef264;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Watch (Rise)</div>
             <div style="color:#4ade80;font-size:2rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{len(watch_rise)}</div>
-            <div style="color:#6b6b6b;font-size:0.75rem;">near threshold</div>
+            <div style="color:#86868b;font-size:0.75rem;">near threshold</div>
         </div>
         ''', unsafe_allow_html=True)
     
     with sum_cols[3]:
         st.markdown(f'''
-        <div style="background:#141416;border:1px solid #f59e0b;border-radius:10px;padding:1rem;text-align:center;">
+        <div style="background:#ffffff;box-shadow:0 2px 8px rgba(0,0,0,0.06);border:1px solid #f59e0b;border-radius:10px;padding:1rem;text-align:center;">
             <div style="color:#fcd34d;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Watch (Fall)</div>
             <div style="color:#f59e0b;font-size:2rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{len(watch_fall)}</div>
-            <div style="color:#6b6b6b;font-size:0.75rem;">near threshold</div>
+            <div style="color:#86868b;font-size:0.75rem;">near threshold</div>
         </div>
         ''', unsafe_allow_html=True)
     
@@ -193,7 +193,9 @@ def render_price_predictor_tab(processor, players_df: pd.DataFrame):
     search = st.text_input("Search for a specific player", key="price_search")
     
     if search:
-        matched = df[df['web_name'].str.lower().str.contains(search.lower(), na=False)]
+        search_norm = normalize_name(search.lower().strip())
+        df['_name_norm'] = df['web_name'].apply(lambda x: normalize_name(str(x).lower()))
+        matched = df[df['_name_norm'].str.contains(search_norm, na=False)]
         
         if not matched.empty:
             for _, player in matched.head(3).iterrows():
@@ -206,11 +208,11 @@ def render_price_predictor_tab(processor, players_df: pd.DataFrame):
                 season_change = player['cost_change_start'] / 10
                 
                 st.markdown(f'''
-                <div style="background:#141416;border:1px solid #2a2a2e;border-radius:10px;padding:1rem;margin-bottom:0.5rem;">
+                <div style="background:#ffffff;border:1px solid rgba(0,0,0,0.04);border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:1rem;margin-bottom:0.5rem;">
                     <div style="display:flex;justify-content:space-between;align-items:center;">
                         <div>
-                            <span style="color:#e8e8e8;font-weight:700;font-size:1.1rem;">{player['web_name']}</span>
-                            <span style="color:#6b6b6b;font-size:0.9rem;margin-left:0.5rem;">{player.get('team_name', '')} | {player['position']}</span>
+                            <span style="color:#1d1d1f;font-weight:700;font-size:1.1rem;">{player['web_name']}</span>
+                            <span style="color:#86868b;font-size:0.9rem;margin-left:0.5rem;">{player.get('team_name', '')} | {player['position']}</span>
                         </div>
                         <div style="background:{status_color};color:#fff;padding:0.25rem 0.75rem;border-radius:8px;font-size:0.72rem;font-weight:600;">
                             {status_text}
@@ -218,19 +220,19 @@ def render_price_predictor_tab(processor, players_df: pd.DataFrame):
                     </div>
                     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0.75rem;margin-top:0.75rem;text-align:center;">
                         <div>
-                            <div style="color:#6b6b6b;font-size:0.7rem;text-transform:uppercase;">Current Price</div>
-                            <div style="color:#e8e8e8;font-weight:600;font-family:'JetBrains Mono',monospace;">£{player['now_cost']:.1f}m</div>
+                            <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">Current Price</div>
+                            <div style="color:#1d1d1f;font-weight:600;font-family:'JetBrains Mono',monospace;">£{player['now_cost']:.1f}m</div>
                         </div>
                         <div>
-                            <div style="color:#6b6b6b;font-size:0.7rem;text-transform:uppercase;">Net Transfers</div>
+                            <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">Net Transfers</div>
                             <div style="color:{status_color};font-weight:600;font-family:'JetBrains Mono',monospace;">{net:+,.0f}</div>
                         </div>
                         <div>
-                            <div style="color:#6b6b6b;font-size:0.7rem;text-transform:uppercase;">GW Change</div>
+                            <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">GW Change</div>
                             <div style="color:{'#22c55e' if event_change > 0 else '#ef4444' if event_change < 0 else '#6b6b6b'};font-weight:600;font-family:'JetBrains Mono',monospace;">{event_change:+.1f}</div>
                         </div>
                         <div>
-                            <div style="color:#6b6b6b;font-size:0.7rem;text-transform:uppercase;">Season Change</div>
+                            <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">Season Change</div>
                             <div style="color:{'#22c55e' if season_change > 0 else '#ef4444' if season_change < 0 else '#6b6b6b'};font-weight:600;font-family:'JetBrains Mono',monospace;">{season_change:+.1f}</div>
                         </div>
                     </div>
@@ -307,12 +309,12 @@ def render_price_predictor_tab(processor, players_df: pd.DataFrame):
     
     fig.update_layout(
         height=300,
-        template='plotly_dark',
-        paper_bgcolor='#0a0a0b',
-        plot_bgcolor='#111113',
-        font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
-        xaxis=dict(title='Net Transfers This GW', gridcolor='#1e1e21'),
-        yaxis=dict(title='Number of Players', gridcolor='#1e1e21'),
+        template='plotly_white',
+        paper_bgcolor='#ffffff',
+        plot_bgcolor='#ffffff',
+        font=dict(family='Inter, sans-serif', color='#86868b', size=11),
+        xaxis=dict(title='Net Transfers This GW', gridcolor='#e5e5ea'),
+        yaxis=dict(title='Number of Players', gridcolor='#e5e5ea'),
         margin=dict(l=50, r=30, t=30, b=50),
         showlegend=False
     )

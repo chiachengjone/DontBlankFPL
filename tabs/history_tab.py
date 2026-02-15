@@ -62,8 +62,8 @@ def render_history_tab(processor, players_df: pd.DataFrame, fetcher):
     
     with sum_cols[0]:
         st.markdown(f'''
-        <div style="background:#141416;border:1px solid #2a2a2e;border-radius:10px;padding:1rem;text-align:center;">
-            <div style="color:#6b6b6b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Total Points</div>
+        <div style="background:#ffffff;border:1px solid rgba(0,0,0,0.04);border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:1rem;text-align:center;">
+            <div style="color:#86868b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Total Points</div>
             <div style="color:#3b82f6;font-size:2rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{total_points}</div>
         </div>
         ''', unsafe_allow_html=True)
@@ -71,24 +71,24 @@ def render_history_tab(processor, players_df: pd.DataFrame, fetcher):
     with sum_cols[1]:
         rank_color = '#22c55e' if current_rank < 100000 else '#f59e0b' if current_rank < 500000 else '#6b6b6b'
         st.markdown(f'''
-        <div style="background:#141416;border:1px solid #2a2a2e;border-radius:10px;padding:1rem;text-align:center;">
-            <div style="color:#6b6b6b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Overall Rank</div>
+        <div style="background:#ffffff;border:1px solid rgba(0,0,0,0.04);border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:1rem;text-align:center;">
+            <div style="color:#86868b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Overall Rank</div>
             <div style="color:{rank_color};font-size:1.5rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{current_rank:,}</div>
         </div>
         ''', unsafe_allow_html=True)
     
     with sum_cols[2]:
         st.markdown(f'''
-        <div style="background:#141416;border:1px solid #2a2a2e;border-radius:10px;padding:1rem;text-align:center;">
-            <div style="color:#6b6b6b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Avg GW Points</div>
+        <div style="background:#ffffff;border:1px solid rgba(0,0,0,0.04);border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:1rem;text-align:center;">
+            <div style="color:#86868b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Avg GW Points</div>
             <div style="color:#22c55e;font-size:2rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{avg_gw_points:.1f}</div>
         </div>
         ''', unsafe_allow_html=True)
     
     with sum_cols[3]:
         st.markdown(f'''
-        <div style="background:#141416;border:1px solid #2a2a2e;border-radius:10px;padding:1rem;text-align:center;">
-            <div style="color:#6b6b6b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Transfer Hits</div>
+        <div style="background:#ffffff;border:1px solid rgba(0,0,0,0.04);border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:1rem;text-align:center;">
+            <div style="color:#86868b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Transfer Hits</div>
             <div style="color:#ef4444;font-size:2rem;font-weight:700;font-family:'JetBrains Mono',monospace;">-{total_hits}</div>
         </div>
         ''', unsafe_allow_html=True)
@@ -125,17 +125,17 @@ def render_history_tab(processor, players_df: pd.DataFrame, fetcher):
     
     fig.update_layout(
         height=350,
-        template='plotly_dark',
-        paper_bgcolor='#0a0a0b',
-        plot_bgcolor='#111113',
-        font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
+        template='plotly_white',
+        paper_bgcolor='#ffffff',
+        plot_bgcolor='#ffffff',
+        font=dict(family='Inter, sans-serif', color='#86868b', size=11),
         legend=dict(orientation='h', yanchor='bottom', y=1.02),
         margin=dict(l=50, r=50, t=40, b=50)
     )
     
-    fig.update_xaxes(title_text='Gameweek', gridcolor='#1e1e21')
-    fig.update_yaxes(title_text='Points', gridcolor='#1e1e21', secondary_y=False)
-    fig.update_yaxes(title_text='Rank', gridcolor='#1e1e21', secondary_y=True, autorange='reversed')
+    fig.update_xaxes(title_text='Gameweek', gridcolor='#e5e5ea')
+    fig.update_yaxes(title_text='Points', gridcolor='#e5e5ea', secondary_y=False)
+    fig.update_yaxes(title_text='Rank', gridcolor='#e5e5ea', secondary_y=True, autorange='reversed')
     
     st.plotly_chart(fig, use_container_width=True)
     
@@ -150,10 +150,10 @@ def render_history_tab(processor, players_df: pd.DataFrame, fetcher):
         st.markdown("**Best Gameweek**")
         if best_gw:
             st.markdown(f'''
-            <div style="background:#141416;border:1px solid #22c55e;border-radius:10px;padding:1rem;">
+            <div style="background:#ffffff;box-shadow:0 2px 8px rgba(0,0,0,0.06);border:1px solid #22c55e;border-radius:10px;padding:1rem;">
                 <div style="color:#6ee7b7;font-size:0.72rem;font-weight:500;text-transform:uppercase;">GW{best_gw.get('event', '?')}</div>
                 <div style="color:#22c55e;font-size:2rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{best_gw.get('points', 0)} pts</div>
-                <div style="color:#6b6b6b;font-size:0.8rem;">Rank: {best_gw.get('rank', 'N/A'):,}</div>
+                <div style="color:#86868b;font-size:0.8rem;">Rank: {best_gw.get('rank', 'N/A'):,}</div>
             </div>
             ''', unsafe_allow_html=True)
     
@@ -161,10 +161,10 @@ def render_history_tab(processor, players_df: pd.DataFrame, fetcher):
         st.markdown("**Worst Gameweek**")
         if worst_gw:
             st.markdown(f'''
-            <div style="background:#141416;border:1px solid #ef4444;border-radius:10px;padding:1rem;">
+            <div style="background:#ffffff;box-shadow:0 2px 8px rgba(0,0,0,0.06);border:1px solid #ef4444;border-radius:10px;padding:1rem;">
                 <div style="color:#fca5a5;font-size:0.72rem;font-weight:500;text-transform:uppercase;">GW{worst_gw.get('event', '?')}</div>
                 <div style="color:#ef4444;font-size:2rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{worst_gw.get('points', 0)} pts</div>
-                <div style="color:#6b6b6b;font-size:0.8rem;">Rank: {worst_gw.get('rank', 'N/A'):,}</div>
+                <div style="color:#86868b;font-size:0.8rem;">Rank: {worst_gw.get('rank', 'N/A'):,}</div>
             </div>
             ''', unsafe_allow_html=True)
     
@@ -190,14 +190,14 @@ def render_history_tab(processor, players_df: pd.DataFrame, fetcher):
     
     fig2.update_layout(
         height=250,
-        template='plotly_dark',
-        paper_bgcolor='#0a0a0b',
-        plot_bgcolor='#111113',
-        font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
+        template='plotly_white',
+        paper_bgcolor='#ffffff',
+        plot_bgcolor='#ffffff',
+        font=dict(family='Inter, sans-serif', color='#86868b', size=11),
         barmode='relative',
         legend=dict(orientation='h', yanchor='bottom', y=1.02),
-        xaxis=dict(title='Gameweek', gridcolor='#1e1e21'),
-        yaxis=dict(title='Transfers', gridcolor='#1e1e21'),
+        xaxis=dict(title='Gameweek', gridcolor='#e5e5ea'),
+        yaxis=dict(title='Transfers', gridcolor='#e5e5ea'),
         margin=dict(l=50, r=30, t=40, b=50)
     )
     
@@ -249,17 +249,17 @@ def render_history_tab(processor, players_df: pd.DataFrame, fetcher):
         arrow_cols = st.columns(2)
         with arrow_cols[0]:
             st.markdown(f'''
-            <div style="background:#141416;border:1px solid #22c55e;border-radius:10px;padding:1rem;text-align:center;">
+            <div style="background:#ffffff;box-shadow:0 2px 8px rgba(0,0,0,0.06);border:1px solid #22c55e;border-radius:10px;padding:1rem;text-align:center;">
                 <div style="color:#22c55e;font-size:1.5rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{green_arrows}</div>
-                <div style="color:#6b6b6b;font-size:0.72rem;text-transform:uppercase;">Green Arrows</div>
+                <div style="color:#86868b;font-size:0.72rem;text-transform:uppercase;">Green Arrows</div>
             </div>
             ''', unsafe_allow_html=True)
         
         with arrow_cols[1]:
             st.markdown(f'''
-            <div style="background:#141416;border:1px solid #ef4444;border-radius:10px;padding:1rem;text-align:center;">
+            <div style="background:#ffffff;box-shadow:0 2px 8px rgba(0,0,0,0.06);border:1px solid #ef4444;border-radius:10px;padding:1rem;text-align:center;">
                 <div style="color:#ef4444;font-size:1.5rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{red_arrows}</div>
-                <div style="color:#6b6b6b;font-size:0.72rem;text-transform:uppercase;">Red Arrows</div>
+                <div style="color:#86868b;font-size:0.72rem;text-transform:uppercase;">Red Arrows</div>
             </div>
             ''', unsafe_allow_html=True)
 

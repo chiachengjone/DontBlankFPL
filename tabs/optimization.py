@@ -217,10 +217,10 @@ def render_budget_breakdown(current_squad_df, ep_col):
         )])
         fig_pie.update_layout(
             height=250,
-            template='plotly_dark',
-            paper_bgcolor='#0a0a0b',
-            plot_bgcolor='#111113',
-            font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
+            template='plotly_white',
+            paper_bgcolor='#ffffff',
+            plot_bgcolor='#ffffff',
+            font=dict(family='Inter, sans-serif', color='#86868b', size=11),
             margin=dict(l=20, r=20, t=20, b=20),
             showlegend=False
         )
@@ -241,10 +241,10 @@ def render_budget_breakdown(current_squad_df, ep_col):
         ))
         fig_form.update_layout(
             height=250,
-            template='plotly_dark',
-            paper_bgcolor='#0a0a0b',
-            plot_bgcolor='#111113',
-            font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
+            template='plotly_white',
+            paper_bgcolor='#ffffff',
+            plot_bgcolor='#ffffff',
+            font=dict(family='Inter, sans-serif', color='#86868b', size=11),
             margin=dict(l=40, r=20, t=20, b=60),
             xaxis_tickangle=-45,
             yaxis_title='Form'
@@ -436,7 +436,7 @@ def render_ai_transfer_plan(current_squad_df, available_df, ep_col, free_transfe
             f'<span style="color:#888;">Net Spend:</span> '
             f'<span style="color:{spend_color};font-weight:600;">{net_spend:+.1f}m</span>'
             f' | <span style="color:#888;">Bank After:</span> '
-            f'<span style="color:#fff;font-weight:600;">{bank - net_spend:.1f}m</span>'
+            f'<span style="color:#1d1d1f;font-weight:600;">{bank - net_spend:.1f}m</span>'
             f' | <span style="color:#888;">EP Gain:</span> '
             f'<span style="color:{ep_color};font-weight:600;">{ep_gain:+.1f}</span>'
             f'{hit_html}'
@@ -492,10 +492,10 @@ def render_points_projection(current_squad_df, available_df, ep_col):
     
     fig_proj.update_layout(
         height=300,
-        template='plotly_dark',
-        paper_bgcolor='#0a0a0b',
-        plot_bgcolor='#111113',
-        font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
+        template='plotly_white',
+        paper_bgcolor='#ffffff',
+        plot_bgcolor='#ffffff',
+        font=dict(family='Inter, sans-serif', color='#86868b', size=11),
         barmode='group',
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
         margin=dict(l=40, r=40, t=40, b=40),
@@ -609,7 +609,7 @@ def render_multi_week_plan(current_squad_df, available_df, ep_col, free_transfer
                 tc1, tc2, tc3 = st.columns([5, 1, 5])
                 with tc1:
                     st.markdown(
-                        f'<div style="background:#141416;border:1px solid #2a2a2e;border-radius:8px;'
+                        f'<div style="background:#fff;border:1px solid rgba(0,0,0,0.06);border-radius:8px;'
                         f'padding:0.5rem 0.7rem;text-align:center;">'
                         f'<span style="color:#ef4444;font-weight:600;">OUT</span> '
                         f'{t["out"]} ({t["out_price"]:.1f}m)</div>',
@@ -619,7 +619,7 @@ def render_multi_week_plan(current_squad_df, available_df, ep_col, free_transfer
                     st.markdown('<div style="text-align:center;padding-top:0.3rem;color:#fff;">></div>', unsafe_allow_html=True)
                 with tc3:
                     st.markdown(
-                        f'<div style="background:#141416;border:1px solid #2a2a2e;border-radius:8px;'
+                        f'<div style="background:#fff;border:1px solid rgba(0,0,0,0.06);border-radius:8px;'
                         f'padding:0.5rem 0.7rem;text-align:center;">'
                         f'<span style="color:#22c55e;font-weight:600;">IN</span> '
                         f'{t["in"]} ({t["in_price"]:.1f}m)</div>',

@@ -26,11 +26,11 @@ def render_player_detail_card(player_row: Dict, processor, players_df: pd.DataFr
     with col1:
         status_badge = f'<span style="color:{injury["color"]};margin-left:0.5rem;">[{injury["status"].upper()}]</span>' if injury['status'] != 'available' else ''
         st.markdown(f'''
-        <div style="background:#1a1a1a;padding:1rem;border:1px solid #333;">
-            <div style="font-size:1.5rem;font-weight:600;color:#fff;">
+        <div style="background:#ffffff;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:1rem;border:1px solid rgba(0,0,0,0.04);border-radius:10px;">
+            <div style="font-size:1.5rem;font-weight:600;color:#1d1d1f;">
                 {player_row["web_name"]}{status_badge}
             </div>
-            <div style="color:#888;">{player_row.get("team_name", "")} | {player_row.get("position", "")} | {player_row["now_cost"]:.1f}m</div>
+            <div style="color:#86868b;">{player_row.get("team_name", "")} | {player_row.get("position", "")} | {player_row["now_cost"]:.1f}m</div>
             {f'<div style="color:#f59e0b;font-size:0.85rem;margin-top:0.5rem;">{injury["news"]}</div>' if injury["news"] else ''}
         </div>
         ''', unsafe_allow_html=True)
@@ -76,7 +76,7 @@ def render_player_detail_card(player_row: Dict, processor, players_df: pd.DataFr
     with prc1:
         st.markdown('<p class="section-title">Price Changes</p>', unsafe_allow_html=True)
         st.markdown(f'''
-        <div style="background:#1a1a1a;padding:1rem;border:1px solid #333;">
+        <div style="background:#ffffff;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:1rem;border:1px solid rgba(0,0,0,0.04);border-radius:10px;">
             <div>This GW: <span style="color:{"#22c55e" if price_info["change_gw"] > 0 else "#ef4444" if price_info["change_gw"] < 0 else "#888"};font-weight:600;">{price_info["change_gw"]:+.1f}m</span></div>
             <div>Season: <span style="color:{"#22c55e" if price_info["change_season"] > 0 else "#ef4444" if price_info["change_season"] < 0 else "#888"};font-weight:600;">{price_info["change_season"]:+.1f}m</span></div>
             <div style="margin-top:0.5rem;">Transfers In: <span style="color:#22c55e;">{price_info["transfers_in"]:,}</span></div>
@@ -95,12 +95,12 @@ def render_player_detail_card(player_row: Dict, processor, players_df: pd.DataFr
         bonus = int(safe_numeric(pd.Series([player_row.get('bonus', 0)])).iloc[0])
         
         st.markdown(f'''
-        <div style="background:#1a1a1a;padding:1rem;border:1px solid #333;">
-            <div>Goals: <span style="color:#fff;font-weight:600;">{goals}</span></div>
-            <div>Assists: <span style="color:#fff;font-weight:600;">{assists}</span></div>
-            <div>Clean Sheets: <span style="color:#fff;font-weight:600;">{cs}</span></div>
-            <div>Minutes: <span style="color:#fff;font-weight:600;">{mins:,}</span></div>
-            <div>Bonus: <span style="color:#fff;font-weight:600;">{bonus}</span></div>
+        <div style="background:#ffffff;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:1rem;border:1px solid rgba(0,0,0,0.06);border-radius:10px;">
+            <div>Goals: <span style="color:#1d1d1f;font-weight:600;">{goals}</span></div>
+            <div>Assists: <span style="color:#1d1d1f;font-weight:600;">{assists}</span></div>
+            <div>Clean Sheets: <span style="color:#1d1d1f;font-weight:600;">{cs}</span></div>
+            <div>Minutes: <span style="color:#1d1d1f;font-weight:600;">{mins:,}</span></div>
+            <div>Bonus: <span style="color:#1d1d1f;font-weight:600;">{bonus}</span></div>
         </div>
         ''', unsafe_allow_html=True)
 
@@ -113,11 +113,11 @@ def render_captain_pick_card(player_row: Dict, rank: int = 1):
     medal = '#1' if rank == 1 else '#2' if rank == 2 else '#3' if rank == 3 else f'#{rank}'
     
     st.markdown(f'''
-    <div style="background:#1a1a1a;padding:0.75rem;border:1px solid #333;margin-bottom:0.5rem;">
+    <div style="background:#ffffff;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:0.75rem;border:1px solid rgba(0,0,0,0.04);border-radius:10px;margin-bottom:0.5rem;">
         <div style="display:flex;justify-content:space-between;align-items:center;">
             <div>
                 <span style="font-size:1.2rem;margin-right:0.5rem;">{medal}</span>
-                <span style="color:#fff;font-weight:600;">{player_row["web_name"]}</span>
+                <span style="color:#1d1d1f;font-weight:600;">{player_row["web_name"]}</span>
                 <span style="color:#888;margin-left:0.5rem;">{player_row.get("team_name", "")}</span>
             </div>
             <div style="text-align:right;">
@@ -132,10 +132,10 @@ def render_captain_pick_card(player_row: Dict, rank: int = 1):
 def render_injury_alert_card(player_row: Dict, injury_info: Dict):
     """Render injury alert card."""
     st.markdown(f'''
-    <div style="background:#1a1a1a;padding:0.75rem;border-left:3px solid {injury_info["color"]};margin-bottom:0.5rem;">
+    <div style="background:#ffffff;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:0.75rem;border:1px solid rgba(0,0,0,0.04);border-left:3px solid {injury_info["color"]};border-radius:10px;margin-bottom:0.5rem;">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;">
             <div>
-                <span style="color:#fff;font-weight:600;">{player_row["web_name"]}</span>
+                <span style="color:#1d1d1f;font-weight:600;">{player_row["web_name"]}</span>
                 <span style="color:#888;margin-left:0.5rem;">{player_row.get("team_name", "")}</span>
             </div>
             <span style="color:{injury_info["color"]};font-weight:600;">{injury_info["chance"]}%</span>

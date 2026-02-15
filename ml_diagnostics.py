@@ -239,7 +239,7 @@ def generate_report(df: pd.DataFrame) -> str:
     leaky = identify_leakage_features(corr_df, threshold=0.85)
     if leaky:
         report.append("")
-        report.append(f"   ⚠️  HIGH LEAKAGE RISK FEATURES ({len(leaky)}):")
+        report.append(f"   HIGH LEAKAGE RISK FEATURES ({len(leaky)}):")
         for feat in leaky:
             report.append(f"      - {feat}")
     
@@ -267,7 +267,7 @@ def generate_report(df: pd.DataFrame) -> str:
         report.append(f"   Test R²:   {cv_results['test_r2_mean']:.3f} ± {cv_results['test_r2_std']:.3f}")
         report.append(f"   Overfit Ratio: {cv_results['overfit_ratio']:.2f}x")
         report.append("")
-        report.append(f"   📊 DIAGNOSIS: {cv_results['diagnosis']}")
+        report.append(f"   DIAGNOSIS: {cv_results['diagnosis']}")
     else:
         report.append("   Insufficient features for CV analysis")
     
@@ -284,7 +284,7 @@ def generate_report(df: pd.DataFrame) -> str:
     report.append("")
     report.append("   Pre-match features to use:")
     for feat in categories['pre_match_safe'][:10]:
-        report.append(f"      ✓ {feat}")
+        report.append(f"      - {feat}")
     
     report.append("")
     report.append("=" * 70)

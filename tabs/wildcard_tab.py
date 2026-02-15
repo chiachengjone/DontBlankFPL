@@ -181,7 +181,7 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
     st.markdown("---")
     
     # ── Generate Button ──
-    if st.button("🚀 Generate Wildcard Squad", type="primary", use_container_width=True):
+    if st.button("Generate Wildcard Squad", type="primary", use_container_width=True):
         with st.spinner("Optimizing squad..."):
             squad = generate_wildcard_squad(players_df, formation, strategy, budget)
             
@@ -206,8 +206,8 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
         
         with sum_cols[0]:
             st.markdown(f'''
-            <div style="background:#141416;border:1px solid #2a2a2e;border-radius:10px;padding:1rem;text-align:center;">
-                <div style="color:#6b6b6b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Total Cost</div>
+            <div style="background:#ffffff;border:1px solid rgba(0,0,0,0.04);border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:1rem;text-align:center;">
+                <div style="color:#86868b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Total Cost</div>
                 <div style="color:#3b82f6;font-size:1.5rem;font-weight:700;font-family:'JetBrains Mono',monospace;">£{total_cost:.1f}m</div>
             </div>
             ''', unsafe_allow_html=True)
@@ -216,24 +216,24 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
             remaining = budget - total_cost
             color = '#22c55e' if remaining >= 0 else '#ef4444'
             st.markdown(f'''
-            <div style="background:#141416;border:1px solid #2a2a2e;border-radius:10px;padding:1rem;text-align:center;">
-                <div style="color:#6b6b6b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">ITB</div>
+            <div style="background:#ffffff;border:1px solid rgba(0,0,0,0.04);border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:1rem;text-align:center;">
+                <div style="color:#86868b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">ITB</div>
                 <div style="color:{color};font-size:1.5rem;font-weight:700;font-family:'JetBrains Mono',monospace;">£{remaining:.1f}m</div>
             </div>
             ''', unsafe_allow_html=True)
         
         with sum_cols[2]:
             st.markdown(f'''
-            <div style="background:#141416;border:1px solid #2a2a2e;border-radius:10px;padding:1rem;text-align:center;">
-                <div style="color:#6b6b6b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Starting XI EP</div>
+            <div style="background:#ffffff;border:1px solid rgba(0,0,0,0.04);border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:1rem;text-align:center;">
+                <div style="color:#86868b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Starting XI EP</div>
                 <div style="color:#22c55e;font-size:1.5rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{starting_ep:.1f}</div>
             </div>
             ''', unsafe_allow_html=True)
         
         with sum_cols[3]:
             st.markdown(f'''
-            <div style="background:#141416;border:1px solid #2a2a2e;border-radius:10px;padding:1rem;text-align:center;">
-                <div style="color:#6b6b6b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Avg Ownership</div>
+            <div style="background:#ffffff;border:1px solid rgba(0,0,0,0.04);border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:1rem;text-align:center;">
+                <div style="color:#86868b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Avg Ownership</div>
                 <div style="color:#f59e0b;font-size:1.5rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{avg_ownership:.1f}%</div>
             </div>
             ''', unsafe_allow_html=True)
@@ -255,7 +255,7 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
             display_df = pos_players[['web_name', 'team_name', 'now_cost', 'expected_points', 
                                       'form', 'selected_by_percent', 'is_starter']].copy()
             display_df.columns = ['Player', 'Team', 'Price', 'EP', 'Form', 'EO%', 'Starting']
-            display_df['Starting'] = display_df['Starting'].apply(lambda x: '⭐' if x else '🪑')
+            display_df['Starting'] = display_df['Starting'].apply(lambda x: 'Starting' if x else 'Bench')
             
             st.dataframe(
                 display_df.style.format({
@@ -276,9 +276,9 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
         
         if (team_counts > 3).any():
             over_limit = team_counts[team_counts > 3]
-            st.error(f"⚠️ Team limit exceeded: {', '.join(over_limit.index.tolist())}")
+            st.error(f"Team limit exceeded: {', '.join(over_limit.index.tolist())}")
         else:
-            st.success(f"✅ Valid squad: 15 players, £{total_cost:.1f}m, max 3 per team")
+            st.success(f"Valid squad: 15 players, £{total_cost:.1f}m, max 3 per team")
         
         # Position verification
         pos_counts = squad.groupby('position').size().to_dict()

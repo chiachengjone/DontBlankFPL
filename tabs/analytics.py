@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 
 from utils.helpers import (
     safe_numeric, style_df_with_injuries, round_df,
-    classify_ownership_column,
+    classify_ownership_column, normalize_name,
 )
 from components.charts import create_cbit_chart, create_ownership_trends_chart
 
@@ -86,7 +86,10 @@ def render_analytics_tab(processor, players_df: pd.DataFrame):
     df = df[df['minutes'] >= min_mins]
     
     if search:
-        df = df[df['web_name'].str.lower().str.contains(search.lower(), na=False)]
+        query_norm = normalize_name(search.lower().strip())
+        df['_name_norm'] = df['web_name'].apply(lambda x: normalize_name(str(x).lower()))
+        df = df[df['_name_norm'].str.contains(query_norm, na=False)]
+        df = df.drop(columns=['_name_norm'])
     
     # Sort
     sort_map = {
@@ -202,11 +205,11 @@ def render_points_distribution(players_df: pd.DataFrame):
     
     fig.update_layout(
         height=320, barmode='overlay',
-        template='plotly_dark',
-        paper_bgcolor='#0a0a0b', plot_bgcolor='#111113',
-        font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
-        xaxis=dict(title='Expected Points', gridcolor='#1e1e21'),
-        yaxis=dict(title='Count', gridcolor='#1e1e21'),
+        template='plotly_white',
+        paper_bgcolor='#ffffff', plot_bgcolor='#ffffff',
+        font=dict(family='Inter, sans-serif', color='#86868b', size=11),
+        xaxis=dict(title='Expected Points', gridcolor='#e5e5ea'),
+        yaxis=dict(title='Count', gridcolor='#e5e5ea'),
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
         margin=dict(l=50, r=30, t=30, b=50)
     )
@@ -243,10 +246,10 @@ def render_value_by_position(players_df: pd.DataFrame):
     
     fig.update_layout(
         height=350,
-        template='plotly_dark',
-        paper_bgcolor='#0a0a0b', plot_bgcolor='#111113',
-        font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
-        yaxis=dict(title='EP per £m', gridcolor='#1e1e21'),
+        template='plotly_white',
+        paper_bgcolor='#ffffff', plot_bgcolor='#ffffff',
+        font=dict(family='Inter, sans-serif', color='#86868b', size=11),
+        yaxis=dict(title='EP per £m', gridcolor='#e5e5ea'),
         showlegend=False,
         margin=dict(l=50, r=30, t=20, b=40)
     )
@@ -358,11 +361,11 @@ def render_advanced_metrics(players_df: pd.DataFrame):
                 customdata=pos_df[['now_cost']].values
             ))
         fig.update_layout(
-            height=300, template='plotly_dark',
-            paper_bgcolor='#0a0a0b', plot_bgcolor='#111113',
-            font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
-            xaxis=dict(gridcolor='#1e1e21', tickangle=45),
-            yaxis=dict(title='EPPM', gridcolor='#1e1e21'),
+            height=300, template='plotly_white',
+            paper_bgcolor='#ffffff', plot_bgcolor='#ffffff',
+            font=dict(family='Inter, sans-serif', color='#86868b', size=11),
+            xaxis=dict(gridcolor='#e5e5ea', tickangle=45),
+            yaxis=dict(title='EPPM', gridcolor='#e5e5ea'),
             legend=dict(orientation='h', yanchor='bottom', y=1.02),
             margin=dict(l=50, r=30, t=40, b=80),
             barmode='group'
@@ -386,7 +389,9 @@ def render_advanced_metrics(players_df: pd.DataFrame):
             search_lower = am2_search.lower().strip() if is_searching else ""
             
             if is_searching:
-                scatter_df['is_searched'] = scatter_df['web_name'].str.lower().str.contains(search_lower, na=False)
+                search_norm = normalize_name(search_lower)
+                scatter_df['_name_norm'] = scatter_df['web_name'].apply(lambda x: normalize_name(str(x).lower()))
+                scatter_df['is_searched'] = scatter_df['_name_norm'].str.contains(search_norm, na=False)
             else:
                 scatter_df['is_searched'] = False
             
@@ -423,11 +428,11 @@ def render_advanced_metrics(players_df: pd.DataFrame):
                     ))
             
             fig.update_layout(
-                height=380, template='plotly_dark',
-                paper_bgcolor='#0a0a0b', plot_bgcolor='#111113',
-                font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
-                xaxis=dict(title='Threat Momentum', gridcolor='#1e1e21'),
-                yaxis=dict(title='Matchup Quality', gridcolor='#1e1e21'),
+                height=380, template='plotly_white',
+                paper_bgcolor='#ffffff', plot_bgcolor='#ffffff',
+                font=dict(family='Inter, sans-serif', color='#86868b', size=11),
+                xaxis=dict(title='Threat Momentum', gridcolor='#e5e5ea'),
+                yaxis=dict(title='Matchup Quality', gridcolor='#e5e5ea'),
                 legend=dict(orientation='h', yanchor='bottom', y=1.02),
                 margin=dict(l=50, r=30, t=40, b=50)
             )
@@ -474,21 +479,21 @@ def render_advanced_metrics(players_df: pd.DataFrame):
                     direction_color = '#22c55e' if direction > 0 else '#ef4444' if direction < 0 else '#888'
                     
                     st.markdown(
-                        f'<div style="background:#141416;border:1px solid #2a2a2e;border-radius:12px;padding:1rem;margin-bottom:0.5rem;">'
+                        f'<div style="background:#ffffff;border:1px solid rgba(0,0,0,0.04);border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:1rem;margin-bottom:0.5rem;">'
                         f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">'
                         f'<div><span style="color:{pos_color};font-weight:600;font-size:0.9rem;">{p["position"]}</span>'
                         f' <span style="color:#fff;font-weight:700;font-size:1.2rem;">{p["web_name"]}</span>'
                         f' <span style="color:#888;font-size:0.85rem;">{p.get("team_name", "")} | {p["now_cost"]:.1f}m</span></div>'
                         f'<div style="color:#888;font-size:0.8rem;">Own: {own:.1f}%</div></div>'
                         f'<div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:0.75rem;text-align:center;">'
-                        f'<div><div style="color:#888;font-size:0.7rem;">EP</div><div style="color:#fff;font-weight:600;">{ep:.1f}</div></div>'
-                        f'<div><div style="color:#888;font-size:0.7rem;">EPPM</div><div style="color:#fff;font-weight:600;">{eppm:.2f}</div></div>'
-                        f'<div><div style="color:#888;font-size:0.7rem;">Form</div><div style="color:#fff;font-weight:600;">{form:.1f}</div></div>'
+                        f'<div><div style="color:#888;font-size:0.7rem;">EP</div><div style="color:#1d1d1f;font-weight:600;">{ep:.1f}</div></div>'
+                        f'<div><div style="color:#888;font-size:0.7rem;">EPPM</div><div style="color:#1d1d1f;font-weight:600;">{eppm:.2f}</div></div>'
+                        f'<div><div style="color:#888;font-size:0.7rem;">Form</div><div style="color:#1d1d1f;font-weight:600;">{form:.1f}</div></div>'
                         f'<div><div style="color:#888;font-size:0.7rem;">Direction</div><div style="color:{direction_color};font-weight:600;">{direction_label}</div></div>'
                         f'</div>'
                         f'<div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:0.75rem;text-align:center;margin-top:0.5rem;">'
-                        f'<div><div style="color:#888;font-size:0.7rem;">Momentum</div><div style="color:#fff;font-weight:600;">{momentum:.2f}</div></div>'
-                        f'<div><div style="color:#888;font-size:0.7rem;">Matchup</div><div style="color:#fff;font-weight:600;">{matchup:.2f}</div></div>'
+                        f'<div><div style="color:#888;font-size:0.7rem;">Momentum</div><div style="color:#1d1d1f;font-weight:600;">{momentum:.2f}</div></div>'
+                        f'<div><div style="color:#888;font-size:0.7rem;">Matchup</div><div style="color:#1d1d1f;font-weight:600;">{matchup:.2f}</div></div>'
                         f'<div><div style="color:#888;font-size:0.7rem;">Goals vs xG</div><div style="color:{goal_color};font-weight:600;">{goals} ({goal_label})</div></div>'
                         f'<div><div style="color:#888;font-size:0.7rem;">Assists vs xA</div><div style="color:{assist_color};font-weight:600;">{assists} ({assist_label})</div></div>'
                         f'</div></div>',
@@ -545,7 +550,7 @@ def render_advanced_metrics(players_df: pd.DataFrame):
                     verdict = p.get('diff_verdict', '')
                     profile = p.get('diff_profile', '')
                     st.markdown(
-                        f'<div style="background:#141416;border:1px solid #2a2a2e;border-radius:8px;padding:0.7rem;">'
+                        f'<div style="background:#ffffff;border:1px solid rgba(0,0,0,0.04);border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:0.7rem;">'
                         f'<div style="color:{pos_color};font-size:0.75rem;font-weight:600;">{p["position"]}</div>'
                         f'<div style="color:#fff;font-size:1rem;font-weight:600;">{p["web_name"]}</div>'
                         f'<div style="color:#888;font-size:0.8rem;">{p.get("team_name", "")} | {p["now_cost"]:.1f}m</div>'
@@ -688,7 +693,7 @@ def render_expected_vs_actual(players_df: pd.DataFrame):
         max_val = max(top_players['total_points'].max(), top_players['expected_total'].max()) * 1.1
         fig.add_trace(go.Scatter(
             x=[0, max_val], y=[0, max_val],
-            mode='lines', line=dict(color='rgba(255,255,255,0.08)', dash='dot'),
+            mode='lines', line=dict(color='rgba(0,0,0,0.08)', dash='dot'),
             showlegend=False, hoverinfo='skip'
         ))
         
@@ -700,7 +705,7 @@ def render_expected_vs_actual(players_df: pd.DataFrame):
                 x=pos_df['expected_total'], y=pos_df['total_points'],
                 mode='markers', name=pos,
                 marker=dict(size=8, color=color, opacity=0.75,
-                           line=dict(width=1, color='rgba(255,255,255,0.1)')),
+                           line=dict(width=1, color='rgba(0,0,0,0.08)')),
                 text=pos_df['web_name'],
                 hovertemplate='<b>%{text}</b><br>Expected: %{x:.0f}<br>Actual: %{y:.0f}<extra></extra>'
             ))
@@ -708,7 +713,9 @@ def render_expected_vs_actual(players_df: pd.DataFrame):
         # Highlight searched player
         if eva_search and eva_search.strip():
             search_lower = eva_search.lower().strip()
-            matched = top_players[top_players['web_name'].str.lower().str.contains(search_lower, na=False)]
+            search_norm = normalize_name(search_lower)
+            top_players['_name_norm'] = top_players['web_name'].apply(lambda x: normalize_name(str(x).lower()))
+            matched = top_players[top_players['_name_norm'].str.contains(search_norm, na=False)]
             if not matched.empty:
                 fig.add_trace(go.Scatter(
                     x=matched['expected_total'], y=matched['total_points'],
@@ -721,11 +728,11 @@ def render_expected_vs_actual(players_df: pd.DataFrame):
                 ))
         
         fig.update_layout(
-            height=380, template='plotly_dark',
-            paper_bgcolor='#0a0a0b', plot_bgcolor='#111113',
-            font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
-            xaxis=dict(title='Expected Total Points', gridcolor='#1e1e21'),
-            yaxis=dict(title='Actual Total Points', gridcolor='#1e1e21'),
+            height=380, template='plotly_white',
+            paper_bgcolor='#ffffff', plot_bgcolor='#ffffff',
+            font=dict(family='Inter, sans-serif', color='#86868b', size=11),
+            xaxis=dict(title='Expected Total Points', gridcolor='#e5e5ea'),
+            yaxis=dict(title='Actual Total Points', gridcolor='#e5e5ea'),
             legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
             margin=dict(l=50, r=30, t=30, b=50)
         )

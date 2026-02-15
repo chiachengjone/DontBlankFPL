@@ -146,10 +146,10 @@ def render_genetic_tab(processor, players_df: pd.DataFrame):
             fig.update_layout(
                 height=400,
                 showlegend=True,
-                template="plotly_dark",
-                paper_bgcolor="#0a0a0b",
-                plot_bgcolor="#111113",
-                font=dict(family="Inter, sans-serif", color="#6b6b6b", size=11),
+                template="plotly_white",
+                paper_bgcolor="#ffffff",
+                plot_bgcolor="#ffffff",
+                font=dict(family="Inter, sans-serif", color="#86868b", size=11),
             )
             st.plotly_chart(fig, use_container_width=True)
         else:

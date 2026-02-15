@@ -1,6 +1,6 @@
 """UI components for FPL Strategy Engine."""
 
-from components.styles import DARK_THEME_CSS, apply_theme
+from components.styles import DARK_THEME_CSS, apply_theme, render_tab_header
 from components.charts import (
     create_ep_ownership_scatter,
     create_cbit_chart,

@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 
-from utils.helpers import safe_numeric, round_df
+from utils.helpers import safe_numeric, round_df, normalize_name
 
 
 def render_monte_carlo_tab(processor, players_df: pd.DataFrame):
@@ -38,8 +38,10 @@ def render_monte_carlo_tab(processor, players_df: pd.DataFrame):
         player_search = st.text_input("Search player", key="mc_player_search")
 
         if player_search:
+            search_norm = normalize_name(player_search.lower().strip())
+            players_df['_name_norm'] = players_df['web_name'].apply(lambda x: normalize_name(str(x).lower()))
             matched = players_df[
-                players_df["web_name"].str.contains(player_search, case=False, na=False)
+                players_df['_name_norm'].str.contains(search_norm, na=False)
             ]
 
             if not matched.empty:
@@ -213,10 +215,10 @@ def render_monte_carlo_tab(processor, players_df: pd.DataFrame):
                 xaxis_title="Percentile",
                 yaxis_title="Points",
                 height=350,
-                template="plotly_dark",
-                paper_bgcolor="#0a0a0b",
-                plot_bgcolor="#111113",
-                font=dict(family="Inter, sans-serif", color="#6b6b6b", size=11),
+                template="plotly_white",
+                paper_bgcolor="#ffffff",
+                plot_bgcolor="#ffffff",
+                font=dict(family="Inter, sans-serif", color="#86868b", size=11),
             )
             st.plotly_chart(fig, use_container_width=True)
 

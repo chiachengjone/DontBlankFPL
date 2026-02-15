@@ -35,12 +35,12 @@ def render_captain_tab(processor, players_df: pd.DataFrame):
         ml_available = True
     else:
         # Fallback: generate a slightly varied estimate based on form and EP
-        df['ml_pred'] = df['expected_points'] * 0.85 + df['form'] * 0.3 + np.random.uniform(-0.2, 0.2, len(df))
+        df['ml_pred'] = df['expected_points'] * 0.85 + df['form'] * 0.3
         ml_available = False
     
     # Show warning if ML not available
     if not ml_available:
-        st.info("💡 Run ML Predictions tab first for accurate ML estimates. Currently showing estimated values.")
+        st.info("Run ML Predictions tab first for accurate ML estimates. Currently showing estimated values.")
     
     # Filter for viable captains (min minutes, reasonable EP)
     viable = df[(df['minutes'] > 200) & (df['expected_points'] > 2)].copy()
@@ -82,21 +82,21 @@ def render_captain_tab(processor, players_df: pd.DataFrame):
             label = ["Top Pick", "Safe Pick", "Differential"][i] if i < 3 else f"#{i+1}"
             
             st.markdown(f'''
-            <div style="background:#141416;border:1px solid {pos_color};border-radius:10px;padding:1rem;text-align:center;">
+            <div style="background:#ffffff;border:1px solid rgba(0,0,0,0.04);border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:1rem;text-align:center;">
                 <div style="color:{pos_color};font-size:0.7rem;font-weight:600;text-transform:uppercase;">{label}</div>
-                <div style="color:#fff;font-size:1.3rem;font-weight:700;margin:0.3rem 0;">{player['web_name']}{diff_badge}</div>
-                <div style="color:#6b6b6b;font-size:0.85rem;">{player.get('team_name', '')} | {player['position']} | £{player['now_cost']:.1f}m</div>
+                <div style="color:#1d1d1f;font-size:1.3rem;font-weight:700;margin:0.3rem 0;">{player['web_name']}{diff_badge}</div>
+                <div style="color:#86868b;font-size:0.85rem;">{player.get('team_name', '')} | {player['position']} | £{player['now_cost']:.1f}m</div>
                 <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:0.5rem;margin-top:0.75rem;text-align:center;">
-                    <div><div style="color:#6b6b6b;font-size:0.65rem;text-transform:uppercase;">Poisson EP</div><div style="color:#3b82f6;font-weight:600;font-family:'JetBrains Mono',monospace;">{ep:.2f}</div></div>
-                    <div><div style="color:#6b6b6b;font-size:0.65rem;text-transform:uppercase;">FPL EP</div><div style="color:#22c55e;font-weight:600;font-family:'JetBrains Mono',monospace;">{fpl_ep:.2f}</div></div>
-                    <div><div style="color:#6b6b6b;font-size:0.65rem;text-transform:uppercase;">ML Pred</div><div style="color:#f59e0b;font-weight:600;font-family:'JetBrains Mono',monospace;">{ml:.2f}</div></div>
-                    <div><div style="color:#6b6b6b;font-size:0.65rem;text-transform:uppercase;">Form</div><div style="color:#e8e8e8;font-weight:600;font-family:'JetBrains Mono',monospace;">{form:.1f}</div></div>
+                    <div><div style="color:#86868b;font-size:0.65rem;text-transform:uppercase;">Poisson EP</div><div style="color:#3b82f6;font-weight:600;font-family:'JetBrains Mono',monospace;">{ep:.1f}</div></div>
+                    <div><div style="color:#86868b;font-size:0.65rem;text-transform:uppercase;">FPL EP</div><div style="color:#22c55e;font-weight:600;font-family:'JetBrains Mono',monospace;">{fpl_ep:.1f}</div></div>
+                    <div><div style="color:#86868b;font-size:0.65rem;text-transform:uppercase;">ML Pred</div><div style="color:#f59e0b;font-weight:600;font-family:'JetBrains Mono',monospace;">{ml:.1f}</div></div>
+                    <div><div style="color:#86868b;font-size:0.65rem;text-transform:uppercase;">Form</div><div style="color:#1d1d1f;font-weight:600;font-family:'JetBrains Mono',monospace;">{form:.1f}</div></div>
                 </div>
-                <div style="margin-top:0.75rem;padding-top:0.5rem;border-top:1px solid #2a2a2e;">
-                    <div style="color:#6b6b6b;font-size:0.65rem;text-transform:uppercase;">Consensus</div>
-                    <div style="color:#e8e8e8;font-size:1.1rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{consensus:.2f} pts</div>
+                <div style="margin-top:0.75rem;padding-top:0.5rem;border-top:1px solid rgba(0,0,0,0.08);">
+                    <div style="color:#86868b;font-size:0.65rem;text-transform:uppercase;">Consensus</div>
+                    <div style="color:#1d1d1f;font-size:1.1rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{consensus:.1f} pts</div>
                 </div>
-                <div style="color:#6b6b6b;font-size:0.7rem;margin-top:0.3rem;">EO: {eo:.1f}%</div>
+                <div style="color:#86868b;font-size:0.7rem;margin-top:0.3rem;">EO: {eo:.1f}%</div>
             </div>
             ''', unsafe_allow_html=True)
     
@@ -263,11 +263,11 @@ def render_captain_tab(processor, players_df: pd.DataFrame):
             fig.update_layout(
                 polar=dict(
                     radialaxis=dict(visible=True, range=[0, 100], gridcolor='#333'),
-                    bgcolor='#111113'
+                    bgcolor='#ffffff'
                 ),
                 showlegend=True,
-                template='plotly_dark',
-                paper_bgcolor='#0a0a0b',
+                template='plotly_white',
+                paper_bgcolor='#ffffff',
                 font=dict(family='Inter, sans-serif', color='#fff'),
                 height=350,
                 margin=dict(l=60, r=60, t=30, b=30)
@@ -285,14 +285,14 @@ def render_captain_tab(processor, players_df: pd.DataFrame):
                 winner_form = "✓" if p1_data['form'] >= p2_data['form'] else ""
                 
                 st.markdown(f'''
-                <div style="background:#141416;border:1px solid #2a2a2e;border-radius:10px;padding:1rem;">
+                <div style="background:#ffffff;border:1px solid rgba(0,0,0,0.04);border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:1rem;">
                     <div style="color:#3b82f6;font-weight:700;font-size:1.1rem;margin-bottom:0.5rem;">{player1}</div>
                     <div style="display:grid;gap:0.3rem;">
-                        <div style="display:flex;justify-content:space-between;"><span>Poisson EP:</span><span style="color:#fff;">{p1_data['expected_points']:.2f} {winner_ep}</span></div>
-                        <div style="display:flex;justify-content:space-between;"><span>FPL EP:</span><span style="color:#fff;">{p1_data['ep_next_num']:.2f} {winner_fpl}</span></div>
-                        <div style="display:flex;justify-content:space-between;"><span>ML Pred:</span><span style="color:#fff;">{p1_data['ml_pred']:.2f} {winner_ml}</span></div>
-                        <div style="display:flex;justify-content:space-between;"><span>Form:</span><span style="color:#fff;">{p1_data['form']:.1f} {winner_form}</span></div>
-                        <div style="display:flex;justify-content:space-between;"><span>EO:</span><span style="color:#fff;">{p1_data['selected_by_percent']:.1f}%</span></div>
+                        <div style="display:flex;justify-content:space-between;"><span>Poisson EP:</span><span style="color:#1d1d1f;">{p1_data['expected_points']:.1f} {winner_ep}</span></div>
+                        <div style="display:flex;justify-content:space-between;"><span>FPL EP:</span><span style="color:#1d1d1f;">{p1_data['ep_next_num']:.1f} {winner_fpl}</span></div>
+                        <div style="display:flex;justify-content:space-between;"><span>ML Pred:</span><span style="color:#1d1d1f;">{p1_data['ml_pred']:.1f} {winner_ml}</span></div>
+                        <div style="display:flex;justify-content:space-between;"><span>Form:</span><span style="color:#1d1d1f;">{p1_data['form']:.1f} {winner_form}</span></div>
+                        <div style="display:flex;justify-content:space-between;"><span>EO:</span><span style="color:#1d1d1f;">{p1_data['selected_by_percent']:.1f}%</span></div>
                     </div>
                 </div>
                 ''', unsafe_allow_html=True)
@@ -304,14 +304,14 @@ def render_captain_tab(processor, players_df: pd.DataFrame):
                 winner_form = "✓" if p2_data['form'] >= p1_data['form'] else ""
                 
                 st.markdown(f'''
-                <div style="background:#141416;border:1px solid #2a2a2e;border-radius:10px;padding:1rem;">
+                <div style="background:#ffffff;border:1px solid rgba(0,0,0,0.04);border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:1rem;">
                     <div style="color:#ef4444;font-weight:700;font-size:1.1rem;margin-bottom:0.5rem;">{player2}</div>
                     <div style="display:grid;gap:0.3rem;">
-                        <div style="display:flex;justify-content:space-between;"><span>Poisson EP:</span><span style="color:#fff;">{p2_data['expected_points']:.2f} {winner_ep}</span></div>
-                        <div style="display:flex;justify-content:space-between;"><span>FPL EP:</span><span style="color:#fff;">{p2_data['ep_next_num']:.2f} {winner_fpl}</span></div>
-                        <div style="display:flex;justify-content:space-between;"><span>ML Pred:</span><span style="color:#fff;">{p2_data['ml_pred']:.2f} {winner_ml}</span></div>
-                        <div style="display:flex;justify-content:space-between;"><span>Form:</span><span style="color:#fff;">{p2_data['form']:.1f} {winner_form}</span></div>
-                        <div style="display:flex;justify-content:space-between;"><span>EO:</span><span style="color:#fff;">{p2_data['selected_by_percent']:.1f}%</span></div>
+                        <div style="display:flex;justify-content:space-between;"><span>Poisson EP:</span><span style="color:#1d1d1f;">{p2_data['expected_points']:.1f} {winner_ep}</span></div>
+                        <div style="display:flex;justify-content:space-between;"><span>FPL EP:</span><span style="color:#1d1d1f;">{p2_data['ep_next_num']:.1f} {winner_fpl}</span></div>
+                        <div style="display:flex;justify-content:space-between;"><span>ML Pred:</span><span style="color:#1d1d1f;">{p2_data['ml_pred']:.1f} {winner_ml}</span></div>
+                        <div style="display:flex;justify-content:space-between;"><span>Form:</span><span style="color:#1d1d1f;">{p2_data['form']:.1f} {winner_form}</span></div>
+                        <div style="display:flex;justify-content:space-between;"><span>EO:</span><span style="color:#1d1d1f;">{p2_data['selected_by_percent']:.1f}%</span></div>
                     </div>
                 </div>
                 ''', unsafe_allow_html=True)
@@ -334,10 +334,10 @@ def render_captain_tab(processor, players_df: pd.DataFrame):
             with diff_cols[i]:
                 pos_color = pos_colors.get(p['position'], '#888')
                 st.markdown(f'''
-                <div style="background:#141416;border:1px solid #2a2a2e;border-radius:10px;padding:0.75rem;text-align:center;">
+                <div style="background:#ffffff;border:1px solid rgba(0,0,0,0.04);border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:0.75rem;text-align:center;">
                     <div style="color:{pos_color};font-size:0.7rem;">{p['position']}</div>
-                    <div style="color:#fff;font-weight:600;">{p['web_name']}</div>
-                    <div style="color:#6b6b6b;font-size:0.8rem;">{p.get('team_name', '')} | £{p['now_cost']:.1f}m</div>
+                    <div style="color:#1d1d1f;font-weight:600;">{p['web_name']}</div>
+                    <div style="color:#86868b;font-size:0.8rem;">{p.get('team_name', '')} | £{p['now_cost']:.1f}m</div>
                     <div style="color:#22c55e;font-size:0.9rem;margin-top:0.3rem;">EP: {p['expected_points']:.2f}</div>
                     <div style="color:#f59e0b;font-size:0.8rem;">EO: {p['selected_by_percent']:.1f}%</div>
                 </div>
@@ -374,12 +374,12 @@ def render_captain_tab(processor, players_df: pd.DataFrame):
         
         fig.update_layout(
             height=300,
-            template='plotly_dark',
-            paper_bgcolor='#0a0a0b',
-            plot_bgcolor='#111113',
-            font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
-            xaxis=dict(gridcolor='#1e1e21', tickangle=45),
-            yaxis=dict(title='Form', gridcolor='#1e1e21'),
+            template='plotly_white',
+            paper_bgcolor='#ffffff',
+            plot_bgcolor='#ffffff',
+            font=dict(family='Inter, sans-serif', color='#86868b', size=11),
+            xaxis=dict(gridcolor='#e5e5ea', tickangle=45),
+            yaxis=dict(title='Form', gridcolor='#e5e5ea'),
             margin=dict(l=50, r=30, t=20, b=80),
             showlegend=False,
             bargap=0.3

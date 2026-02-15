@@ -68,11 +68,11 @@ DASHBOARD_INJURY_ALERTS = 8
 DASHBOARD_FIXTURE_SWINGS = 6
 
 # ── Chart Theme ──
-CHART_BG = '#0a0a0b'
-CHART_PLOT_BG = '#111113'
-CHART_GRID = '#1e1e21'
+CHART_BG = '#ffffff'
+CHART_PLOT_BG = '#ffffff'
+CHART_GRID = '#e5e5ea'
 CHART_FONT_FAMILY = 'Inter, sans-serif'
-CHART_FONT_COLOR = '#6b6b6b'
+CHART_FONT_COLOR = '#86868b'
 CHART_FONT_SIZE = 11
 
 POSITION_COLORS = {
@@ -92,7 +92,7 @@ def get_chart_layout(height=400, **overrides):
     """Return a standard Plotly layout dict for consistent styling."""
     layout = dict(
         height=height,
-        template='plotly_dark',
+        template='plotly_white',
         paper_bgcolor=CHART_BG,
         plot_bgcolor=CHART_PLOT_BG,
         font=dict(family=CHART_FONT_FAMILY, color=CHART_FONT_COLOR, size=CHART_FONT_SIZE),

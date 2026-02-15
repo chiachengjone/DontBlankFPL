@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 
-from utils.helpers import safe_numeric, get_injury_status, style_df_with_injuries, round_df
+from utils.helpers import safe_numeric, get_injury_status, style_df_with_injuries, round_df, normalize_name
 from components.charts import create_ep_ownership_scatter
 from components.cards import render_player_detail_card
 from fpl_api import CBIT_BONUS_THRESHOLD, CBIT_BONUS_POINTS, MAX_FREE_TRANSFERS, CAPTAIN_MULTIPLIER
@@ -69,10 +69,12 @@ def render_strategy_tab(processor, players_df: pd.DataFrame):
     # Player detail view when searching
     if search_player and search_player.strip():
         search_lower = search_player.lower().strip()
-        matched = players_df[players_df['web_name'].str.lower().str.contains(search_lower, na=False)]
+        search_norm = normalize_name(search_lower)
+        players_df['_name_norm'] = players_df['web_name'].apply(lambda x: normalize_name(str(x).lower()))
+        matched = players_df[players_df['_name_norm'].str.contains(search_norm, na=False)]
         
         if not matched.empty:
-            exact = matched[matched['web_name'].str.lower() == search_lower]
+            exact = matched[matched['_name_norm'] == search_norm]
             selected = exact.iloc[0] if not exact.empty else matched.iloc[0]
             
             st.markdown('<p class="section-title">Player Details</p>', unsafe_allow_html=True)
@@ -168,7 +170,7 @@ def render_form_vs_ep_chart(df: pd.DataFrame):
                 size=pos_df['now_cost'].clip(lower=4, upper=14) * 2.5,
                 color=color,
                 opacity=0.7,
-                line=dict(width=1, color='rgba(255,255,255,0.15)')
+                line=dict(width=1, color='rgba(0,0,0,0.06)')
             ),
             text=pos_df['web_name'],
             hovertemplate='<b>%{text}</b><br>Form: %{x:.1f}<br>EP: %{y:.1f}<br><extra></extra>'
@@ -178,17 +180,17 @@ def render_form_vs_ep_chart(df: pd.DataFrame):
     med_form = chart_df['form'].median()
     med_ep = chart_df['ep'].median()
     
-    fig.add_hline(y=med_ep, line_dash="dot", line_color="rgba(255,255,255,0.08)")
-    fig.add_vline(x=med_form, line_dash="dot", line_color="rgba(255,255,255,0.08)")
+    fig.add_hline(y=med_ep, line_dash="dot", line_color="rgba(0,0,0,0.08)")
+    fig.add_vline(x=med_form, line_dash="dot", line_color="rgba(0,0,0,0.08)")
     
     fig.update_layout(
         height=420,
-        template='plotly_dark',
-        paper_bgcolor='#0a0a0b',
-        plot_bgcolor='#111113',
-        font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
-        xaxis=dict(title='Form', gridcolor='#1e1e21', zerolinecolor='#1e1e21'),
-        yaxis=dict(title='Expected Points', gridcolor='#1e1e21', zerolinecolor='#1e1e21'),
+        template='plotly_white',
+        paper_bgcolor='#ffffff',
+        plot_bgcolor='#ffffff',
+        font=dict(family='Inter, sans-serif', color='#86868b', size=11),
+        xaxis=dict(title='Form', gridcolor='#e5e5ea', zerolinecolor='#e5e5ea'),
+        yaxis=dict(title='Expected Points', gridcolor='#e5e5ea', zerolinecolor='#e5e5ea'),
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
         margin=dict(l=50, r=30, t=30, b=50)
     )
@@ -381,10 +383,10 @@ def render_fixture_difficulty(processor):
             
             fig.update_layout(
                 height=600,
-                template='plotly_dark',
-                paper_bgcolor='#0a0a0b',
-                plot_bgcolor='#111113',
-                font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
+                template='plotly_white',
+                paper_bgcolor='#ffffff',
+                plot_bgcolor='#ffffff',
+                font=dict(family='Inter, sans-serif', color='#86868b', size=11),
                 margin=dict(l=80, r=40, t=20, b=40),
                 yaxis=dict(autorange='reversed' if sort_order == "Easiest First" else True)
             )
@@ -458,15 +460,15 @@ def render_fixture_difficulty(processor):
                         hovertemplate='GW%{x}: FDR %{y:.1f}<extra></extra>'
                     ))
                     
-                    fig.add_hline(y=3.0, line_dash='dash', line_color='#6b6b6b', 
+                    fig.add_hline(y=3.0, line_dash='dash', line_color='#86868b', 
                                   annotation_text='Average (3.0)')
                     
                     fig.update_layout(
                         height=300,
-                        template='plotly_dark',
-                        paper_bgcolor='#0a0a0b',
-                        plot_bgcolor='#111113',
-                        font=dict(family='Inter, sans-serif', color='#6b6b6b', size=10),
+                        template='plotly_white',
+                        paper_bgcolor='#ffffff',
+                        plot_bgcolor='#ffffff',
+                        font=dict(family='Inter, sans-serif', color='#86868b', size=10),
                         margin=dict(l=40, r=20, t=20, b=40),
                         yaxis=dict(title='FDR', range=[0, 5.5]),
                         xaxis=dict(title='')
@@ -594,10 +596,10 @@ def render_ownership_trends(players_df: pd.DataFrame):
     fig.update_layout(
         barmode='relative',
         height=350,
-        template='plotly_dark',
-        paper_bgcolor='#0a0a0b',
-        plot_bgcolor='#111113',
-        font=dict(family='Inter, sans-serif', color='#6b6b6b', size=11),
+        template='plotly_white',
+        paper_bgcolor='#ffffff',
+        plot_bgcolor='#ffffff',
+        font=dict(family='Inter, sans-serif', color='#86868b', size=11),
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
         margin=dict(l=40, r=40, t=40, b=80),
         xaxis_tickangle=-45

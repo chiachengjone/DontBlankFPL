@@ -7,21 +7,21 @@ import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
 
-from utils.helpers import safe_numeric
+from utils.helpers import safe_numeric, normalize_name
 
 
 def render_advanced_tab(processor, players_df: pd.DataFrame):
     """Advanced analysis tab with cutting-edge features."""
     
-    st.markdown('<p class="section-title">🧪 Advanced Analytics Laboratory</p>', unsafe_allow_html=True)
+    st.markdown('<p class="section-title">Advanced Analytics Laboratory</p>', unsafe_allow_html=True)
     st.caption("ML predictions, Monte Carlo simulations, genetic algorithms, and backtesting")
     
     # Sub-tabs for different advanced features
     subtab1, subtab2, subtab3, subtab4 = st.tabs([
-        "🤖 ML Predictions",
-        "🎲 Monte Carlo Sim",
-        "🧬 Genetic Optimizer",
-        "📊 Backtesting"
+        "ML Predictions",
+        "Monte Carlo Sim",
+        "Genetic Optimizer",
+        "Backtesting"
     ])
     
     with subtab1:
@@ -39,7 +39,7 @@ def render_advanced_tab(processor, players_df: pd.DataFrame):
 
 def render_ml_predictions(processor, players_df: pd.DataFrame):
     """Machine Learning predictions section."""
-    st.markdown("### 🤖 Machine Learning Predictions")
+    st.markdown("### Machine Learning Predictions")
     st.markdown("Ensemble model using XGBoost, Random Forest, and Gradient Boosting")
     
     col1, col2 = st.columns([1, 2])
@@ -50,7 +50,7 @@ def render_ml_predictions(processor, players_df: pd.DataFrame):
         use_ensemble = st.checkbox("Use Ensemble", value=True, key="ml_ensemble")
         show_feature_importance = st.checkbox("Show Feature Importance", value=True)
         
-        if st.button("🚀 Generate ML Predictions", type="primary", use_container_width=True):
+        if st.button("Generate ML Predictions", type="primary", use_container_width=True):
             with st.spinner("Training ML models..."):
                 try:
                     from ml_predictor import create_ml_pipeline
@@ -66,7 +66,7 @@ def render_ml_predictions(processor, players_df: pd.DataFrame):
                     st.session_state['ml_predictions'] = predictions
                     st.session_state['ml_predictor'] = predictor
                     
-                    st.success(f"✅ Predicted {len(predictions)} players!")
+                    st.success(f"Predicted {len(predictions)} players!")
                     
                     # Cross-validation scores
                     cv_scores = predictor.cross_validate_predictions(n_splits=3)
@@ -77,7 +77,7 @@ def render_ml_predictions(processor, players_df: pd.DataFrame):
                     st.metric("RMSE", f"{cv_scores['mean_rmse']:.2f}")
                     
                 except ImportError:
-                    st.error("❌ ML module not available. Install: `pip install xgboost scikit-learn`")
+                    st.error("ML module not available. Install: `pip install xgboost scikit-learn`")
                 except Exception as e:
                     st.error(f"Error: {e}")
     
@@ -130,7 +130,7 @@ def render_ml_predictions(processor, players_df: pd.DataFrame):
 
 def render_monte_carlo(processor, players_df: pd.DataFrame):
     """Monte Carlo simulation section."""
-    st.markdown("### 🎲 Monte Carlo Simulation")
+    st.markdown("### Monte Carlo Simulation")
     st.markdown("Probabilistic modeling with 10,000+ simulations for uncertainty quantification")
     
     col1, col2 = st.columns([1, 2])
@@ -158,8 +158,10 @@ def render_monte_carlo(processor, players_df: pd.DataFrame):
         player_search = st.text_input("Search player", key="mc_player_search")
         
         if player_search:
+            search_norm = normalize_name(player_search.lower().strip())
+            players_df['_name_norm'] = players_df['web_name'].apply(lambda x: normalize_name(str(x).lower()))
             matched = players_df[
-                players_df['web_name'].str.contains(player_search, case=False, na=False)
+                players_df['_name_norm'].str.contains(search_norm, na=False)
             ]
             
             if not matched.empty:
@@ -170,7 +172,7 @@ def render_monte_carlo(processor, players_df: pd.DataFrame):
                     key="mc_player_select"
                 )
                 
-                if st.button("🎲 Simulate Player", type="primary", use_container_width=True):
+                if st.button("Simulate Player", type="primary", use_container_width=True):
                     with st.spinner("Running Monte Carlo..."):
                         try:
                             from monte_carlo import create_monte_carlo_engine
@@ -186,13 +188,13 @@ def render_monte_carlo(processor, players_df: pd.DataFrame):
                             st.session_state['mc_player_id'] = selected_player
                             
                         except ImportError:
-                            st.error("❌ Monte Carlo module not available")
+                            st.error("Monte Carlo module not available")
                         except Exception as e:
                             st.error(f"Error: {e}")
         
         # Squad simulation
         st.markdown("**Squad Simulation**")
-        if st.button("🎲 Simulate Current Squad", use_container_width=True):
+        if st.button("Simulate Current Squad", use_container_width=True):
             st.info("Feature coming soon: connect your team ID for squad simulation")
     
     with col2:
@@ -257,7 +259,7 @@ def render_monte_carlo(processor, players_df: pd.DataFrame):
 
 def render_genetic_optimizer(processor, players_df: pd.DataFrame):
     """Genetic algorithm optimization section."""
-    st.markdown("### 🧬 Genetic Algorithm Optimizer")
+    st.markdown("### Genetic Algorithm Optimizer")
     st.markdown("Evolutionary squad optimization using nature-inspired algorithms")
     
     col1, col2 = st.columns([1, 2])
@@ -297,7 +299,7 @@ def render_genetic_optimizer(processor, players_df: pd.DataFrame):
         st.caption(f"• Crossover: Multi-point")
         st.caption(f"• Mutation: {mutation_rate*100:.0f}% rate")
         
-        if st.button("🧬 Evolve Squad", type="primary", use_container_width=True):
+        if st.button("Evolve Squad", type="primary", use_container_width=True):
             with st.spinner(f"Evolving for {generations} generations..."):
                 try:
                     from genetic_optimizer import create_genetic_optimizer
@@ -314,10 +316,10 @@ def render_genetic_optimizer(processor, players_df: pd.DataFrame):
                     st.session_state['ga_history'] = optimizer.get_optimization_history()
                     st.session_state['ga_optimizer'] = optimizer
                     
-                    st.success(f"✅ Evolution complete! Fitness: {best.fitness:.2f}")
+                    st.success(f"Evolution complete! Fitness: {best.fitness:.2f}")
                     
                 except ImportError:
-                    st.error("❌ Genetic optimizer not available")
+                    st.error("Genetic optimizer not available")
                 except Exception as e:
                     st.error(f"Error: {e}")
     
@@ -340,13 +342,13 @@ def render_genetic_optimizer(processor, players_df: pd.DataFrame):
                     'Position': player.get('position', '?'),
                     'Cost': player.get('now_cost', 0),
                     'EP': player.get('ep_next', 0),
-                    'Status': '⭐ (C)' if is_captain else '✓' if is_starting else 'Bench'
+                    'Status': '(C)' if is_captain else 'Starting' if is_starting else 'Bench'
                 })
             
             squad_df = pd.DataFrame(squad_data)
             
             # Split into starting XI and bench
-            starting_df = squad_df[squad_df['Status'].str.contains('⭐|✓')].copy()
+            starting_df = squad_df[squad_df['Status'].isin(['(C)', 'Starting'])].copy()
             bench_df = squad_df[squad_df['Status'] == 'Bench'].copy()
             
             st.markdown("**Starting XI**")
@@ -405,7 +407,7 @@ def render_genetic_optimizer(processor, players_df: pd.DataFrame):
 
 def render_backtesting(processor, players_df: pd.DataFrame):
     """Backtesting section."""
-    st.markdown("### 📊 Strategy Backtesting")
+    st.markdown("### Strategy Backtesting")
     st.markdown("Historical validation of optimization strategies")
     
     col1, col2 = st.columns([1, 2])
@@ -429,12 +431,12 @@ def render_backtesting(processor, players_df: pd.DataFrame):
         end_gw = st.number_input("End GW", 1, 38, 38, key="bt_end")
         
         st.markdown("**Backtest Features**")
-        st.caption("✓ Historical FPL data")
-        st.caption("✓ Transfer cost modeling")
-        st.caption("✓ Chip usage simulation")
-        st.caption("✓ Rank percentile estimation")
+        st.caption("- Historical FPL data")
+        st.caption("- Transfer cost modeling")
+        st.caption("- Chip usage simulation")
+        st.caption("- Rank percentile estimation")
         
-        if st.button("📊 Run Backtest", type="primary", use_container_width=True):
+        if st.button("Run Backtest", type="primary", use_container_width=True):
             with st.spinner("Backtesting strategy..."):
                 try:
                     from backtesting import HistoricalDataLoader, create_backtest_engine
@@ -463,10 +465,10 @@ def render_backtesting(processor, players_df: pd.DataFrame):
                     
                     st.session_state['bt_result'] = result
                     
-                    st.success("✅ Backtest complete!")
+                    st.success("Backtest complete!")
                     
                 except ImportError:
-                    st.error("❌ Backtesting module not available")
+                    st.error("Backtesting module not available")
                 except Exception as e:
                     st.error(f"Error: {e}")
     
@@ -544,5 +546,5 @@ def render_backtesting(processor, players_df: pd.DataFrame):
             st.plotly_chart(fig, use_container_width=True)
             
             # Summary
-            with st.expander("📄 Detailed Summary"):
+            with st.expander("Detailed Summary"):
                 st.code(result.summary(), language="text")
