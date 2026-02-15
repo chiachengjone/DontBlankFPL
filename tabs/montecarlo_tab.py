@@ -33,7 +33,7 @@ def render_monte_carlo_tab(processor, players_df: pd.DataFrame):
         - **Poisson**: Count-based, good for goals/assists
         
         **Output Metrics**
-        - **Mean**: Average expected points across all simulations
+        - **Mean**: Average {get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl']))} across all simulations
         - **Std Dev**: Volatility/variance (higher = more unpredictable)
         - **5th/95th Percentile**: Range of likely outcomes (90% confidence)
         - **Upside**: Chance of significantly exceeding expectation
@@ -269,6 +269,6 @@ def render_monte_carlo_tab(processor, players_df: pd.DataFrame):
                 st.caption("Average of worst 5 % (CVaR)")
             with r3:
                 st.metric("Prob > Expected", f"{result.probability_exceeds_threshold * 100:.1f}%")
-                st.caption("Chance of exceeding FPL EP")
+                st.caption(f"Chance of exceeding {get_consensus_label(st.session_state.active_models)}")
         if "mc_player_result" not in st.session_state and "mc_portfolio" not in st.session_state:
             st.info("Search for a player or simulate your squad to see results here.")

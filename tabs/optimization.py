@@ -5,7 +5,10 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 
-from utils.helpers import safe_numeric, style_df_with_injuries, round_df
+from utils.helpers import (
+    safe_numeric, style_df_with_injuries, round_df,
+    calculate_consensus_ep, get_consensus_label
+)
 from optimizer import MAX_PLAYERS_PER_TEAM
 from config import TRANSFER_HIT_COST
 from fpl_api import MAX_FREE_TRANSFERS
@@ -28,14 +31,14 @@ def render_optimization_tab(processor, players_df: pd.DataFrame, fetcher):
         - Using more than FTs available costs -4 pts per extra transfer
         
         **Strategy Options**
-        - **Balanced**: 35% EP, 20% Form, 20% Value, 15% Mins, 10% Diff
-        - **Maximum Points**: 55% EP, 25% Form, 20% Mins (best for high budget)
-        - **Differential**: 35% EP, 35% Diff, 15% Form, 15% Mins (rank chasing)
-        - **Value**: 45% Value (EP/m), 30% EP, 25% Mins (tight budget)
+        - **Balanced**: 35% xP, 20% Form, 20% Value, 15% Mins, 10% Diff
+        - **Maximum Points**: 55% xP, 25% Form, 20% Mins (best for high budget)
+        - **Differential**: 35% xP, 35% Diff, 15% Form, 15% Mins (rank chasing)
+        - **Value**: 45% Value (xP/m), 30% xP, 25% Mins (tight budget)
         
         **Transfer Recommendations**
         - Shows best OUT → IN swaps for your squad
-        - EP Gain: Expected points improvement
+        - xP Gain: Predicted points improvement
         - Value: Price difference (positive = saves money)
         
         **Hit Analysis**
@@ -121,18 +124,19 @@ def analyze_transfers(processor, players_df, fetcher, team_id, weeks_ahead, free
             featured_df, fixtures_df, current_gw, team_stats=team_stats, horizon=weeks_ahead
         )
         
-        # We take the cumulative Poisson for the horizon and divide by weeks to get a per-GW average
-        # This keeps the metrics comparable and prevents massive inflation over 5-10 week windows
-        featured_df['poisson_ep'] = (safe_numeric(temp_df['expected_points_poisson']) / weeks_ahead).round(2)
+        # Keep as sum; calculate_consensus_ep handles the averaging in its avg_consensus_ep col
+        featured_df['poisson_ep'] = safe_numeric(temp_df['expected_points_poisson']).round(2)
     except Exception as e:
         st.error(f"Poisson re-calculation failed: {e}")
         featured_df['poisson_ep'] = safe_numeric(featured_df.get('expected_points_poisson', 2.0))
 
-    featured_df['fpl_ep'] = safe_numeric(featured_df.get('ep_next_num', featured_df.get('ep_next', 2.0)))
+    featured_df['ep_next_num'] = safe_numeric(featured_df.get('ep_next_num', featured_df.get('ep_next', 2.0)))
     
-    # Force Blended EP as primary optimization target (70% Average Poisson, 30% FPL)
-    featured_df['blended_ep'] = (featured_df['poisson_ep'] * 0.7 + featured_df['fpl_ep'] * 0.3).round(2)
-    ep_col = 'blended_ep'
+    # Use Global Model Selection (Consensus) - passing weeks_ahead to handle horizon
+    active_models = st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])
+    featured_df = calculate_consensus_ep(featured_df, active_models, horizon=weeks_ahead)
+    # Use average consensus for per-GW transfer scores
+    ep_col = 'avg_consensus_ep'
     
     featured_df['selected_by_percent'] = safe_numeric(featured_df['selected_by_percent'])
     featured_df['now_cost'] = safe_numeric(featured_df['now_cost'], 5)
@@ -298,8 +302,8 @@ def render_transfer_recommendations(current_squad_df, available_df, ep_col):
     if not current_squad_df.empty:
         st.markdown("**Recommended OUT** (lowest score in your squad)", unsafe_allow_html=True)
         out_candidates = current_squad_df.nsmallest(5, 'transfer_score')
-        out_display = out_candidates[['web_name', 'team_name', 'position', 'now_cost', 'poisson_ep', 'fpl_ep', 'blended_ep', 'form', 'transfer_score']].copy()
-        out_display.columns = ['Player', 'Team', 'Pos', 'Price', 'Poisson', 'FPL', 'Blend', 'Form', 'Score']
+        out_display = out_candidates[['web_name', 'team_name', 'position', 'now_cost', 'poisson_ep', 'fpl_ep', 'consensus_ep', 'form', 'transfer_score']].copy()
+        out_display.columns = ['Player', 'Team', 'Pos', 'Price', 'Poisson xP', 'FPL xP', 'Model xP', 'Form', 'Score']
         st.dataframe(style_df_with_injuries(out_display), hide_index=True, use_container_width=True)
         
         st.markdown("**Recommended IN** (best available)", unsafe_allow_html=True)
@@ -422,7 +426,7 @@ def render_ai_transfer_plan(current_squad_df, available_df, ep_col, free_transfe
             hit_label = f" + {ep['hits']} hit" if ep['hits'] > 0 else ""
             comp_rows.append({
                 'Transfers': f"{ep['n']} ({free_label}{hit_label})",
-                'EP Gain': round(ep['ep_gain'], 1),
+                'xP Gain': round(ep['ep_gain'], 1),
                 'Hit Cost': f"-{ep['hit_cost']}" if ep['hit_cost'] > 0 else "0",
                 'Net Value': round(ep['net_value'], 1),
                 'Recommended': ">> YES" if is_best else "",
@@ -447,14 +451,14 @@ def render_ai_transfer_plan(current_squad_df, available_df, ep_col, free_transfe
             with tc1:
                 st.markdown(f'''<div class="rule-card">
                     <div style="color:#ef4444;font-weight:600;">OUT: {t['out_name']}</div>
-                    <div class="rule-label">{t['out_team']} | {t['out_pos']} | {t['out_price']:.1f}m | Blend {t['out_ep']:.2f}</div>
+                    <div class="rule-label">{t['out_team']} | {t['out_pos']} | {t['out_price']:.1f}m | Model xP {t['out_ep']:.2f}</div>
                 </div>''', unsafe_allow_html=True)
             with tc2:
                 st.markdown('<div style="text-align:center;padding-top:1rem;color:#fff;font-size:1.5rem;">></div>', unsafe_allow_html=True)
             with tc3:
                 st.markdown(f'''<div class="rule-card">
                     <div style="color:#22c55e;font-weight:600;">IN: {t['in_name']}</div>
-                    <div class="rule-label">{t['in_team']} | {t['in_pos']} | {t['in_price']:.1f}m | Blend {t['in_ep']:.2f}</div>
+                    <div class="rule-label">{t['in_team']} | {t['in_pos']} | {t['in_price']:.1f}m | Model xP {t['in_ep']:.2f}</div>
                 </div>''', unsafe_allow_html=True)
 
         # Summary
@@ -478,7 +482,7 @@ def render_ai_transfer_plan(current_squad_df, available_df, ep_col, free_transfe
             f'<span style="color:{spend_color};font-weight:600;">{net_spend:+.1f}m</span>'
             f' | <span style="color:#888;">Bank After:</span> '
             f'<span style="color:#1d1d1f;font-weight:600;">{bank - net_spend:.1f}m</span>'
-            f' | <span style="color:#888;">EP Gain:</span> '
+            f' | <span style="color:#888;">xP Gain:</span> '
             f'<span style="color:{ep_color};font-weight:600;">{ep_gain:+.1f}</span>'
             f'{hit_html}'
             f' | <span style="color:#888;">Net:</span> '
@@ -498,8 +502,8 @@ def render_position_recommendations(available_df, ep_col):
         pos_df = available_df[available_df['position'] == pos].nlargest(5, 'transfer_score')
         if not pos_df.empty:
             st.markdown(f"**{pos} Recommendations**")
-            display_df = pos_df[['web_name', 'team_name', 'now_cost', 'poisson_ep', 'fpl_ep', 'blended_ep', 'form', 'selected_by_percent', 'transfer_score']].copy()
-            display_df.columns = ['Player', 'Team', 'Price', 'Poisson', 'FPL', 'Blend', 'Form', 'Owned%', 'Score']
+            display_df = pos_df[['web_name', 'team_name', 'now_cost', 'poisson_ep', 'fpl_ep', 'consensus_ep', 'form', 'selected_by_percent', 'transfer_score']].copy()
+            display_df.columns = ['Player', 'Team', 'Price', 'Poisson xP', 'FPL xP', 'Model xP', 'Form', 'Owned%', 'Score']
             st.dataframe(style_df_with_injuries(display_df), hide_index=True, use_container_width=True)
 
 
@@ -507,8 +511,8 @@ def render_top_picks(available_df, ep_col):
     """Render top 10 overall picks."""
     st.markdown('<p class="section-title">Top 10 Overall Picks</p>', unsafe_allow_html=True)
     top_10 = available_df.nlargest(10, 'transfer_score')
-    top_display = top_10[['web_name', 'team_name', 'position', 'now_cost', 'poisson_ep', 'fpl_ep', 'blended_ep', 'form', 'selected_by_percent', 'transfer_score']].copy()
-    top_display.columns = ['Player', 'Team', 'Pos', 'Price', 'Poisson', 'FPL', 'Blend', 'Form', 'Owned%', 'Score']
+    top_display = top_10[['web_name', 'team_name', 'position', 'now_cost', 'poisson_ep', 'fpl_ep', 'consensus_ep', 'form', 'selected_by_percent', 'transfer_score']].copy()
+    top_display.columns = ['Player', 'Team', 'Pos', 'Price', 'Poisson xP', 'FPL xP', 'Model xP', 'Form', 'Owned%', 'Score']
     st.dataframe(style_df_with_injuries(top_display), hide_index=True, use_container_width=True)
 
 
@@ -540,7 +544,7 @@ def render_points_projection(current_squad_df, available_df, ep_col):
         barmode='group',
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
         margin=dict(l=40, r=40, t=40, b=40),
-        yaxis_title='Expected Points'
+        yaxis_title='xP'
     )
     st.plotly_chart(fig_proj, use_container_width=True, key='opt_points_projection')
 

@@ -3,7 +3,7 @@
 import pandas as pd
 import numpy as np
 import unicodedata
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from config import (
     OWNERSHIP_TEMPLATE_THRESHOLD,
@@ -449,3 +449,170 @@ def add_availability_columns(df: pd.DataFrame, players_df: pd.DataFrame = None) 
 
     return df
 
+
+# ── Consensus EP Logic ──
+
+def calculate_consensus_ep(df: pd.DataFrame, active_models: List[str], horizon: int = 1) -> pd.DataFrame:
+    """
+    Calculate weighted Consensus EP based on globally selected models.
+    
+    Weights:
+    - ML: 40%
+    - Poisson: 40%
+    - FPL: 20%
+    
+    Weights are normalized based on which models are enabled.
+    """
+    df = df.copy()
+    
+    # Model keys mapping (consistency with app.py/tabs)
+    model_col_map = {
+        'ml': 'ml_pred',
+        'poisson': 'poisson_ep',
+        'fpl': 'ep_next_num'
+    }
+    
+    # Base weights
+    base_weights = {
+        'ml': 0.4,
+        'poisson': 0.4,
+        'fpl': 0.2
+    }
+    
+    # Filter for active models and get weights
+    # Normalize keys to lowercase for safety
+    active_keys = [m.lower() for m in active_models]
+    active_weights = {m: base_weights[m] for m in active_keys if m in base_weights}
+    
+    # Normalize weights
+    total_weight = sum(active_weights.values())
+    if total_weight == 0:
+        # Fallback to all if nothing valid selected
+        active_weights = base_weights
+        total_weight = sum(base_weights.values())
+    
+    normalized_weights = {m: w/total_weight for m, w in active_weights.items()}
+    
+    # Ensure baseline columns exist for calculation
+    # poisson_ep usually from calculate_poisson_ep_for_dataframe
+    if 'poisson_ep' not in df.columns:
+        if 'expected_points_poisson' in df.columns:
+            df['poisson_ep'] = safe_numeric(df['expected_points_poisson'])
+        else:
+            df['poisson_ep'] = safe_numeric(df.get('expected_points', 0))
+            
+    if 'ep_next_num' not in df.columns:
+        df['ep_next_num'] = safe_numeric(df.get('ep_next', 0))
+        
+    if 'ml_pred' not in df.columns:
+        if 'ml_ep' in df.columns:
+            df['ml_pred'] = safe_numeric(df['ml_ep'])
+        else:
+            df['ml_pred'] = df['poisson_ep'] * 0.9 # Fallback if ML not loaded
+    
+    # Calculation
+    consensus = pd.Series(0.0, index=df.index)
+    for model, weight in normalized_weights.items():
+        col = model_col_map[model]
+        if col in df.columns:
+            val = safe_numeric(df[col])
+            
+            # Smart Horizon Scaling
+            # If horizon > 1, we expect to return a Total sum for the window
+            if horizon > 1:
+                if model == 'fpl':
+                    # FPL ep_next is always single-GW raw, so scale it
+                    val = val * horizon
+                elif model == 'ml':
+                    # ML predictions are usually single-GW in players_df, so scale
+                    # Only scale if typical single-GW range (e.g. max < 15 for 1 GW)
+                    if val.max() < 15: 
+                        val = val * horizon
+                # Poisson is assumed already totaled (sum of GWs) by engine loop
+            
+            consensus += val * weight
+            
+    df['consensus_ep'] = consensus.round(2)
+    
+    # Calculate average if horizon > 1
+    if horizon > 1:
+        df['avg_consensus_ep'] = (df['consensus_ep'] / horizon).round(2)
+    else:
+        df['avg_consensus_ep'] = df['consensus_ep']
+        
+    return df
+
+
+def calculate_enhanced_captain_score(row: pd.Series, active_models: List[str]) -> float:
+    """
+    Calculate a sophisticated, position-aware captain score (0-10+).
+    Standardized for use in Captain tab and Dashboard.
+    
+    Weights: 60% Core Models, 30% Position Bonus, 10% Meta/Safety.
+    """
+    # 1. Core Models (60% weight)
+    model_count = len(active_models)
+    
+    # Map model keys to data columns
+    ml_val = safe_numeric(row.get('ml_pred', row.get('ml_ep', 0)))
+    poisson_val = safe_numeric(row.get('poisson_ep', row.get('expected_points_poisson', 0)))
+    fpl_val = safe_numeric(row.get('ep_next_num', row.get('ep_next', 0)))
+    
+    if model_count == 3:
+        # Global: ML 40%, Poisson 40%, FPL 20% -> scaled to 60% total
+        core = (ml_val * 0.24 + poisson_val * 0.24 + fpl_val * 0.12)
+    elif model_count == 2:
+        m_set = set([m.lower() for m in active_models])
+        if 'ml' in m_set and 'poisson' in m_set:
+            core = (ml_val * 0.30 + poisson_val * 0.30)
+        elif 'ml' in m_set and 'fpl' in m_set:
+            core = (ml_val * 0.40 + fpl_val * 0.20)
+        elif 'poisson' in m_set and 'fpl' in m_set:
+            core = (poisson_val * 0.40 + fpl_val * 0.20)
+        else:
+            core = (ml_val * 0.30 + poisson_val * 0.30) # Default
+    else:
+        # Only 1 model active
+        active = active_models[0].lower() if active_models else 'fpl'
+        val = ml_val if active == 'ml' else poisson_val if active == 'poisson' else fpl_val
+        core = val * 0.6
+    
+    # 2. Position-Specific Potential (30% weight)
+    if row.get('position') in ['GKP', 'DEF']:
+        p_cs = safe_numeric(row.get('poisson_p_cs', 0.2))
+        cbit_p = safe_numeric(row.get('cbit_prob', 0.3))
+        pos_bonus = (p_cs * 0.15 + cbit_p * 0.15) * 10
+    else:
+        threat = safe_numeric(row.get('threat_momentum', 0.5))
+        matchup = safe_numeric(row.get('matchup_quality', 1.0))
+        # Scaled to ~0-3 range
+        pos_bonus = float(np.clip(threat * 0.15 * 10 + (matchup / 2) * 0.15 * 10, 0, 3))
+        
+    # 3. Meta & Safety (10% weight)
+    # selected_by_percent can be a string or float from FPL API
+    eo = safe_numeric(row.get('selected_by_percent', 0)) / 100
+    form_norm = safe_numeric(row.get('form', 0)) / 15
+    meta = (eo * 0.05 + form_norm * 0.05) * 10
+    
+    # 4. Injury Risk Adjustment
+    chance = safe_numeric(row.get('chance_of_playing_next_round', 100)) / 100
+    
+    return float((core + pos_bonus + meta) * chance)
+
+
+def get_consensus_label(active_models: List[str], horizon: int = 1) -> str:
+    """Return dynamic label for Model xP based on number of active models."""
+    if not active_models:
+        return "xP"
+        
+    if len(active_models) == 1:
+        model = active_models[0].lower()
+        label_map = {
+            'ml': 'ML xP',
+            'poisson': 'Poisson xP',
+            'fpl': 'FPL xP'
+        }
+        name = label_map.get(model, 'xP')
+        return f"{name} x{horizon}" if horizon > 1 else name
+    
+    return f"Model xP ({horizon}GW)" if horizon > 1 else "Model xP"

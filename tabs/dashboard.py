@@ -25,15 +25,40 @@ from utils.helpers import (
     classify_ownership_column,
     style_df_with_injuries,
     round_df,
+    calculate_consensus_ep,
+    get_consensus_label,
 )
 
 
 def render_dashboard_tab(processor, players_df: pd.DataFrame):
     """Dashboard overview - key metrics and recommendations at a glance."""
+    
+    # Pre-calculate Consensus EP for the entire dashboard
+    players_df = players_df.copy()
+    
+    # Ensure ML data is present if available in session state
+    if 'ml_predictions' in st.session_state and 'ml_pred' not in players_df.columns:
+        ml_preds = st.session_state['ml_predictions']
+        players_df['ml_pred'] = players_df['id'].apply(
+            lambda pid: ml_preds[pid].predicted_points if pid in ml_preds else 0
+        )
+
+    active_models = st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])
+    players_df = calculate_consensus_ep(players_df, active_models)
+    con_label = get_consensus_label(active_models)
 
     # Metrics explanation dropdown
+    # Prioritizing Model xP explanation at the top
     with st.expander("Understanding Dashboard Metrics"):
-        st.markdown("""
+        st.markdown(f"""
+        **Model xP ({con_label})**
+        The Model xP is a weighted average of several predictive models. The current weightages are:
+        - **3 Models Active**: ML xP (40%), Poisson xP (40%), FPL xP (20%)
+        - **ML xP + Poisson xP**: ML xP (50%), Poisson xP (50%)
+        - **ML xP + FPL xP**: ML xP (67%), FPL xP (33%)
+        - **Poisson xP + FPL xP**: Poisson xP (67%), FPL xP (33%)
+        - **Single Model**: 100% of selected model
+        
         **Gameweek Overview**
         - **Current GW**: The active gameweek number
         - **GW Average**: Average points scored by all managers this GW
@@ -41,13 +66,13 @@ def render_dashboard_tab(processor, players_df: pd.DataFrame):
         - **vs Average**: How many points above/below the average you scored
         
         **Top Picks by Position**
-        - Shows highest Expected Points (EP) players per position
+        - Shows highest {con_label} players per position
         - Yellow background indicates injured/doubtful players
         - Ownership tier shows how template vs differential a pick is
         
         **Captain Quick Pick**
-        - Top 3 captain candidates based on EP, form, and ownership
-        - EV = Expected Value (EP × captain multiplier)
+        - Top 3 captain candidates based on {con_label}, form, and ownership
+        - xP = Expected Value ({con_label} × captain multiplier)
         
         **Fixture Swings**
         - Teams whose schedule is about to get easier (green) or harder (red)
@@ -109,7 +134,7 @@ def render_dashboard_tab(processor, players_df: pd.DataFrame):
             st.metric("vs Average", f"{diff:+d}", delta=f"{diff:+d}")
         else:
             avg_ep = safe_numeric(players_df.get('expected_points', players_df.get('ep_next', pd.Series([0] * len(players_df))))).mean()
-            st.metric("Avg EP (all)", f"{avg_ep:.2f}")
+            st.metric("Avg xP (all)", f"{avg_ep:.2f}")
 
     # ── Squad Performance ──
     render_squad_performance(processor, players_df, current_gw, team_id)
@@ -156,8 +181,8 @@ def render_squad_performance(processor, players_df, current_gw, team_id):
             return
 
         squad_df['total_points'] = safe_numeric(squad_df.get('total_points', pd.Series([0] * len(squad_df))))
-        # Use advanced expected_points if available, fall back to ep_next
-        squad_df['expected_points'] = safe_numeric(squad_df.get('expected_points', squad_df.get('ep_next', pd.Series([0] * len(squad_df)))))
+        # Use Consensus EP calculated in render_dashboard_tab
+        squad_df['expected_points'] = safe_numeric(squad_df['consensus_ep'])
         squad_df['minutes'] = safe_numeric(squad_df.get('minutes', pd.Series([0] * len(squad_df))))
         squad_df['form'] = safe_numeric(squad_df.get('form', pd.Series([0] * len(squad_df))))
         squad_df['games_played'] = (squad_df['minutes'] / 90).clip(lower=1)
@@ -178,13 +203,13 @@ def render_squad_performance(processor, players_df, current_gw, team_id):
         with p1:
             st.metric("Avg Pts/Game", f"{avg_actual:.1f}")
         with p2:
-            st.metric("Expected Pts/Game", f"{avg_expected:.1f}")
+            st.metric(f"{get_consensus_label(st.session_state.active_models)}/Game", f"{avg_expected:.1f}")
         with p3:
             label = "Overperforming" if perf_delta >= 0 else "Underperforming"
             st.metric(label, f"{perf_delta:+.1f} pts/gm", delta=f"{perf_pct:+.0f}%")
         with p4:
             overperf_count = (squad_df['perf_diff'] > 0).sum()
-            st.metric("Players Above EP", f"{overperf_count}/{len(squad_df)}")
+            st.metric(f"Players Above {get_consensus_label(st.session_state.active_models, 1)}", f"{overperf_count}/{len(squad_df)}")
 
         # Per-player bar chart
         chart_df = squad_df.sort_values('perf_diff', ascending=True).copy()
@@ -202,7 +227,7 @@ def render_squad_performance(processor, players_df, current_gw, team_id):
             marker_color=colors,
             text=chart_df['perf_diff'].apply(lambda v: f"{v:+.1f}"),
             textposition='outside',
-            hovertemplate='<b>%{y}</b><br>Actual: %{customdata[0]:.1f}/gm<br>Expected: %{customdata[1]:.1f}/gm<extra></extra>',
+            hovertemplate='<b>%{y}</b><br>Actual: %{customdata[0]:.1f}/gm<br>xP: %{customdata[1]:.1f}/gm<extra></extra>',
             customdata=chart_df[['pts_per_game', 'expected_per_game']].values,
         ))
         fig.update_layout(
@@ -210,7 +235,7 @@ def render_squad_performance(processor, players_df, current_gw, team_id):
             template='plotly_white',
             paper_bgcolor='#ffffff', plot_bgcolor='#ffffff',
             font=dict(family='Inter, sans-serif', color='#86868b', size=11),
-            xaxis=dict(title='Pts/Game vs Expected', gridcolor='#e5e5ea', zeroline=True,
+            xaxis=dict(title=f'Pts/Game vs {get_consensus_label(st.session_state.active_models)}', gridcolor='#e5e5ea', zeroline=True,
                       zerolinecolor='rgba(0,0,0,0.06)', zerolinewidth=1),
             yaxis=dict(gridcolor='#e5e5ea'),
             margin=dict(l=120, r=50, t=20, b=40),
@@ -222,13 +247,13 @@ def render_squad_performance(processor, players_df, current_gw, team_id):
 
 
 def render_top_picks_summary(players_df: pd.DataFrame):
-    """Top EP picks per position - quick recommendations."""
+    """Top xP picks per position - quick recommendations."""
     st.markdown('<p class="section-title">Top Picks by Position</p>', unsafe_allow_html=True)
-    st.caption("Highest expected points this gameweek per position")
+    st.caption(f"Highest {get_consensus_label(st.session_state.active_models)} this gameweek per position")
 
     df = players_df.copy()
-    # Use advanced expected_points if available
-    df['ep'] = safe_numeric(df.get('expected_points', df.get('ep_next', pd.Series([0] * len(df)))))
+    # Use pre-calculated consensus_ep
+    df['ep'] = safe_numeric(df['consensus_ep'])
     df['now_cost'] = safe_numeric(df['now_cost'], 5)
     df['selected_by_percent'] = safe_numeric(df['selected_by_percent'])
     df['minutes'] = safe_numeric(df.get('minutes', pd.Series([0] * len(df))))
@@ -258,7 +283,7 @@ def render_top_picks_summary(players_df: pd.DataFrame):
                     f'{player_name}</div>'
                     f'<div style="color:#888;font-size:0.72rem;">'
                     f'{team_name} | {p["now_cost"]:.1f}m | '
-                    f'<span style="color:{POSITION_COLORS.get(pos, "#888")}">EP {p["ep"]:.1f}</span> | '
+                    f'<span style="color:{POSITION_COLORS.get(pos, "#888")}">{get_consensus_label(st.session_state.active_models)} {p["ep"]:.1f}</span> | '
                     f'<span style="color:{tier["color"]}">{tier["tier"]}</span>'
                     f'</div></div>',
                     unsafe_allow_html=True,
@@ -270,15 +295,23 @@ def render_captain_quick_pick(players_df: pd.DataFrame):
     st.markdown('<p class="section-title">Captain Quick Pick</p>', unsafe_allow_html=True)
 
     df = players_df.copy()
-    # Use advanced expected_points if available
-    df['ep'] = safe_numeric(df.get('expected_points', df.get('ep_next', pd.Series([0] * len(df)))))
-    df['form'] = safe_numeric(df.get('form', pd.Series([0] * len(df))))
-    df['minutes'] = safe_numeric(df.get('minutes', pd.Series([0] * len(df))))
-    df = df[df['minutes'] > 500]
-    df['captain_ev'] = df['ep'] * CAPTAIN_MULTIPLIER
-    df['captain_score'] = df['captain_ev'] + df['form'] * 0.3
+    from utils.helpers import calculate_enhanced_captain_score
+    active_m = st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])
+    
+    # Ensure necessary metrics exist for UI display
+    df['ep'] = safe_numeric(df.get('consensus_ep', 0))
+    df['form'] = safe_numeric(df.get('form', 0))
+    df['minutes'] = safe_numeric(df.get('minutes', 0))
+    
+    # Calculate scores on players with sufficient minutes
+    viable_df = df[df['minutes'] > 500].copy()
+    if viable_df.empty:
+        viable_df = df.copy()
+        
+    viable_df['captain_score'] = viable_df.apply(lambda r: calculate_enhanced_captain_score(r, active_m), axis=1)
+    viable_df['captain_ev'] = viable_df['ep'] * CAPTAIN_MULTIPLIER
 
-    top3 = df.nlargest(3, 'captain_score')
+    top3 = viable_df.nlargest(3, 'captain_score')
     cap_cols = st.columns(3)
 
     for i, (_, cap) in enumerate(top3.iterrows()):
@@ -291,8 +324,8 @@ def render_captain_quick_pick(players_df: pd.DataFrame):
                 f'<div style="font-size:0.7rem;color:#888;">{badge}</div>'
                 f'<div style="font-size:1.1rem;font-weight:600;color:#fff;">{cap_name}</div>'
                 f'<div style="color:#888;font-size:0.8rem;">{cap_team} | {cap["now_cost"]:.1f}m</div>'
-                f'<div style="color:#ef4444;font-weight:600;margin-top:0.3rem;">{cap["captain_ev"]:.1f} EV</div>'
-                f'<div style="color:#888;font-size:0.72rem;">Form {cap["form"]:.1f} | EP {cap["ep"]:.1f}</div>'
+                f'<div style="color:#ef4444;font-weight:600;margin-top:0.3rem;">{cap["captain_ev"]:.1f} xP</div>'
+                f'<div style="color:#888;font-size:0.72rem;">Form {cap["form"]:.1f} | {get_consensus_label(st.session_state.active_models)} {cap["ep"]:.1f}</div>'
                 f'</div>',
                 unsafe_allow_html=True,
             )

@@ -4,7 +4,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-from utils.helpers import safe_numeric, round_df, style_df_with_injuries
+from utils.helpers import safe_numeric, round_df, style_df_with_injuries, calculate_consensus_ep, get_consensus_label
 from optimizer import MAX_PLAYERS_PER_TEAM, MAX_BUDGET
 from components.styles import render_section_title
 
@@ -38,9 +38,10 @@ def generate_wildcard_squad(
     # Full squad requirements (FPL rules)
     squad_req = {'GKP': 2, 'DEF': 5, 'MID': 5, 'FWD': 3}
     
-    # Prepare player data
-    players = df.copy()
-    players['expected_points'] = safe_numeric(players.get('expected_points', players.get('ep_next', pd.Series([2.0]*len(players)))))
+    # Use Model xP (Consensus)
+    active_models = st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])
+    players = calculate_consensus_ep(df.copy(), active_models)
+    players['expected_points'] = safe_numeric(players['consensus_ep'])
     players['now_cost'] = safe_numeric(players['now_cost'], 5)
     players['form'] = safe_numeric(players.get('form', pd.Series([0]*len(players))))
     players['selected_by_percent'] = safe_numeric(players['selected_by_percent'])
@@ -162,9 +163,9 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
         - 5-4-1: Defensive, maximizes CS points
         
         **Strategy Options**
-        - **Balanced**: Weighs EP and value equally
-        - **Max Points**: Selects highest EP players regardless of price
-        - **Value**: Prioritizes EPPM (points per million)
+        - **Balanced**: Weighs xP and value equally
+        - **Max Points**: Selects highest xP players regardless of price
+        - **Value**: Prioritizes xP/m (points per million)
         - **Differential**: Low ownership picks for rank gains
         
         **Squad Requirements**
@@ -173,8 +174,8 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
         - Must stay within budget (default £100m)
         
         **Squad Quality Metrics**
-        - Total EP: Combined expected points for the squad
-        - Total Value: Squad's EPPM efficiency
+        - Total xP: Combined xP for the squad
+        - Total Value: Squad's xP/m efficiency
         - Ownership Mix: Balance of template vs differential
         """)
     
@@ -196,7 +197,7 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
             "Strategy",
             ['Balanced', 'Max Points', 'Value', 'Differential'],
             key="wc_strategy",
-            help="Balanced: EP + Value mix | Max Points: Highest EP | Value: Best EPPM | Differential: Low ownership"
+            help="Balanced: xP + Value mix | Max Points: Highest xP | Value: Best xP/m | Differential: Low ownership"
         )
     
     with set_cols[2]:
@@ -256,7 +257,7 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
         with sum_cols[2]:
             st.markdown(f'''
             <div style="background:#ffffff;border:1px solid rgba(0,0,0,0.04);border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:1rem;text-align:center;">
-                <div style="color:#86868b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Starting XI EP</div>
+                <div style="color:#86868b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Starting XI xP</div>
                 <div style="color:#22c55e;font-size:1.5rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{starting_ep:.1f}</div>
             </div>
             ''', unsafe_allow_html=True)
@@ -285,13 +286,13 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
             # Format display
             display_df = pos_players[['web_name', 'team_name', 'now_cost', 'expected_points', 
                                       'form', 'selected_by_percent', 'is_starter']].copy()
-            display_df.columns = ['Player', 'Team', 'Price', 'EP', 'Form', 'EO%', 'Starting']
+            display_df.columns = ['Player', 'Team', 'Price', 'Model xP', 'Form', 'EO%', 'Starting']
             display_df['Starting'] = display_df['Starting'].apply(lambda x: 'Starting' if x else 'Bench')
             
             st.dataframe(
                 style_df_with_injuries(display_df, players_df, format_dict={
                     'Price': '£{:.1f}m',
-                    'EP': '{:.2f}',
+                    'Model xP': '{:.2f}',
                     'Form': '{:.1f}',
                     'EO%': '{:.1f}%'
                 }),
@@ -328,14 +329,14 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
         with st.expander("View Full Squad Table"):
             full_df = squad[['web_name', 'team_name', 'position', 'now_cost', 
                             'expected_points', 'form', 'selected_by_percent', 'is_starter']].copy()
-            full_df.columns = ['Player', 'Team', 'Pos', 'Price', 'EP', 'Form', 'EO%', 'Starter']
+            full_df.columns = ['Player', 'Team', 'Pos', 'Price', 'Model xP', 'Form', 'EO%', 'Starter']
             full_df = full_df.sort_values(['Starter', 'Pos'], ascending=[False, True])
             full_df['Starter'] = full_df['Starter'].apply(lambda x: 'Yes' if x else 'Bench')
             
             st.dataframe(
                 style_df_with_injuries(full_df, players_df, format_dict={
                     'Price': '£{:.1f}m',
-                    'EP': '{:.2f}',
+                    'Model xP': '{:.2f}',
                     'Form': '{:.1f}',
                     'EO%': '{:.1f}%'
                 }),

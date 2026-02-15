@@ -18,13 +18,13 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
         **What is ML Prediction?**
         - Machine learning model trained on historical FPL data
         - Uses XGBoost ensemble with 5-fold cross-validation
-        - Predicts expected points for upcoming gameweeks
+        - Predicts xP for upcoming gameweeks
         
         **Key Metrics**
-        - **ML Prediction**: Model's predicted points for the player
-        - **FPL EP**: Official FPL expected points estimate
+        - **ML xP**: Model's predicted points for the player
+        - **FPL xP**: Official FPL expected points estimate
         - **vs FPL**: Difference between ML and FPL predictions
-        - **Poisson EP**: Statistical model using xG/xA data
+        - **Poisson xP**: Statistical model using xG/xA data
         - **Certainty %**: Model confidence (higher = more reliable)
         
         **Understanding Certainty**
@@ -38,7 +38,7 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
         - Opponent defensive strength, recent results
         
         **How to Use**
-        - Compare ML vs FPL EP for value identification
+        - Compare ML vs FPL xP for value identification
         - High ML, Low FPL = potential differential
         - Low certainty = high variance player (risky captain)
         
@@ -49,37 +49,62 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
 
     # ── Controls ──
     
-    ctrl1, ctrl2, ctrl3, ctrl4 = st.columns([1, 1, 1, 2])
+    ctrl1, ctrl2, ctrl3 = st.columns([1, 1, 1])
     
     with ctrl1:
-        n_gameweeks = st.selectbox(
-            "Predict for",
-            options=[1, 2, 3, 5],
-            format_func=lambda x: f"Next {x} GW{'s' if x > 1 else ''}",
-            index=0,
-            key="ml_horizon"
-        )
-    
-    with ctrl2:
         position_filter = st.selectbox(
             "Position",
             options=["All", "GKP", "DEF", "MID", "FWD"],
             key="ml_pos_filter"
         )
+    
+    with ctrl2:
+        price_range = st.slider(
+            "Price Range (£m)",
+            4.0, 15.0, (4.0, 15.0), 0.1,
+            key="ml_price_range"
+        )
 
     with ctrl3:
-        price_tier = st.selectbox(
-            "Type",
-            options=['All', 'Premium (>9m)', 'Mid-range (6-9m)', 'Budget (<6m)'],
-            key="ml_price_tier"
+        min_minutes = st.slider(
+            "Min Minutes Played",
+            0, 3500, 0, 90,
+            key="ml_min_minutes"
         )
     
+    ctrl4, ctrl5, ctrl6 = st.columns([1, 1, 1])
+    
     with ctrl4:
-        selected_player = st.text_input(
-            "Search player",
-            placeholder="Type player name...",
-            key="ml_player_focus"
+        all_teams = sorted(players_df['team_name'].dropna().unique().tolist()) if 'team_name' in players_df.columns else []
+        ml_team_filter = st.selectbox("Team", ['All'] + all_teams, key="ml_team_filter")
+        
+    with ctrl5:
+        # Dynamic sort options matching Analytics tab style
+        horizon = st.session_state.get("ml_horizon", 1)
+        ml_label = f"ML xP x{horizon}" if horizon > 1 else "ML xP"
+        fpl_label = f"FPL xP x{horizon}" if horizon > 1 else "FPL xP"
+        poisson_label = f"Poisson xP x{horizon}" if horizon > 1 else "Poisson xP"
+        
+        ml_sort_col = st.selectbox(
+            "Sort By",
+            [ml_label, fpl_label, poisson_label, "vs FPL (+)", "Certainty"],
+            key="ml_sort"
         )
+    
+    with ctrl6:
+        n_gameweeks = st.slider(
+            "Predict for (GW Horizon)",
+            min_value=1,
+            max_value=10,
+            value=st.session_state.get("ml_horizon", 1),
+            key="ml_horizon"
+        )
+    
+    search_player_input = st.text_input(
+        "Search player",
+        placeholder="Type player name...",
+        key="ml_player_search"
+    )
     
 
     # ── Results section ──
@@ -103,58 +128,90 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
                 continue
             player = match.iloc[0]
             
-            # Get raw FPL EP (ep_next from API), NOT the Poisson-modified expected_points
-            # ep_next_num is the raw value preserved before Poisson blending
-            raw_fpl_ep = player.get('ep_next_num', player.get('ep_next', 0))
-            fpl_ep = safe_numeric(pd.Series([raw_fpl_ep])).iloc[0]
-            
-            # Get Poisson EP (prefer expected_points_poisson if available)
-            if 'expected_points_poisson' in player:
-                poisson_ep = safe_numeric(pd.Series([player['expected_points_poisson']])).iloc[0]
-            else:
-                poisson_ep_raw = player.get('expected_points', fpl_ep)
-                poisson_ep = safe_numeric(pd.Series([poisson_ep_raw])).iloc[0]
-            
+            # Get raw metrics for scaling
+            fpl_ep_raw = safe_numeric(pd.Series([player.get('ep_next_num', player.get('ep_next', 0))])).iloc[0]
             ml_pred = pred.predicted_points
             
-            # Better uncertainty: use CI width relative to prediction magnitude
+            # Certainty calculation
             ci_low, ci_high = pred.confidence_interval
             ci_width = ci_high - ci_low
-            
-            # Relative uncertainty: how wide is the CI compared to the prediction?
-            # Lower is better. A CI width of 0.5 on a prediction of 5 = 10% uncertainty
             if ml_pred > 0.5:
                 relative_uncertainty = (ci_width / ml_pred) * 100
             else:
-                relative_uncertainty = ci_width * 50  # Scale for low predictions
-            
-            # Cap and invert to get "certainty" score (0-100)
-            # 0% uncertainty = 100 certainty, 100%+ uncertainty = 0 certainty
+                relative_uncertainty = ci_width * 50
             certainty = max(0, min(100, 100 - relative_uncertainty))
+
+            # Scale metrics by horizon using decay logic from Analytics tab for FPL and Poisson
+            horizon = n_gameweeks
             
+            # Use processor's multi-GW calculator for FPL and Poisson if possible
+            # Otherwise fallback to scaling
+            try:
+                # Get weekly projections for Poisson
+                _, weekly_poisson = processor.calculate_expected_points(pid, weeks_ahead=horizon)
+                poisson_ep = sum(weekly_poisson)
+            except:
+                # Fallback to simple decay scaling
+                poisson_ep_raw = player.get('expected_points_poisson', player.get('expected_points', fpl_ep_raw))
+                poisson_ep = 0.0
+                for i in range(horizon):
+                    poisson_ep += poisson_ep_raw * (0.9 ** i)
+            
+            # FPL EP scaling
+            fpl_ep = 0.0
+            for i in range(horizon):
+                fpl_ep += fpl_ep_raw * (0.85 ** i)
+            
+            # ML Pred scaling (ML is typically trained on next-GW, so we apply decay)
+            ml_pred_total = 0.0
+            raw_ml = pred.predicted_points
+            for i in range(horizon):
+                ml_pred_total += raw_ml * (0.92 ** i) # ML slightly higher decay retention
+            
+            # Certainty scaling (reduces with distance)
+            certainty_base = certainty # From previous calculation
+            certainty_horizon = certainty_base * (0.95 ** (horizon - 1))
+            
+            # Scale Range (uncertainty) based on horizon
+            # Sum range linearly as it represents the bounds of total points
+            # Scaling factors for decay still apply
+            scaled_ci_low = 0.0
+            scaled_ci_high = 0.0
+            for i in range(horizon):
+                decay = 0.92 ** i
+                scaled_ci_low += ci_low * decay
+                scaled_ci_high += ci_high * decay
+
             pred_data.append({
                 "id": pid,
                 "Player": player.get("web_name", f"ID:{pid}"),
                 "Pos": player.get("position", "?"),
                 "Team": player.get("team_name", "?"),
                 "Price": round(float(player.get("now_cost", 0)), 1),
-                "ML Pred": round(ml_pred, 1),
-                "Range": f"{ci_low:.1f}-{ci_high:.1f}",
-                "FPL EP": round(fpl_ep, 1),
-                "Poisson EP": round(poisson_ep, 1),
-                "vs FPL": round(ml_pred - fpl_ep, 1),
-                "vs Poisson": round(ml_pred - poisson_ep, 1),
-                "Certainty": round(certainty, 0),
-                "_ci_low": ci_low,
-                "_ci_high": ci_high,
-                "_uncertainty": pred.prediction_std,
+                "Minutes": player.get("minutes", 0),
+                "ML xP": round(ml_pred_total, 1),
+                "Avg ML": round(ml_pred_total / horizon, 2) if horizon > 1 else round(ml_pred_total, 2),
+                "Range": f"{scaled_ci_low:.1f}-{scaled_ci_high:.1f}",
+                "FPL xP": round(fpl_ep, 1),
+                "Poisson xP": round(poisson_ep, 1),
+                "vs FPL": round(ml_pred_total - fpl_ep, 1),
+                "vs Poisson": round(ml_pred_total - poisson_ep, 1),
+                "Certainty": round(certainty_horizon, 0),
+                "EO%": player.get("selected_by_percent", 0),
+                "_ci_low": scaled_ci_low,
+                "_ci_high": scaled_ci_high,
+                "_uncertainty": pred.prediction_std * sum([0.92 ** i for i in range(horizon)]),
+                # Raw sorting keys matching dynamic labels
+                f"ML xP x{horizon}" if horizon > 1 else "ML xP": ml_pred_total,
+                f"FPL xP x{horizon}" if horizon > 1 else "FPL xP": fpl_ep,
+                f"Poisson xP x{horizon}" if horizon > 1 else "Poisson xP": poisson_ep,
             })
 
         pred_df = pd.DataFrame(pred_data)
         
         # ── Player-specific view ──
-        if selected_player and selected_player.strip():
-            q = normalize_name(selected_player.lower().strip())
+        if search_player_input and search_player_input.strip():
+            q = normalize_name(search_player_input.lower().strip())
             
             # Match if query starts with beginning of either name on the original players_df
             # then find the corresponding ID in pred_df
@@ -179,14 +236,14 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
                 
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
-                    st.metric("ML Prediction", f"{p['ML Pred']:.1f} pts")
+                    st.metric("ML xP", f"{p['ML xP']:.1f} pts")
                 with col2:
                     delta_color = "normal" if p["vs FPL"] >= 0 else "inverse"
-                    st.metric("vs FPL", f"{p['FPL EP']:.1f} pts", 
+                    st.metric("vs FPL", f"{p['FPL xP']:.1f} pts", 
                               f"{p['vs FPL']:+.1f}", delta_color=delta_color)
                 with col3:
                     delta_color = "normal" if p["vs Poisson"] >= 0 else "inverse"
-                    st.metric("vs Poisson", f"{p['Poisson EP']:.1f} pts", 
+                    st.metric("vs Poisson", f"{p['Poisson xP']:.1f} pts", 
                               f"{p['vs Poisson']:+.1f}", delta_color=delta_color)
                 with col4:
                     st.metric("Prediction Range", p["Range"])
@@ -254,19 +311,19 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
                 st.markdown("---")
         
         # ── Filter Results ──
-        if position_filter != "All":
-            pred_df = pred_df[pred_df["Pos"] == position_filter]
+        if ml_team_filter != 'All':
+            pred_df = pred_df[pred_df["Team"] == ml_team_filter]
             
-        if price_tier == 'Premium (>9m)':
-            pred_df = pred_df[pred_df['Price'] > 9]
-        elif price_tier == 'Mid-range (6-9m)':
-            pred_df = pred_df[(pred_df['Price'] >= 6) & (pred_df['Price'] <= 9)]
-        elif price_tier == 'Budget (<6m)':
-            pred_df = pred_df[pred_df['Price'] < 6]
+        # Price and Minutes Sliders
+        pred_df = pred_df[
+            (pred_df['Price'] >= price_range[0]) & 
+            (pred_df['Price'] <= price_range[1]) &
+            (pred_df['Minutes'] >= min_minutes)
+        ]
 
         # Search logic (starts with first or last name)
-        if selected_player.strip():
-            q = normalize_name(selected_player.lower().strip())
+        if search_player_input.strip():
+            q = normalize_name(search_player_input.lower().strip())
             if 'first_normalized' not in players_df.columns:
                 players_df['first_normalized'] = players_df['first_name'].apply(lambda x: normalize_name(str(x).lower()))
                 players_df['second_normalized'] = players_df['second_name'].apply(lambda x: normalize_name(str(x).lower()))
@@ -277,7 +334,8 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
             ]["id"].tolist()
             pred_df = pred_df[pred_df["id"].isin(matched_ids)]
 
-        pred_df = pred_df.sort_values("ML Pred", ascending=False).reset_index(drop=True)
+        sort_col = ml_sort_col
+        pred_df = pred_df.sort_values(sort_col, ascending=False).reset_index(drop=True)
         
         # ── Quick Insights ──
         st.markdown("### Quick Picks")
@@ -290,12 +348,12 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
                 st.metric(
                     "Top Pick",
                     top_pick.iloc[0]["Player"],
-                    f"{top_pick.iloc[0]['ML Pred']:.1f} pts",
+                    f"{top_pick.iloc[0]['ML xP']:.1f} pts",
                     help="Highest ML predicted points"
                 )
         
-        # Best value (ML pred / price)
-        pred_df["_value"] = pred_df["ML Pred"] / pred_df["Price"].clip(lower=4)
+        # Best value (ML xP / price)
+        pred_df["_value"] = pred_df["ML xP"] / pred_df["Price"].clip(lower=4)
         best_value = pred_df.nlargest(1, "_value")
         if not best_value.empty:
             with qp2:
@@ -318,7 +376,7 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
                 )
         
         # Most certain high prediction
-        high_certainty = pred_df[pred_df["Certainty"] >= 50].nlargest(1, "ML Pred")
+        high_certainty = pred_df[pred_df["Certainty"] >= 50].nlargest(1, "ML xP")
         if not high_certainty.empty:
             with qp4:
                 st.metric(
@@ -331,25 +389,39 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
         # ── Full results table ──
         st.markdown(f"### ML Predictions (next {gws} GW{'s' if gws > 1 else ''}) — {len(pred_df)} found")
         
-        # Prepare display dataframe - keep numeric values for proper sorting/filtering
-        display_cols = ["Player", "Pos", "Team", "Price", "ML Pred", "Range", "FPL EP", "vs FPL", "Poisson EP", "vs Poisson", "Certainty"]
+        # Prepare display dataframe
+        horizon = n_gameweeks
+        ml_label = f"ML xP x{horizon}" if horizon > 1 else "ML xP"
+        fpl_label = f"FPL xP x{horizon}" if horizon > 1 else "FPL xP"
+        poisson_label = f"Poisson xP x{horizon}" if horizon > 1 else "Poisson xP"
+        
+        display_cols = ["Player", "Pos", "Team", "Price", "Minutes", ml_label]
+        if horizon > 1:
+            display_cols.append("Avg ML")
+        display_cols.extend(["Range", fpl_label, "vs FPL", poisson_label, "vs Poisson", "Certainty"])
+        
         full_df = pred_df[display_cols].copy()
         
-        # Use column_config for formatting without converting to strings
+        # Use column_config for formatting
+        col_config = {
+            "Price": st.column_config.NumberColumn("Price", format="£%.1fm"),
+            "Minutes": st.column_config.NumberColumn("Mins", format="%d"),
+            ml_label: st.column_config.NumberColumn(ml_label, format="%.1f"),
+            fpl_label: st.column_config.NumberColumn(fpl_label, format="%.1f"),
+            "vs FPL": st.column_config.NumberColumn("vs FPL", format="%+.1f"),
+            poisson_label: st.column_config.NumberColumn(poisson_label, format="%.1f"),
+            "vs Poisson": st.column_config.NumberColumn("vs Poisson", format="%+.1f"),
+            "Certainty": st.column_config.NumberColumn("Certainty", format="%.0f%%"),
+        }
+        if "Avg ML" in full_df.columns:
+            col_config["Avg ML"] = st.column_config.NumberColumn("Avg ML", format="%.2f")
+
         st.dataframe(
             style_df_with_injuries(full_df, players_df),
             use_container_width=True,
             hide_index=True,
             height=600,
-            column_config={
-                "Price": st.column_config.NumberColumn("Price", format="£%.1fm"),
-                "ML Pred": st.column_config.NumberColumn("ML Pred", format="%.1f"),
-                "FPL EP": st.column_config.NumberColumn("FPL EP", format="%.1f"),
-                "vs FPL": st.column_config.NumberColumn("vs FPL", format="%+.1f"),
-                "Poisson EP": st.column_config.NumberColumn("Poisson EP", format="%.1f"),
-                "vs Poisson": st.column_config.NumberColumn("vs Poisson", format="%+.1f"),
-                "Certainty": st.column_config.NumberColumn("Certainty", format="%.0f%%"),
-            }
+            column_config=col_config
         )
         
         # ── Model accuracy info (collapsed) ──
@@ -464,7 +536,7 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
                     if pos_df.empty:
                         st.info(f"No {pos} predictions available")
                     else:
-                        pos_display = pos_df[["Player", "Team", "Price", "ML Pred", "vs FPL", "vs Poisson", "Certainty"]].copy()
+                        pos_display = pos_df[["Player", "Team", "Price", "ML xP", "vs FPL", "vs Poisson", "Certainty"]].copy()
                         st.dataframe(
                             pos_display,
                             use_container_width=True,

@@ -6,7 +6,10 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from utils.helpers import safe_numeric, style_df_with_injuries
+from utils.helpers import (
+    safe_numeric, style_df_with_injuries,
+    calculate_consensus_ep, get_consensus_label
+)
 from components.styles import render_section_title, render_fixture_badge
 
 
@@ -91,9 +94,13 @@ def render_team_analysis_tab(processor, players_df: pd.DataFrame):
         team_id = team_data['id']
         team_short = team_data['short_name']
         
-        # Get team players
+        # Get team players and calculate consensus
         team_players = players_df[players_df['team'] == team_id].copy()
-        team_players['expected_points'] = safe_numeric(team_players.get('expected_points', team_players.get('ep_next', pd.Series([0]*len(team_players)))))
+        active_models = st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])
+        team_players = calculate_consensus_ep(team_players, active_models)
+        con_label = get_consensus_label(active_models)
+        
+        team_players['expected_points'] = safe_numeric(team_players['consensus_ep'])
         team_players['now_cost'] = safe_numeric(team_players['now_cost'], 5)
         team_players['minutes'] = safe_numeric(team_players.get('minutes', pd.Series([0]*len(team_players))))
         team_players['form'] = safe_numeric(team_players.get('form', pd.Series([0]*len(team_players))))
@@ -108,7 +115,7 @@ def render_team_analysis_tab(processor, players_df: pd.DataFrame):
             total_ep = team_players['expected_points'].sum()
             st.markdown(f'''
             <div style="background:#ffffff;border:1px solid rgba(0,0,0,0.04);border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:1rem;text-align:center;">
-                <div style="color:#86868b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Total Team EP</div>
+                <div style="color:#86868b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Total {con_label}</div>
                 <div style="color:#3b82f6;font-size:1.5rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{total_ep:.1f}</div>
             </div>
             ''', unsafe_allow_html=True)
@@ -117,7 +124,7 @@ def render_team_analysis_tab(processor, players_df: pd.DataFrame):
             avg_ep = team_players['expected_points'].mean()
             st.markdown(f'''
             <div style="background:#ffffff;border:1px solid rgba(0,0,0,0.04);border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:1rem;text-align:center;">
-                <div style="color:#86868b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Avg Player EP</div>
+                <div style="color:#86868b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Avg Player {con_label}</div>
                 <div style="color:#22c55e;font-size:1.5rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{avg_ep:.2f}</div>
             </div>
             ''', unsafe_allow_html=True)
@@ -141,6 +148,98 @@ def render_team_analysis_tab(processor, players_df: pd.DataFrame):
             <div style="background:#ffffff;border:1px solid rgba(0,0,0,0.04);border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:1rem;text-align:center;">
                 <div style="color:#86868b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Players Available</div>
                 <div style="color:#1d1d1f;font-size:1.5rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{num_players}</div>
+            </div>
+            ''', unsafe_allow_html=True)
+        
+        st.markdown("---")
+        
+        # ── Team Attack/Defense Stats (Moved up) ──
+        st.markdown("### Team Statistics")
+        
+        # Calculate stats for ALL teams to determine ranks
+        all_team_stats = []
+        for tid in processor.teams_df['id'].unique():
+            t_players = players_df[players_df['team'] == tid]
+            t_attackers = t_players[t_players['position'].isin(['MID', 'FWD'])]
+            t_defenders = t_players[t_players['position'].isin(['GKP', 'DEF'])]
+            
+            all_team_stats.append({
+                'id': tid,
+                'goals': safe_numeric(t_attackers.get('goals_scored', 0)).sum(),
+                'assists': safe_numeric(t_attackers.get('assists', 0)).sum(),
+                'xg': safe_numeric(t_attackers.get('us_xG', t_attackers.get('expected_goals', 0))).sum(),
+                'xa': safe_numeric(t_attackers.get('us_xA', t_attackers.get('expected_assists', 0))).sum(),
+                'cs': safe_numeric(t_defenders.get('clean_sheets', 0)).sum() / max(len(t_defenders), 1),
+                'saves': safe_numeric(t_defenders.get('saves', 0)).sum(),
+                'cbit': safe_numeric(t_defenders.get('cbit_score', 0)).mean(),
+                'gc': safe_numeric(t_defenders.get('goals_conceded', 0)).sum() / max(len(t_defenders), 1)
+            })
+        
+        stats_df = pd.DataFrame(all_team_stats)
+        
+        # Helper to get rank string
+        def get_rank(tid, metric, ascending=False):
+            ranks = stats_df[metric].rank(method='min', ascending=ascending)
+            rank = int(ranks[stats_df['id'] == tid].iloc[0])
+            return f" <span style='font-size:0.75rem;color:#888;'>({rank}º)</span>"
+
+        stat_cols = st.columns(2)
+        
+        with stat_cols[0]:
+            st.markdown("**Attacking Output**")
+            attackers = team_players[team_players['position'].isin(['MID', 'FWD'])]
+            total_goals = safe_numeric(attackers.get('goals_scored', 0)).sum()
+            total_assists = safe_numeric(attackers.get('assists', 0)).sum()
+            total_xg = safe_numeric(attackers.get('us_xG', attackers.get('expected_goals', 0))).sum()
+            total_xa = safe_numeric(attackers.get('us_xA', attackers.get('expected_assists', 0))).sum()
+            
+            st.markdown(f'''
+            <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:0.5rem;">
+                <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;text-align:center;">
+                    <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">Goals</div>
+                    <div style="color:#22c55e;font-weight:600;font-family:'JetBrains Mono',monospace;">{int(total_goals)}{get_rank(team_id, 'goals')}</div>
+                </div>
+                <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;text-align:center;">
+                    <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">Assists</div>
+                    <div style="color:#3b82f6;font-weight:600;font-family:'JetBrains Mono',monospace;">{int(total_assists)}{get_rank(team_id, 'assists')}</div>
+                </div>
+                <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;text-align:center;">
+                    <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">xG</div>
+                    <div style="color:#22c55e;font-weight:600;font-family:'JetBrains Mono',monospace;">{total_xg:.1f}{get_rank(team_id, 'xg')}</div>
+                </div>
+                <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;text-align:center;">
+                    <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">xA</div>
+                    <div style="color:#3b82f6;font-weight:600;font-family:'JetBrains Mono',monospace;">{total_xa:.1f}{get_rank(team_id, 'xa')}</div>
+                </div>
+            </div>
+            ''', unsafe_allow_html=True)
+        
+        with stat_cols[1]:
+            st.markdown("**Defensive Output**")
+            defenders = team_players[team_players['position'].isin(['GKP', 'DEF'])]
+            total_cs = safe_numeric(defenders.get('clean_sheets', 0)).sum() / max(len(defenders), 1)
+            total_saves = safe_numeric(defenders.get('saves', 0)).sum()
+            avg_cbit = safe_numeric(defenders.get('cbit_score', 0)).mean()
+            goals_conceded = safe_numeric(defenders.get('goals_conceded', 0)).sum() / max(len(defenders), 1)
+            
+            st.markdown(f'''
+            <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:0.5rem;">
+                <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;text-align:center;">
+                    <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">Avg CS</div>
+                    <div style="color:#22c55e;font-weight:600;font-family:'JetBrains Mono',monospace;">{total_cs:.1f}{get_rank(team_id, 'cs')}</div>
+                </div>
+                <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;text-align:center;">
+                    <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">Total Saves</div>
+                    <div style="color:#3b82f6;font-weight:600;font-family:'JetBrains Mono',monospace;">{int(total_saves)}{get_rank(team_id, 'saves')}</div>
+                </div>
+                <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;text-align:center;">
+                    <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">Avg CBIT</div>
+                    <div style="color:#f59e0b;font-weight:600;font-family:'JetBrains Mono',monospace;">{avg_cbit:.2f}{get_rank(team_id, 'cbit')}</div>
+                </div>
+                <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;text-align:center;">
+                    <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">Avg GC</div>
+                    <div style="color:#ef4444;font-weight:600;font-family:'JetBrains Mono',monospace;">{goals_conceded:.1f}{get_rank(team_id, 'gc', ascending=True)}</div>
+                </div>
             </div>
             ''', unsafe_allow_html=True)
         
@@ -190,12 +289,12 @@ def render_team_analysis_tab(processor, players_df: pd.DataFrame):
                     # Add fixture ticker to display
                     display_df = display_players[['web_name', 'position', 'now_cost', 'expected_points', 
                                                   'form', 'minutes', 'selected_by_percent']].copy()
-                    display_df.columns = ['Player', 'Pos', 'Price', 'EP', 'Form', 'Mins', 'EO%']
+                    display_df.columns = ['Player', 'Pos', 'Price', con_label, 'Form', 'Mins', 'EO%']
                     
                     st.dataframe(
                         style_df_with_injuries(display_df, players_df, format_dict={
                             'Price': '£{:.1f}m',
-                            'EP': '{:.2f}',
+                            con_label: '{:.2f}',
                             'Form': '{:.1f}',
                             'Mins': '{:.0f}',
                             'EO%': '{:.1f}%'
@@ -207,6 +306,53 @@ def render_team_analysis_tab(processor, players_df: pd.DataFrame):
                 else:
                     st.info(f"No {pos} players available")
         
+        st.markdown("---")
+        
+        # ── Points Distribution (Bubble Chart) ──
+        st.markdown("### Point Distribution Cluster")
+        st.caption("Player point contributions by position — bubble size reflects total points")
+        
+        cluster_df = team_players[team_players['total_points'] > 0].copy()
+        if not cluster_df.empty:
+            import plotly.express as px
+            
+            # Position order for x-axis
+            pos_order = {"GKP": 0, "DEF": 1, "MID": 2, "FWD": 3}
+            cluster_df['pos_val'] = cluster_df['position'].map(pos_order)
+            
+            fig = px.scatter(
+                cluster_df,
+                x='position',
+                y='total_points',
+                size='total_points',
+                color='position',
+                hover_name='web_name',
+                text='web_name',
+                category_orders={"position": ["GKP", "DEF", "MID", "FWD"]},
+                color_discrete_map={'GKP': '#3b82f6', 'DEF': '#22c55e', 'MID': '#f59e0b', 'FWD': '#ef4444'}
+            )
+            
+            fig.update_traces(
+                textposition='top center',
+                marker=dict(opacity=0.7, line=dict(width=1, color='White')),
+                hovertemplate='<b>%{hovertext}</b><br>Points: %{y}<extra></extra>'
+            )
+            
+            fig.update_layout(
+                margin=dict(t=30, l=40, r=40, b=40),
+                height=450,
+                showlegend=False,
+                template='plotly_white',
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                font=dict(family='Inter, sans-serif', size=12),
+                xaxis=dict(title="Position", gridcolor='#f0f0f0'),
+                yaxis=dict(title="Total Points", gridcolor='#f0f0f0')
+            )
+            st.plotly_chart(fig, use_container_width=True, key="team_point_bubble")
+        else:
+            st.info("No point data available for this team")
+            
         st.markdown("---")
         
         # ── Stack Analysis ──
@@ -298,66 +444,3 @@ def render_team_analysis_tab(processor, players_df: pd.DataFrame):
         
         st.markdown("---")
         
-        # ── Team Attack/Defense Stats ──
-        st.markdown("### Team Statistics")
-        
-        stat_cols = st.columns(2)
-        
-        with stat_cols[0]:
-            st.markdown("**Attacking Output**")
-            # Sum attacking stats from team players
-            attackers = team_players[team_players['position'].isin(['MID', 'FWD'])]
-            total_goals = safe_numeric(attackers.get('goals_scored', pd.Series([0]*len(attackers)))).sum()
-            total_assists = safe_numeric(attackers.get('assists', pd.Series([0]*len(attackers)))).sum()
-            total_xg = safe_numeric(attackers.get('us_xG', attackers.get('expected_goals', pd.Series([0]*len(attackers))))).sum()
-            total_xa = safe_numeric(attackers.get('us_xA', attackers.get('expected_assists', pd.Series([0]*len(attackers))))).sum()
-            
-            st.markdown(f'''
-            <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:0.5rem;">
-                <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;text-align:center;">
-                    <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">Goals</div>
-                    <div style="color:#22c55e;font-weight:600;font-family:'JetBrains Mono',monospace;">{int(total_goals)}</div>
-                </div>
-                <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;text-align:center;">
-                    <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">Assists</div>
-                    <div style="color:#3b82f6;font-weight:600;font-family:'JetBrains Mono',monospace;">{int(total_assists)}</div>
-                </div>
-                <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;text-align:center;">
-                    <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">xG</div>
-                    <div style="color:#22c55e;font-weight:600;font-family:'JetBrains Mono',monospace;">{total_xg:.1f}</div>
-                </div>
-                <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;text-align:center;">
-                    <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">xA</div>
-                    <div style="color:#3b82f6;font-weight:600;font-family:'JetBrains Mono',monospace;">{total_xa:.1f}</div>
-                </div>
-            </div>
-            ''', unsafe_allow_html=True)
-        
-        with stat_cols[1]:
-            st.markdown("**Defensive Output**")
-            defenders = team_players[team_players['position'].isin(['GKP', 'DEF'])]
-            total_cs = safe_numeric(defenders.get('clean_sheets', pd.Series([0]*len(defenders)))).sum() / max(len(defenders), 1)
-            total_saves = safe_numeric(defenders.get('saves', pd.Series([0]*len(defenders)))).sum()
-            avg_cbit = safe_numeric(defenders.get('cbit_score', pd.Series([0]*len(defenders)))).mean()
-            goals_conceded = safe_numeric(defenders.get('goals_conceded', pd.Series([0]*len(defenders)))).sum() / max(len(defenders), 1)
-            
-            st.markdown(f'''
-            <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:0.5rem;">
-                <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;text-align:center;">
-                    <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">Avg CS</div>
-                    <div style="color:#22c55e;font-weight:600;font-family:'JetBrains Mono',monospace;">{total_cs:.1f}</div>
-                </div>
-                <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;text-align:center;">
-                    <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">Total Saves</div>
-                    <div style="color:#3b82f6;font-weight:600;font-family:'JetBrains Mono',monospace;">{int(total_saves)}</div>
-                </div>
-                <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;text-align:center;">
-                    <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">Avg CBIT</div>
-                    <div style="color:#f59e0b;font-weight:600;font-family:'JetBrains Mono',monospace;">{avg_cbit:.2f}</div>
-                </div>
-                <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;text-align:center;">
-                    <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">Avg GC</div>
-                    <div style="color:#ef4444;font-weight:600;font-family:'JetBrains Mono',monospace;">{goals_conceded:.1f}</div>
-                </div>
-            </div>
-            ''', unsafe_allow_html=True)

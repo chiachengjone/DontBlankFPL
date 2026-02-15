@@ -40,7 +40,8 @@ apply_theme()
 # ── Session State Defaults ──
 _SESSION_DEFAULTS = {
     'injury_highlight': True,
-    'use_poisson_xp': True,  # True = Poisson blend, False = FPL raw ep_next
+    'use_poisson_xp': True,  # Legacy, keeping for compatibility during migration
+    'active_models': ['ml', 'poisson', 'fpl'], # Default to all 3
     'fpl_team_id': 0,
     # Preferences
     'pref_weeks_ahead': 1,
@@ -139,15 +140,30 @@ def main():
         if ustat_active is False:
             st.warning("Understat offline - using FPL fallback")
     with set_col2:
-        new_poisson = st.toggle(
-            "Poisson xP",
-            value=st.session_state.use_poisson_xp,
-            help="ON = Poisson model (70/30 blend with opponent strength). OFF = Raw FPL ep_next."
-        )
-        if new_poisson != st.session_state.use_poisson_xp:
-            st.session_state.use_poisson_xp = new_poisson
-            st.session_state.pop('players_df', None)
-            st.cache_resource.clear()  # Clear cached data to force regeneration
+        st.markdown("<div style='font-size:0.75rem;color:#86868b;margin-bottom:0.2rem;'>Active Models (Model xP)</div>", unsafe_allow_html=True)
+        # Using checkboxes in a nested column layout for a clean look
+        m_col1, m_col2, m_col3 = st.columns(3)
+        with m_col1:
+            use_ml = st.checkbox("ML xP", value='ml' in st.session_state.active_models, key="global_ml", help="ML Prediction")
+        with m_col2:
+            use_poisson = st.checkbox("Poi", value='poisson' in st.session_state.active_models, key="global_poisson", help="Poisson xP")
+        with m_col3:
+            use_fpl = st.checkbox("FPL xP", value='fpl' in st.session_state.active_models, key="global_fpl", help="FPL Raw xP")
+            
+        # Update active_models list
+        new_active = []
+        if use_ml: new_active.append('ml')
+        if use_poisson: new_active.append('poisson')
+        if use_fpl: new_active.append('fpl')
+        
+        # Ensure at least one is selected - if none, revert to previous or default
+        if not new_active:
+            new_active = st.session_state.active_models if st.session_state.active_models else ['fpl']
+            
+        if new_active != st.session_state.active_models:
+            st.session_state.active_models = new_active
+            # Also update legacy toggle for any old dependencies
+            st.session_state.use_poisson_xp = 'poisson' in new_active
             st.rerun()
     with set_col3:
         st.session_state.injury_highlight = st.toggle(

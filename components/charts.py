@@ -33,8 +33,10 @@ def create_ep_ownership_scatter(
     
     df['selected_by_percent'] = safe_numeric(df.get('selected_by_percent', pd.Series([0]*len(df))))
     
-    # Use expected_points (advanced EP) if available, else ep_next
-    if 'expected_points' in df.columns and df['expected_points'].notna().any():
+    # Use consensus_ep (Model xP) as primary, then expected_points (advanced EP), then ep_next
+    if 'consensus_ep' in df.columns:
+        df['ep'] = safe_numeric(df['consensus_ep'])
+    elif 'expected_points' in df.columns and df['expected_points'].notna().any():
         df['ep'] = safe_numeric(df['expected_points'])
     elif 'ep_next' in df.columns:
         df['ep'] = safe_numeric(df['ep_next'])
@@ -123,7 +125,7 @@ def create_ep_ownership_scatter(
                     name=pos,
                     legendgroup=pos,
                     showlegend=False,
-                    hovertemplate='<b>%{customdata}</b><br>Ownership: %{x:.1f}%<br>EP: %{y:.1f}<extra></extra>',
+                    hovertemplate='<b>%{customdata}</b><br>Ownership: %{x:.1f}%<br>xP: %{y:.1f}<extra></extra>',
                     customdata=non_top['web_name']
                 ))
             
@@ -165,7 +167,7 @@ def create_ep_ownership_scatter(
         plot_bgcolor='#ffffff',
         font=dict(family='Inter, sans-serif', color='#86868b', size=11),
         xaxis_title='Ownership %',
-        yaxis_title='Expected Points',
+        yaxis_title='Model xP',
         xaxis=dict(gridcolor='#e5e5ea', zerolinecolor='#e5e5ea'),
         yaxis=dict(gridcolor='#e5e5ea', zerolinecolor='#e5e5ea'),
         legend=dict(
