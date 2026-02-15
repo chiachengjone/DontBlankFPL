@@ -15,6 +15,35 @@ def render_price_predictor_tab(processor, players_df: pd.DataFrame):
     st.markdown('<p class="section-title">Price Change Predictor</p>', unsafe_allow_html=True)
     st.caption("Track transfer activity and predict price changes based on net transfers")
     
+    # Metrics explanation dropdown
+    with st.expander("Understanding Price Changes"):
+        st.markdown("""
+        **How FPL Prices Change**
+        - Prices change at ~2:30 AM UK time based on transfer activity
+        - Not exact: FPL uses a hidden algorithm to determine changes
+        - Generally: ~60-80k net transfers needed for a price change
+        
+        **Transfer Metrics**
+        - **Net Transfers**: Transfers In - Transfers Out this GW
+        - **Cost Change Event**: Price change this GW so far (£0.1 increments)
+        - **Cost Change Start**: Total price change from starting price
+        
+        **Prediction Categories**
+        - **Likely to Rise** (green): Net transfers > 60k, buy before rise
+        - **Likely to Fall** (red): Net transfers < -60k, sell before fall
+        - **Watch List**: Close to threshold, monitor closely
+        
+        **Price Strategy Tips**
+        - Buy rising players early in GW to bank value
+        - Sell falling players before deadline
+        - Don't chase price rises for players you'll sell soon
+        - Hold quality players even if they're falling
+        
+        **Ownership Impact**
+        - High ownership: Harder to rise, easier to fall
+        - Low ownership: Easier to rise on small transfer volumes
+        """)
+    
     # Prepare data
     df = players_df.copy()
     df['transfers_in_event'] = safe_numeric(df.get('transfers_in_event', pd.Series([0]*len(df))))

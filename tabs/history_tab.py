@@ -16,6 +16,36 @@ def render_history_tab(processor, players_df: pd.DataFrame, fetcher):
     st.markdown('<p class="section-title">Historical Performance</p>', unsafe_allow_html=True)
     st.caption("Track your GW scores, captain choices, and ML prediction accuracy")
     
+    # Metrics explanation dropdown
+    with st.expander("Understanding Historical Metrics"):
+        st.markdown("""
+        **Season Summary**
+        - **Total Points**: Your cumulative score this season
+        - **Overall Rank**: Your position among all ~11M managers
+        - **GW Average**: Average points per gameweek
+        - **Best/Worst GW**: Your highest and lowest scoring weeks
+        
+        **Transfer History**
+        - **Total Transfers**: Number of transfers made all season
+        - **Hits Taken**: Points spent on extra transfers (-4 each)
+        - **Net Transfer Cost**: Total hit points lost
+        
+        **Captain Analysis**
+        - Shows captain choices and returns per GW
+        - Captain Points: Points earned from captain pick
+        - Optimal Captain: Best captain choice in hindsight
+        - Captain Efficiency: Actual vs optimal captain points %
+        
+        **ML Prediction Accuracy**
+        - Compares ML predictions to actual outcomes
+        - MAE (Mean Absolute Error): Average prediction miss
+        - Hit Rate: % of predictions within 2 points
+        
+        **Chip Usage**
+        - Shows when chips were played and their impact
+        - Useful for planning future chip strategy
+        """)
+    
     # Get team ID
     team_id = st.session_state.get('fpl_team_id', 0)
     

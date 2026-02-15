@@ -12,6 +12,37 @@ def render_monte_carlo_tab(processor, players_df: pd.DataFrame):
     """Monte Carlo Simulation tab — its own top-level tab."""
 
     st.markdown('<p class="section-title">Monte Carlo Simulation</p>', unsafe_allow_html=True)
+    
+    # Metrics explanation dropdown
+    with st.expander("Understanding Monte Carlo Simulation"):
+        st.markdown("""
+        **What is Monte Carlo Simulation?**
+        - Runs thousands of random scenarios based on statistical distributions
+        - Shows the range of possible outcomes, not just averages
+        - Essential for understanding risk and variance in FPL
+        
+        **Simulation Settings**
+        - **Simulations**: More = more accurate (10k+ recommended)
+        - **Gameweeks**: How far ahead to simulate
+        - **Distribution**: Statistical model for point variation
+        
+        **Distribution Types**
+        - **Mixed**: Combines multiple distributions (most realistic)
+        - **Gamma**: Right-skewed, good for attacking returns
+        - **Normal**: Bell curve, good for consistent performers
+        - **Poisson**: Count-based, good for goals/assists
+        
+        **Output Metrics**
+        - **Mean**: Average expected points across all simulations
+        - **Std Dev**: Volatility/variance (higher = more unpredictable)
+        - **5th/95th Percentile**: Range of likely outcomes (90% confidence)
+        - **Upside**: Chance of significantly exceeding expectation
+        
+        **Portfolio Analysis**
+        - Simulates your entire squad together
+        - Shows combined floor/ceiling for GW points
+        - Identifies if your squad is too risky or too safe
+        """)
 
     col1, col2 = st.columns([1, 2])
 

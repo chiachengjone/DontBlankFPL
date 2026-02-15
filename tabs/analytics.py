@@ -14,6 +14,38 @@ from components.charts import create_cbit_chart, create_ownership_trends_chart
 def render_analytics_tab(processor, players_df: pd.DataFrame):
     """Analytics tab - player discovery and advanced metrics."""
     
+    # Metrics explanation dropdown
+    with st.expander("Understanding Analytics Metrics"):
+        st.markdown("""
+        **Expected Points (EP)**
+        - Predicted points for the next gameweek
+        - Blends FPL's estimate with Poisson model when enabled
+        
+        **EPPM (EP Per Million)**
+        - Value metric: Expected Points ÷ Price
+        - Higher = better value for money
+        
+        **Threat / Creativity / Influence (ICT)**
+        - FPL's underlying stats measuring player impact
+        - Threat: Attacking threat, shots, chances
+        - Creativity: Chance creation, key passes
+        - Influence: Overall match impact
+        
+        **CBIT (Creativity-Based In-play Target)**
+        - Measures in-play actions like tackles, interceptions, clearances
+        - 10+ actions = +2 bonus points (2025/26 rule)
+        
+        **Diff Gain / RRI (Relative Rank Impact)**
+        - How much rank you'd gain if this differential hauls
+        - Higher for low-ownership players with high EP
+        
+        **Ownership Tiers**
+        - Template (>25%): Essential players everyone owns
+        - Popular (10-25%): Common but not universal
+        - Enabler (5-10%): Budget options that enable premiums
+        - Differential (<5%): Low-owned potential rank gainers
+        """)
+    
     # Filters - use session state defaults
     f1, f2, f3, f4, f5 = st.columns([1, 1, 1, 1, 1])
     

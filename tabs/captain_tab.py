@@ -16,6 +16,34 @@ def render_captain_tab(processor, players_df: pd.DataFrame):
     st.markdown('<p class="section-title">Captain Analysis</p>', unsafe_allow_html=True)
     st.caption("Compare top captain candidates using ML, Poisson, and FPL estimates")
     
+    # Metrics explanation dropdown
+    with st.expander("Understanding Captain Metrics"):
+        st.markdown("""
+        **Captain Score**
+        - Blended score combining EP (35%), ML prediction (25%), Form (20%), Ownership (10%), and Threat Momentum (10%)
+        - Higher score = better captain pick confidence
+        
+        **Expected Points (EP)**
+        - FPL's official prediction for points this GW
+        - Based on fixture difficulty, form, and historical data
+        
+        **ML Prediction**
+        - Machine learning model prediction (run ML tab first for accuracy)
+        - Uses XGBoost ensemble trained on historical FPL data
+        
+        **Poisson EP**
+        - Statistical model using expected goals (xG) and assists (xA)
+        - Better for predicting attacking returns
+        
+        **Captain EV (Expected Value)**
+        - EP × 1.25 (2025/26 captain multiplier)
+        - The expected points if you captain this player
+        
+        **Ownership Consideration**
+        - High ownership = safe pick (limits rank loss if they score)
+        - Low ownership = differential (big gains if they haul)
+        """)
+    
     # Prepare data
     df = players_df.copy()
     df['expected_points'] = safe_numeric(df.get('expected_points', df.get('ep_next', pd.Series([2.0]*len(df)))))

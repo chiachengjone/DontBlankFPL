@@ -12,6 +12,40 @@ from utils.helpers import safe_numeric, round_df, style_df_with_injuries, normal
 def render_ml_tab(processor, players_df: pd.DataFrame):
     """Machine Learning Predictions tab — intuitive UI for all users."""
 
+    # Metrics explanation dropdown
+    with st.expander("Understanding ML Predictions"):
+        st.markdown("""
+        **What is ML Prediction?**
+        - Machine learning model trained on historical FPL data
+        - Uses XGBoost ensemble with 5-fold cross-validation
+        - Predicts expected points for upcoming gameweeks
+        
+        **Key Metrics**
+        - **ML Prediction**: Model's predicted points for the player
+        - **FPL EP**: Official FPL expected points estimate
+        - **vs FPL**: Difference between ML and FPL predictions
+        - **Poisson EP**: Statistical model using xG/xA data
+        - **Certainty %**: Model confidence (higher = more reliable)
+        
+        **Understanding Certainty**
+        - 80%+: High confidence, trust the prediction
+        - 60-80%: Moderate confidence, consider other factors
+        - <60%: Low confidence, player is unpredictable
+        
+        **Model Features Used**
+        - Form, ICT Index, minutes, fixture difficulty
+        - Historical points per game, home/away splits
+        - Opponent defensive strength, recent results
+        
+        **How to Use**
+        - Compare ML vs FPL EP for value identification
+        - High ML, Low FPL = potential differential
+        - Low certainty = high variance player (risky captain)
+        
+        **Model Performance (shown after running)**
+        - MAE: Average prediction error in points
+        - R²: How well model explains point variance (higher = better)
+        """)
 
     # ── Controls ──
     

@@ -147,6 +147,37 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
     st.markdown('<p class="section-title">Wildcard Planner</p>', unsafe_allow_html=True)
     st.caption("Generate the optimal 15-man squad based on formation and strategy")
     
+    # Metrics explanation dropdown
+    with st.expander("Understanding Wildcard Planner"):
+        st.markdown("""
+        **What is a Wildcard?**
+        - Chip that allows unlimited free transfers for one gameweek
+        - You get 2 wildcards per season (one before GW20, one after)
+        - Best used during fixture swings or to fix a failing squad
+        
+        **Formation Options**
+        - Choose your preferred starting XI structure
+        - 3-4-3: Attacking formation, 3 forwards
+        - 4-4-2: Balanced, good for clean sheet potential
+        - 5-4-1: Defensive, maximizes CS points
+        
+        **Strategy Options**
+        - **Balanced**: Weighs EP and value equally
+        - **Max Points**: Selects highest EP players regardless of price
+        - **Value**: Prioritizes EPPM (points per million)
+        - **Differential**: Low ownership picks for rank gains
+        
+        **Squad Requirements**
+        - 15 players total (2 GK, 5 DEF, 5 MID, 3 FWD)
+        - Max 3 players from any single team
+        - Must stay within budget (default £100m)
+        
+        **Squad Quality Metrics**
+        - Total EP: Combined expected points for the squad
+        - Total Value: Squad's EPPM efficiency
+        - Ownership Mix: Balance of template vs differential
+        """)
+    
     # ── Settings ──
     st.markdown("### Squad Settings")
     

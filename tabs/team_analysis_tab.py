@@ -50,6 +50,33 @@ def render_team_analysis_tab(processor, players_df: pd.DataFrame):
     st.markdown('<p class="section-title">Team Analysis</p>', unsafe_allow_html=True)
     st.caption("Deep-dive into team assets, fixtures, and stack opportunities")
     
+    # Metrics explanation dropdown
+    with st.expander("Understanding Team Analysis"):
+        st.markdown("""
+        **Team Overview**
+        - Shows all players from selected Premier League team
+        - Useful for identifying stacking opportunities
+        
+        **Fixture Difficulty Rating (FDR)**
+        - 1-2 (Green): Easy fixtures, target these players
+        - 3 (Yellow): Medium difficulty
+        - 4-5 (Red): Hard fixtures, consider benching/avoiding
+        
+        **Team Stacking**
+        - Owning 2-3 players from same team during good fixtures
+        - Maximizes returns when a team has a good run
+        - Risk: All players blank if team performs poorly
+        
+        **Key Assets**
+        - Premium: High-priced, high-ceiling players
+        - Mid-price: Balanced value options
+        - Budget: Cheap enablers to fund premiums
+        
+        **Clean Sheet Probability**
+        - Based on opponent's xG (expected goals) conceded
+        - Higher % = better for defenders/goalkeepers
+        """)
+    
     # Get team list from teams_df
     teams_df = processor.teams_df
     teams = teams_df.to_dict('records')

@@ -27,7 +27,8 @@ class FPLDataFetcher:
     def __init__(self, odds_api_key: Optional[str] = None):
         self.session = requests.Session()
         self.session.headers.update({
-            'User-Agent': 'FPL-Strategy-Engine/2.0'
+            'User-Agent': 'FPL-Strategy-Engine/2.0',
+            'Accept-Charset': 'utf-8'
         })
         self.odds_api_key = odds_api_key
         self._cache = {}
@@ -58,6 +59,7 @@ class FPLDataFetcher:
         try:
             response = self.session.get(f"{FPL_BASE_URL}/bootstrap-static/")
             response.raise_for_status()
+            response.encoding = 'utf-8'
             data = response.json()
             self._set_cache('bootstrap', data)
             return data
@@ -77,6 +79,7 @@ class FPLDataFetcher:
         try:
             response = self.session.get(f"{FPL_BASE_URL}/element-summary/{player_id}/")
             response.raise_for_status()
+            response.encoding = 'utf-8'
             data = response.json()
             self._set_cache(cache_key, data)
             return data
@@ -98,6 +101,7 @@ class FPLDataFetcher:
                 f"{FPL_BASE_URL}/entry/{team_id}/event/{gameweek}/picks/"
             )
             response.raise_for_status()
+            response.encoding = 'utf-8'
             data = response.json()
             self._set_cache(cache_key, data)
             return data
@@ -114,6 +118,7 @@ class FPLDataFetcher:
         try:
             response = self.session.get(f"{FPL_BASE_URL}/entry/{team_id}/history/")
             response.raise_for_status()
+            response.encoding = 'utf-8'
             data = response.json()
             self._set_cache(cache_key, data)
             return data
@@ -129,6 +134,7 @@ class FPLDataFetcher:
         try:
             response = self.session.get(f"{FPL_BASE_URL}/fixtures/")
             response.raise_for_status()
+            response.encoding = 'utf-8'
             data = response.json()
             self._set_cache('fixtures', data)
             return data

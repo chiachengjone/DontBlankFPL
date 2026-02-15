@@ -13,6 +13,35 @@ def render_genetic_tab(processor, players_df: pd.DataFrame):
     """Genetic Algorithm Optimizer tab — its own top-level tab."""
 
     st.markdown('<p class="section-title">Genetic Optimizer</p>', unsafe_allow_html=True)
+    
+    # Metrics explanation dropdown
+    with st.expander("Understanding Genetic Optimizer"):
+        st.markdown("""
+        **What is Genetic Optimization?**
+        - Evolutionary algorithm inspired by natural selection
+        - "Evolves" thousands of possible squads to find the optimal one
+        - Better than greedy algorithms for complex optimization
+        
+        **Algorithm Settings**
+        - **Population Size**: Number of squad candidates per generation (higher = more exploration)
+        - **Generations**: Number of evolution cycles (higher = better convergence)
+        - **Mutation Rate**: Chance of random changes (prevents local optima)
+        
+        **Evolution Process**
+        1. **Selection**: Best squads are chosen to "reproduce"
+        2. **Crossover**: Combines players from two good squads
+        3. **Mutation**: Random player swaps for diversity
+        4. **Fitness**: Squads scored on total EP, value, and constraints
+        
+        **Fitness Score**
+        - Combined metric of squad's total EP and budget efficiency
+        - Higher fitness = better squad
+        
+        **When to Use**
+        - Wildcard planning: Find optimal 15-man squad
+        - Free Hit: Best squad for a single GW
+        - Exploring non-obvious squad structures
+        """)
 
     col1, col2 = st.columns([1, 2])
 

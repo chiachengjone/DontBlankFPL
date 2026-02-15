@@ -14,6 +14,32 @@ from fpl_api import CBIT_BONUS_THRESHOLD, CBIT_BONUS_POINTS, MAX_FREE_TRANSFERS,
 def render_strategy_tab(processor, players_df: pd.DataFrame):
     """Strategy tab - EP vs Ownership visualization with filters."""
     
+    # Metrics explanation dropdown
+    with st.expander("Understanding Strategy Metrics"):
+        st.markdown("""
+        **2025/26 Season Rules**
+        - **5 Max Free Transfers**: Can now bank up to 5 FTs (was 2)
+        - **1.25x Captain**: Captain earns 1.25x points (was 2x)
+        - **CBIT Bonus**: +2 pts for 10+ in-play actions
+        
+        **Player Landscape Scatter Plot**
+        - X-axis: Ownership % (how many managers own them)
+        - Y-axis: Expected Points (predicted GW score)
+        - Bubble size: Price (bigger = more expensive)
+        
+        **Quadrant Strategy**
+        - Top-left (high EP, low ownership): Prime differentials
+        - Top-right (high EP, high ownership): Essential template picks
+        - Bottom-left: Avoid zone
+        - Bottom-right: Traps (popular but low EP)
+        
+        **Color Coding**
+        - Green: Attackers (FWD)
+        - Blue: Midfielders (MID)
+        - Orange: Defenders (DEF)
+        - Purple: Goalkeepers (GKP)
+        """)
+    
     # Season rules at top
     st.markdown('<p class="section-title">2025/26 Season Rules</p>', unsafe_allow_html=True)
     

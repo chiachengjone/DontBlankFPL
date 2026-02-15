@@ -15,6 +15,33 @@ def render_optimization_tab(processor, players_df: pd.DataFrame, fetcher):
     
     st.markdown('<p class="section-title">Transfer Optimizer</p>', unsafe_allow_html=True)
     
+    # Metrics explanation dropdown
+    with st.expander("Understanding Transfer Optimizer"):
+        st.markdown("""
+        **Planning Horizon**
+        - Number of gameweeks to optimize for (3-10)
+        - Longer horizon considers fixture swings
+        
+        **Free Transfers**
+        - How many FTs you have available (1-5 max in 2025/26)
+        - Using more than FTs available costs -4 pts per extra transfer
+        
+        **Strategy Options**
+        - **Balanced**: Weighs EP, value, and fixtures equally
+        - **Maximum Points**: Prioritizes highest EP regardless of price
+        - **Differential**: Favors low-ownership picks for rank gains
+        - **Value**: Prioritizes EPPM (EP per million)
+        
+        **Transfer Recommendations**
+        - Shows best OUT → IN swaps for your squad
+        - EP Gain: Expected points improvement
+        - Value: Price difference (positive = saves money)
+        
+        **Hit Analysis**
+        - Shows if taking hits (-4, -8, etc.) is worth it
+        - Break-even: Points needed to justify the hit
+        """)
+    
     # Configuration -- Team ID comes from the header input
     team_id = st.session_state.get('fpl_team_id', 0)
     if team_id == 0:

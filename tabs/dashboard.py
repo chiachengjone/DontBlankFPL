@@ -4,6 +4,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+import html
 
 from config import (
     CAPTAIN_MULTIPLIER,
@@ -29,6 +30,29 @@ from utils.helpers import (
 
 def render_dashboard_tab(processor, players_df: pd.DataFrame):
     """Dashboard overview - key metrics and recommendations at a glance."""
+
+    # Metrics explanation dropdown
+    with st.expander("Understanding Dashboard Metrics"):
+        st.markdown("""
+        **Gameweek Overview**
+        - **Current GW**: The active gameweek number
+        - **GW Average**: Average points scored by all managers this GW
+        - **Your GW Score**: Your points this GW (minus any transfer hits)
+        - **vs Average**: How many points above/below the average you scored
+        
+        **Top Picks by Position**
+        - Shows highest Expected Points (EP) players per position
+        - Yellow background indicates injured/doubtful players
+        - Ownership tier shows how template vs differential a pick is
+        
+        **Captain Quick Pick**
+        - Top 3 captain candidates based on EP, form, and ownership
+        - EV = Expected Value (EP × captain multiplier)
+        
+        **Fixture Swings**
+        - Teams whose schedule is about to get easier (green) or harder (red)
+        - Useful for planning transfers 3-6 GWs ahead
+        """)
 
     try:
         current_gw = processor.fetcher.get_current_gameweek()
@@ -164,9 +188,9 @@ def render_squad_performance(processor, players_df, current_gw, team_id):
 
         # Per-player bar chart
         chart_df = squad_df.sort_values('perf_diff', ascending=True).copy()
-        chart_df['label'] = chart_df['web_name']
+        chart_df['label'] = chart_df['web_name'].apply(lambda x: str(x) if pd.notna(x) else '')
         if captain_id and captain_id in chart_df['id'].values:
-            chart_df.loc[chart_df['id'] == captain_id, 'label'] = chart_df.loc[chart_df['id'] == captain_id, 'web_name'] + ' (C)'
+            chart_df.loc[chart_df['id'] == captain_id, 'label'] = chart_df.loc[chart_df['id'] == captain_id, 'label'] + ' (C)'
 
         colors = ['#22c55e' if d >= 0 else '#ef4444' for d in chart_df['perf_diff']]
 
@@ -220,17 +244,20 @@ def render_top_picks_summary(players_df: pd.DataFrame):
                 continue
             for _, p in pos_df.iterrows():
                 injury = get_injury_status(p)
-                flag = f' <span style="color:{injury["color"]}">[{injury["icon"]}]</span>' if injury['icon'] else ''
-                avail = get_availability_badge(p)
-                avail_html = f' <span style="color:#f59e0b;font-size:0.7rem;">{avail}</span>' if avail else ''
+                # Highlight background yellow if injured
+                is_injured = injury['status'] != 'available'
+                bg_color = '#fff9e6' if is_injured else '#fff'
+                
                 tier = get_ownership_tier(safe_numeric(pd.Series([p['selected_by_percent']])).iloc[0])
+                player_name = html.escape(str(p["web_name"]) if pd.notna(p["web_name"]) else "")
+                team_name = html.escape(str(p.get("team_name", "")) if pd.notna(p.get("team_name")) else "")
                 st.markdown(
-                    f'<div style="background:#fff;border:1px solid rgba(0,0,0,0.06);border-radius:8px;'
+                    f'<div style="background:{bg_color};border:1px solid rgba(0,0,0,0.06);border-radius:8px;'
                     f'padding:0.5rem 0.7rem;margin-bottom:0.3rem;">'
                     f'<div style="color:#1d1d1f;font-weight:600;font-size:0.85rem;">'
-                    f'{p["web_name"]}{flag}{avail_html}</div>'
+                    f'{player_name}</div>'
                     f'<div style="color:#888;font-size:0.72rem;">'
-                    f'{p.get("team_name", "")} | {p["now_cost"]:.1f}m | '
+                    f'{team_name} | {p["now_cost"]:.1f}m | '
                     f'<span style="color:{POSITION_COLORS.get(pos, "#888")}">EP {p["ep"]:.1f}</span> | '
                     f'<span style="color:{tier["color"]}">{tier["tier"]}</span>'
                     f'</div></div>',
@@ -257,11 +284,13 @@ def render_captain_quick_pick(players_df: pd.DataFrame):
     for i, (_, cap) in enumerate(top3.iterrows()):
         with cap_cols[i]:
             badge = ['1st', '2nd', '3rd'][i]
+            cap_name = html.escape(str(cap["web_name"]) if pd.notna(cap["web_name"]) else "")
+            cap_team = html.escape(str(cap.get("team_name", "")) if pd.notna(cap.get("team_name")) else "")
             st.markdown(
                 f'<div class="rule-card">'
                 f'<div style="font-size:0.7rem;color:#888;">{badge}</div>'
-                f'<div style="font-size:1.1rem;font-weight:600;color:#fff;">{cap["web_name"]}</div>'
-                f'<div style="color:#888;font-size:0.8rem;">{cap.get("team_name", "")} | {cap["now_cost"]:.1f}m</div>'
+                f'<div style="font-size:1.1rem;font-weight:600;color:#fff;">{cap_name}</div>'
+                f'<div style="color:#888;font-size:0.8rem;">{cap_team} | {cap["now_cost"]:.1f}m</div>'
                 f'<div style="color:#ef4444;font-weight:600;margin-top:0.3rem;">{cap["captain_ev"]:.1f} EV</div>'
                 f'<div style="color:#888;font-size:0.72rem;">Form {cap["form"]:.1f} | EP {cap["ep"]:.1f}</div>'
                 f'</div>',
