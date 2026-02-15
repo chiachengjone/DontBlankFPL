@@ -49,7 +49,7 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
 
     # ── Controls ──
     
-    ctrl1, ctrl2, ctrl3 = st.columns([1, 1, 1.5])
+    ctrl1, ctrl2, ctrl3, ctrl4 = st.columns([1, 1, 1, 2])
     
     with ctrl1:
         n_gameweeks = st.selectbox(
@@ -57,25 +57,28 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
             options=[1, 2, 3, 5],
             format_func=lambda x: f"Next {x} GW{'s' if x > 1 else ''}",
             index=0,
-            key="ml_horizon",
-            help="Gameweeks ahead to predict. 1 GW is most accurate."
+            key="ml_horizon"
         )
     
     with ctrl2:
         position_filter = st.selectbox(
             "Position",
             options=["All", "GKP", "DEF", "MID", "FWD"],
-            index=0,
-            key="ml_pos_filter",
-            help="Filter results by position"
+            key="ml_pos_filter"
+        )
+
+    with ctrl3:
+        price_tier = st.selectbox(
+            "Type",
+            options=['All', 'Premium (>9m)', 'Mid-range (6-9m)', 'Budget (<6m)'],
+            key="ml_price_tier"
         )
     
-    with ctrl3:
+    with ctrl4:
         selected_player = st.text_input(
             "Search player",
             placeholder="Type player name...",
-            key="ml_player_focus",
-            help="Search for a specific player by name"
+            key="ml_player_focus"
         )
     
 
@@ -105,9 +108,12 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
             raw_fpl_ep = player.get('ep_next_num', player.get('ep_next', 0))
             fpl_ep = safe_numeric(pd.Series([raw_fpl_ep])).iloc[0]
             
-            # Get Poisson EP (expected_points which is the blended value when Poisson is on)
-            poisson_ep_raw = player.get('expected_points', fpl_ep)
-            poisson_ep = safe_numeric(pd.Series([poisson_ep_raw])).iloc[0]
+            # Get Poisson EP (prefer expected_points_poisson if available)
+            if 'expected_points_poisson' in player:
+                poisson_ep = safe_numeric(pd.Series([player['expected_points_poisson']])).iloc[0]
+            else:
+                poisson_ep_raw = player.get('expected_points', fpl_ep)
+                poisson_ep = safe_numeric(pd.Series([poisson_ep_raw])).iloc[0]
             
             ml_pred = pred.predicted_points
             
@@ -148,12 +154,24 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
         
         # ── Player-specific view ──
         if selected_player and selected_player.strip():
-            query_norm = normalize_name(selected_player.lower().strip())
-            pred_df["_name_norm"] = pred_df["Player"].apply(lambda x: normalize_name(str(x).lower()))
-            player_row = pred_df[pred_df["_name_norm"].str.contains(query_norm, na=False)]
+            q = normalize_name(selected_player.lower().strip())
+            
+            # Match if query starts with beginning of either name on the original players_df
+            # then find the corresponding ID in pred_df
+            if 'first_normalized' not in players_df.columns:
+                players_df['first_normalized'] = players_df['first_name'].apply(lambda x: normalize_name(str(x).lower()))
+                players_df['second_normalized'] = players_df['second_name'].apply(lambda x: normalize_name(str(x).lower()))
+            
+            matched_ids = players_df[
+                (players_df['first_normalized'].str.startswith(q, na=False)) |
+                (players_df['second_normalized'].str.startswith(q, na=False))
+            ]["id"].tolist()
+            
+            player_row = pred_df[pred_df["id"].isin(matched_ids)]
+            
             if not player_row.empty:
                 player_row = player_row.head(1)
-                st.markdown(f"### ML Analysis: {player_row.iloc[0]['Player']}")
+                st.markdown(f"### ML Analysis: {player_row.iloc[0]['web_name']}")
                 
                 p = player_row.iloc[0]
                 pid = p["id"]
@@ -235,10 +253,30 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
                 
                 st.markdown("---")
         
-        # Apply position filter
+        # ── Filter Results ──
         if position_filter != "All":
             pred_df = pred_df[pred_df["Pos"] == position_filter]
-        
+            
+        if price_tier == 'Premium (>9m)':
+            pred_df = pred_df[pred_df['Price'] > 9]
+        elif price_tier == 'Mid-range (6-9m)':
+            pred_df = pred_df[(pred_df['Price'] >= 6) & (pred_df['Price'] <= 9)]
+        elif price_tier == 'Budget (<6m)':
+            pred_df = pred_df[pred_df['Price'] < 6]
+
+        # Search logic (starts with first or last name)
+        if selected_player.strip():
+            q = normalize_name(selected_player.lower().strip())
+            if 'first_normalized' not in players_df.columns:
+                players_df['first_normalized'] = players_df['first_name'].apply(lambda x: normalize_name(str(x).lower()))
+                players_df['second_normalized'] = players_df['second_name'].apply(lambda x: normalize_name(str(x).lower()))
+                
+            matched_ids = players_df[
+                (players_df['first_normalized'].str.startswith(q, na=False)) |
+                (players_df['second_normalized'].str.startswith(q, na=False))
+            ]["id"].tolist()
+            pred_df = pred_df[pred_df["id"].isin(matched_ids)]
+
         pred_df = pred_df.sort_values("ML Pred", ascending=False).reset_index(drop=True)
         
         # ── Quick Insights ──
@@ -291,7 +329,7 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
                 )
         
         # ── Full results table ──
-        st.markdown(f"### All Players (Next {gws} GW{'s' if gws > 1 else ''}) — {len(pred_df)} players")
+        st.markdown(f"### ML Predictions (next {gws} GW{'s' if gws > 1 else ''}) — {len(pred_df)} found")
         
         # Prepare display dataframe - keep numeric values for proper sorting/filtering
         display_cols = ["Player", "Pos", "Team", "Price", "ML Pred", "Range", "FPL EP", "vs FPL", "Poisson EP", "vs Poisson", "Certainty"]

@@ -47,7 +47,7 @@ def render_analytics_tab(processor, players_df: pd.DataFrame):
         """)
     
     # Filters - use session state defaults
-    f1, f2, f3, f4, f5 = st.columns([1, 1, 1, 1, 1])
+    f1, f2, f3 = st.columns([1, 1, 1])
     
     with f1:
         pos_filter = st.selectbox(
@@ -67,10 +67,18 @@ def render_analytics_tab(processor, players_df: pd.DataFrame):
             value=st.session_state.get('pref_min_mins', 90),
             step=90, key="analytics_mins",
         )
+        
+    f4, f5, f6 = st.columns([1, 1, 1])
     with f4:
+        current_horizon = st.session_state.get('pref_weeks_ahead', 1)
+        sort_options = ['Consensus EP']
+        if current_horizon > 1:
+            sort_options.append('Avg Consensus EP')
+        sort_options.extend(['Expected Points', 'Total Points', 'ML EP', 'Threat', 'Diff Gain (RRI)', 'Price', 'Ownership'])
+        
         sort_col = st.selectbox(
             "Sort By",
-            ['Expected Points', 'EPPM', 'Threat', 'Diff Gain (RRI)', 'Diff ROI/m', 'CBIT', 'Price', 'Ownership'],
+            sort_options,
             key="analytics_sort",
         )
     with f5:
@@ -79,18 +87,58 @@ def render_analytics_tab(processor, players_df: pd.DataFrame):
             ['All', 'Template', 'Popular', 'Enabler', 'Differential'],
             key="analytics_tier",
         )
+    with f6:
+        # Horizon slider - controls multi-gameweek xP
+        horizon = st.slider(
+            "xP Horizon (GWs)", 1, 5,
+            value=current_horizon,
+            help="Sum expected points over the next N gameweeks using full Poisson engine",
+            key="analytics_horizon"
+        )
+        if horizon != current_horizon:
+            st.session_state.pref_weeks_ahead = horizon
+            # Clear cached players_df to force recalculation in app.py
+            if 'players_df' in st.session_state:
+                del st.session_state.players_df
+            st.rerun()
     
     search = st.text_input("Search player...", placeholder="Enter name", key="analytics_search")
     
-    # Prepare data - use expected_points from fpl_api (already enriched with Understat)
+    # Prepare data - Analytics always prefers Poisson data for a high-performance view
     df = players_df.copy()
-    # EP comes from advanced calculation in fpl_api; fall back to ep_next if missing
-    if 'expected_points' not in df.columns or df['expected_points'].isna().all():
+    
+    # Force use of Poisson EP for Analytics tab metrics
+    if 'expected_points_poisson' in df.columns:
+        df['expected_points'] = safe_numeric(df['expected_points_poisson'])
+    elif 'expected_points' not in df.columns or df['expected_points'].isna().all():
+        # Fallback to blended/FPL if Poisson specifically missing
         df['expected_points'] = safe_numeric(df.get('ep_next', pd.Series([2.0]*len(df))))
     else:
         df['expected_points'] = safe_numeric(df['expected_points'])
     
-    # Use pre-calculated differential metrics if available
+    # Standardize FPL EP for ranking and comparison
+    df['ep_next_val'] = safe_numeric(df.get('ep_next', 0))
+    
+    # ML & Consensus EP - Fetch ML Predictions from session state to avoid 0s
+    if 'ml_predictions' in st.session_state:
+        ml_preds = st.session_state['ml_predictions']
+        # These are per-GW predictions, so we scale by horizon
+        df['ml_ep'] = df['id'].apply(
+            lambda pid: ml_preds[pid].predicted_points * horizon if pid in ml_preds else df.loc[df['id'] == pid, 'expected_points'].iloc[0] * 0.85 if len(df[df['id'] == pid]) > 0 else 2.0 * horizon
+        ).round(2)
+    else:
+        # Fallback if no ML data - expected_points is already cumulative for the horizon
+        df['ml_ep'] = (df['expected_points'] * 0.85 + (safe_numeric(df.get('form', 0)) * 0.3 * horizon)).round(2)
+        
+    # Consensus is the average of Poisson (expected_points), FPL (ep_next_val * horizon), and ML (ml_ep)
+    # expected_points and ep_next_val * horizon are already cumulative
+    df['consensus_ep'] = ((df['expected_points'] + (df['ep_next_val'] * horizon) + df['ml_ep']) / 3).round(2)
+    
+    # Average Consensus for multi-week windows
+    if horizon > 1:
+        df['avg_consensus_ep'] = (df['consensus_ep'] / horizon).round(2)
+        
+    # Calculate Differential & Value Metrics
     if 'differential_gain' not in df.columns:
         eo = safe_numeric(df['selected_by_percent'], 5).clip(lower=0.1)
         eo_frac = eo / 100.0
@@ -99,6 +147,7 @@ def render_analytics_tab(processor, players_df: pd.DataFrame):
         df['eo_top10k'] = (eo_10k * 100).round(1)
         df['differential_gain'] = (df['expected_points'] * (1 - eo_10k)).round(2)
         df['diff_roi'] = (df['differential_gain'] / safe_numeric(df['now_cost'], 5).clip(lower=4)).round(3)
+    
     if 'differential_score' not in df.columns:
         df['differential_score'] = df['differential_gain']
     
@@ -108,47 +157,111 @@ def render_analytics_tab(processor, players_df: pd.DataFrame):
     
     df['xg_per_pound'] = safe_numeric(df.get('xg_per_pound', df['expected_points'] / safe_numeric(df['now_cost'], 5).clip(lower=4)))
     
-    # Apply filters
-    if pos_filter != 'All':
-        df = df[df['position'] == pos_filter]
+    # ── FILTER DATASET BEFORE RANKING ──
+    # We rank based on the filtered criteria (Pos, Price, Mins, Tier)
+    # but BEFORE the search filter to keep ranks stable while typing.
+    mask = pd.Series([True] * len(df), index=df.index)
+    if pos_filter != 'All': 
+        mask &= (df['position'] == pos_filter)
     
+    # Ensure numeric for filter
     df['now_cost'] = safe_numeric(df['now_cost'], 5)
     df['minutes'] = safe_numeric(df['minutes'])
-    df = df[df['now_cost'] <= max_price]
-    df = df[df['minutes'] >= min_mins]
+    mask &= (df['now_cost'] <= max_price)
+    mask &= (df['minutes'] >= min_mins)
     
+    # Add ownership tier before applying tier filter
+    df['ownership_tier'] = classify_ownership_column(df)
+    if tier_filter != 'All': 
+        mask &= (df['ownership_tier'] == tier_filter)
+    
+    rank_df = df[mask].copy()
+    
+    # Calculate ranks (1 = highest)
+    if not rank_df.empty:
+        rank_df['p_rank'] = rank_df['expected_points'].rank(ascending=False, method='min').astype(int)
+        rank_df['f_rank'] = rank_df['ep_next_val'].rank(ascending=False, method='min').astype(int)
+        rank_df['m_rank'] = rank_df['ml_ep'].rank(ascending=False, method='min').astype(int)
+        rank_df['c_rank'] = rank_df['consensus_ep'].rank(ascending=False, method='min').astype(int)
+        
+        if horizon > 1 and 'avg_consensus_ep' in rank_df.columns:
+            rank_df['ac_rank'] = rank_df['avg_consensus_ep'].rank(ascending=False, method='min').astype(int)
+        # Add total points rank
+        # Ensure 'total_points' is present and numeric
+        rank_df['total_points'] = pd.to_numeric(rank_df.get('total_points', 0), errors='coerce').fillna(0)
+        rank_df['tp_rank'] = rank_df['total_points'].rank(ascending=False, method='min').astype(int)
+        
+        # Create display columns with bracketed ranks
+        # Using subscripts to make the rank look secondary and "lighter" (proxy for transparency)
+        # while keeping the table interactive in st.dataframe
+        def format_with_rank(val, rank):
+            sub_map = str.maketrans("0123456789", "₀₁₂₃₄₅₆₇₈₉")
+            rank_sub = str(rank).translate(sub_map)
+            return f"{val} ₍{rank_sub}₎"
+
+        rank_df['expected_points_display'] = rank_df.apply(
+            lambda r: format_with_rank(f"{r['expected_points']:.2f}", r['p_rank']), axis=1
+        )
+        rank_df['ep_next_display'] = rank_df.apply(
+            lambda r: format_with_rank(f"{r['ep_next_val'] * horizon:.2f}", r['f_rank']), axis=1
+        )
+        rank_df['ml_ep_display'] = rank_df.apply(
+            lambda r: format_with_rank(f"{r['ml_ep']:.2f}", r['m_rank']), axis=1
+        )
+        rank_df['consensus_ep_display'] = rank_df.apply(
+            lambda r: format_with_rank(f"{r['consensus_ep']:.2f}", r['c_rank']), axis=1
+        )
+        if horizon > 1 and 'ac_rank' in rank_df.columns:
+            rank_df['avg_consensus_ep_display'] = rank_df.apply(
+                lambda r: format_with_rank(f"{r['avg_consensus_ep']:.2f}", r['ac_rank']), axis=1
+            )
+        
+        rank_df['total_points_display'] = rank_df.apply(
+            lambda r: format_with_rank(f"{int(r['total_points'])}", r['tp_rank']), axis=1
+        )
+    else:
+        rank_df['expected_points_display'] = ""
+        rank_df['ep_next_display'] = ""
+        rank_df['ml_ep_display'] = ""
+        rank_df['consensus_ep_display'] = ""
+        rank_df['total_points_display'] = ""
+
+    # Apply search filter to the ranked subset
+    df = rank_df
     if search:
-        query_norm = normalize_name(search.lower().strip())
-        df['_name_norm'] = df['web_name'].apply(lambda x: normalize_name(str(x).lower()))
-        df = df[df['_name_norm'].str.contains(query_norm, na=False)]
-        df = df.drop(columns=['_name_norm'])
+        query = normalize_name(search.lower().strip())
+        # Ensure normalized names exist for filtering
+        if 'first_normalized' not in df.columns:
+            df['first_normalized'] = df['first_name'].apply(lambda x: normalize_name(str(x).lower()))
+            df['second_normalized'] = df['second_name'].apply(lambda x: normalize_name(str(x).lower()))
+            
+        df = df[
+            (df['first_normalized'].str.startswith(query, na=False)) |
+            (df['second_normalized'].str.startswith(query, na=False))
+        ]
     
-    # Sort
     sort_map = {
+        'Consensus EP': 'consensus_ep',
+        'Avg Consensus EP': 'avg_consensus_ep',
         'Expected Points': 'expected_points',
-        'EPPM': 'eppm',
+        'Total Points': 'total_points',
+        'ML EP': 'ml_ep',
         'Threat': 'threat_momentum',
         'Diff Gain (RRI)': 'differential_gain',
-        'Diff ROI/m': 'diff_roi',
-        'Differential': 'differential_score',
-        'CBIT': 'cbit_propensity',
         'Price': 'now_cost',
         'Ownership': 'selected_by_percent',
     }
-    sort_by = sort_map.get(sort_col, 'expected_points')
+    sort_by = sort_map.get(sort_col, 'consensus_ep')
     if sort_by in df.columns:
         df[sort_by] = safe_numeric(df[sort_by])
-        df = df.sort_values(sort_by, ascending=(sort_col == 'Price'))
-    
-    # Add ownership tier
-    df['ownership_tier'] = classify_ownership_column(df)
-    
-    # Apply tier filter
-    if tier_filter != 'All':
-        df = df[df['ownership_tier'] == tier_filter]
+        # ascending=df[sort_by].name == 'now_cost' doesn't work well in lambda, just check
+        asc = (sort_col == 'Price')
+        df = df.sort_values(sort_by, ascending=asc)
+    elif sort_by == 'consensus_ep': # Fallback
+        df = df.sort_values('expected_points', ascending=False)
     
     # Display player table
-    render_player_table(df)
+    render_player_table(df, horizon=horizon)
     
     # Points distribution
     render_points_distribution(players_df)
@@ -172,18 +285,35 @@ def render_analytics_tab(processor, players_df: pd.DataFrame):
     render_ownership_trends(players_df)
 
 
-def render_player_table(df: pd.DataFrame):
+def render_player_table(df: pd.DataFrame, horizon: int = 1):
     """Render the main player table with RRI differential columns and CBIT score (DEF/GKP only)."""
+    ep_col = 'expected_points_display' if 'expected_points_display' in df.columns else 'expected_points'
+    fpl_col = 'ep_next_display' if 'ep_next_display' in df.columns else 'ep_next'
+    ml_col = 'ml_ep_display' if 'ml_ep_display' in df.columns else 'ml_ep'
+    con_col = 'consensus_ep_display' if 'consensus_ep_display' in df.columns else 'consensus_ep'
+    ac_col = 'avg_consensus_ep_display' if 'avg_consensus_ep_display' in df.columns else 'avg_consensus_ep'
+    tp_col = 'total_points_display' if 'total_points_display' in df.columns else 'total_points'
+    
     base_cols = ['web_name', 'team_name', 'position', 'now_cost', 'selected_by_percent',
-                 'expected_points', 'ep_next', 'xnp', 'diff_roi', 'eppm', 'threat_momentum']
+                 ep_col, fpl_col, ml_col, con_col]
+    
+    if horizon > 1:
+        base_cols.append(ac_col)
+        
+    base_cols.extend([tp_col, 'xnp', 'threat_momentum'])
     # Only show CBIT score if we have defenders/keepers (otherwise misleading)
     if 'cbit_score' in df.columns and df['position'].isin(['DEF', 'GKP']).any():
         base_cols.append('cbit_score')
     
     display_cols = [c for c in base_cols if c in df.columns]
     
-    numeric_cols = ['now_cost', 'selected_by_percent', 'expected_points', 'ep_next',
-                   'xnp', 'diff_roi', 'eppm', 'threat_momentum', 'cbit_score']
+    numeric_cols = ['now_cost', 'selected_by_percent', 'xnp', 'threat_momentum', 'cbit_score']
+    # expected_points and ep_next are now strings in the display columns, or numeric in fallback
+    if ep_col == 'expected_points': numeric_cols.append('expected_points')
+    if fpl_col == 'ep_next': numeric_cols.append('ep_next')
+    if ml_col == 'ml_ep': numeric_cols.append('ml_ep')
+    if con_col == 'consensus_ep': numeric_cols.append('consensus_ep')
+
     for col in numeric_cols:
         if col in df.columns:
             df[col] = safe_numeric(df[col])
@@ -193,12 +323,23 @@ def render_player_table(df: pd.DataFrame):
         is_defensive = df['position'].isin(['DEF', 'GKP'])
         df.loc[~is_defensive, 'cbit_score'] = 0.0
     
+    # Dynamic labels based on horizon
+    if horizon > 1:
+        ep_label = f"Poisson EP ({horizon}GW)"
+        fpl_ep_label = f"FPL EP x{horizon}"
+    else:
+        ep_label = "Poisson EP"
+        fpl_ep_label = "FPL EP"
+    
     rename = {
         'web_name': 'Player', 'team_name': 'Team', 'position': 'Pos',
         'now_cost': 'Price', 'selected_by_percent': 'Own%',
-        'expected_points': 'EP', 'ep_next': 'FPL EP', 'xnp': 'xNP',
-        'diff_roi': 'ROI/m', 'eppm': 'EPPM', 'threat_momentum': 'Threat',
-        'cbit_score': 'CBIT',
+        ep_col: ep_label, fpl_col: fpl_ep_label, 
+        ml_col: f"ML EP{' x'+str(horizon) if horizon > 1 else ''}", 
+        con_col: f"Consensus EP{' ('+str(horizon)+'GW)' if horizon > 1 else ''}",
+        ac_col: "Avg Consensus EP",
+        tp_col: 'Total Points',
+        'xnp': 'xNP', 'threat_momentum': 'Threat Momentum', 'cbit_score': 'CBIT',
     }
     
     # Show all players in scrollable table
@@ -286,6 +427,22 @@ def render_value_by_position(players_df: pd.DataFrame):
         margin=dict(l=50, r=30, t=20, b=40)
     )
     st.plotly_chart(fig, use_container_width=True, key='analytics_value_boxplot')
+    
+    # New Value Table
+    st.markdown("### 📊 Value Leaderboard")
+    st.caption("Detailed EPPM (Expected Points Per Million) and ROI/m comparison for all players")
+    
+    val_table = df[['web_name', 'team_name', 'position', 'now_cost', 'value', 'diff_roi']].copy()
+    val_table.columns = ['Player', 'Team', 'Pos', 'Price', 'EPPM', 'ROI/m']
+    
+    # Ensure they are rounded for display
+    val_table['EPPM'] = pd.to_numeric(val_table['EPPM']).round(2)
+    val_table['ROI/m'] = pd.to_numeric(val_table['ROI/m']).round(3)
+    
+    st.dataframe(
+        style_df_with_injuries(val_table.sort_values('EPPM', ascending=False), players_df),
+        hide_index=True, use_container_width=True, height=400
+    )
 
 
 def render_cbit_analysis(players_df: pd.DataFrame):

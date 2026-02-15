@@ -94,14 +94,20 @@ def render_strategy_tab(processor, players_df: pd.DataFrame):
     
     # Player detail view when searching
     if search_player and search_player.strip():
-        search_lower = search_player.lower().strip()
-        search_norm = normalize_name(search_lower)
-        players_df['_name_norm'] = players_df['web_name'].apply(lambda x: normalize_name(str(x).lower()))
-        matched = players_df[players_df['_name_norm'].str.contains(search_norm, na=False)]
+        q = normalize_name(search_player.lower().strip())
+        
+        # Ensure normalized components exist for filtering
+        if 'first_normalized' not in players_df.columns:
+            players_df['first_normalized'] = players_df['first_name'].apply(lambda x: normalize_name(str(x).lower()))
+            players_df['second_normalized'] = players_df['second_name'].apply(lambda x: normalize_name(str(x).lower()))
+            
+        matched = players_df[
+            (players_df['first_normalized'].str.startswith(q, na=False)) |
+            (players_df['second_normalized'].str.startswith(q, na=False))
+        ].sort_values('selected_by_percent', ascending=False)
         
         if not matched.empty:
-            exact = matched[matched['_name_norm'] == search_norm]
-            selected = exact.iloc[0] if not exact.empty else matched.iloc[0]
+            selected = matched.iloc[0]
             
             st.markdown('<p class="section-title">Player Details</p>', unsafe_allow_html=True)
             render_player_detail_card(selected, processor, players_df)

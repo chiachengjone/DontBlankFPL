@@ -8,6 +8,7 @@ import plotly.graph_objects as go
 from utils.helpers import safe_numeric, style_df_with_injuries, round_df
 from optimizer import MAX_PLAYERS_PER_TEAM
 from config import TRANSFER_HIT_COST
+from fpl_api import MAX_FREE_TRANSFERS
 
 
 def render_optimization_tab(processor, players_df: pd.DataFrame, fetcher):
@@ -27,10 +28,10 @@ def render_optimization_tab(processor, players_df: pd.DataFrame, fetcher):
         - Using more than FTs available costs -4 pts per extra transfer
         
         **Strategy Options**
-        - **Balanced**: Weighs EP, value, and fixtures equally
-        - **Maximum Points**: Prioritizes highest EP regardless of price
-        - **Differential**: Favors low-ownership picks for rank gains
-        - **Value**: Prioritizes EPPM (EP per million)
+        - **Balanced**: 35% EP, 20% Form, 20% Value, 15% Mins, 10% Diff
+        - **Maximum Points**: 55% EP, 25% Form, 20% Mins (best for high budget)
+        - **Differential**: 35% EP, 35% Diff, 15% Form, 15% Mins (rank chasing)
+        - **Value**: 45% Value (EP/m), 30% EP, 25% Mins (tight budget)
         
         **Transfer Recommendations**
         - Shows best OUT → IN swaps for your squad
@@ -107,16 +108,32 @@ def analyze_transfers(processor, players_df, fetcher, team_id, weeks_ahead, free
         has_real_team = False
         st.warning(f"Could not fetch team data for ID {team_id}: {str(e)}. Showing general recommendations.")
     
-    # Prepare EP column
-    if 'expected_points' in featured_df.columns:
-        ep_col = 'expected_points'
-    elif 'ep_next' in featured_df.columns:
-        ep_col = 'ep_next'
-    else:
-        featured_df['ep_next'] = 2.0
-        ep_col = 'ep_next'
+    # Prepare EP metrics - Horizon-Aware Re-calculation
+    try:
+        from poisson_ep import calculate_poisson_ep_for_dataframe
+        fixtures_df = fetcher.get_fixtures_df()
+        current_gw = fetcher.get_current_gameweek()
+        team_stats = st.session_state.get('_understat_team_stats', None)
+        
+        # Calculate Poisson EP for the specific horizon chosen in the UI
+        # We re-run it here so that the "Poisson EP" column reflects the averaged potential over the whole window
+        temp_df = calculate_poisson_ep_for_dataframe(
+            featured_df, fixtures_df, current_gw, team_stats=team_stats, horizon=weeks_ahead
+        )
+        
+        # We take the cumulative Poisson for the horizon and divide by weeks to get a per-GW average
+        # This keeps the metrics comparable and prevents massive inflation over 5-10 week windows
+        featured_df['poisson_ep'] = (safe_numeric(temp_df['expected_points_poisson']) / weeks_ahead).round(2)
+    except Exception as e:
+        st.error(f"Poisson re-calculation failed: {e}")
+        featured_df['poisson_ep'] = safe_numeric(featured_df.get('expected_points_poisson', 2.0))
+
+    featured_df['fpl_ep'] = safe_numeric(featured_df.get('ep_next_num', featured_df.get('ep_next', 2.0)))
     
-    featured_df[ep_col] = safe_numeric(featured_df[ep_col])
+    # Force Blended EP as primary optimization target (70% Average Poisson, 30% FPL)
+    featured_df['blended_ep'] = (featured_df['poisson_ep'] * 0.7 + featured_df['fpl_ep'] * 0.3).round(2)
+    ep_col = 'blended_ep'
+    
     featured_df['selected_by_percent'] = safe_numeric(featured_df['selected_by_percent'])
     featured_df['now_cost'] = safe_numeric(featured_df['now_cost'], 5)
     featured_df['minutes'] = safe_numeric(featured_df.get('minutes', pd.Series([0]*len(featured_df))))
@@ -155,9 +172,6 @@ def analyze_transfers(processor, players_df, fetcher, team_id, weeks_ahead, free
     # Top 10 overall
     render_top_picks(available_df, ep_col)
     
-    # Multi-week transfer plan
-    if has_real_team and not current_squad_df.empty:
-        render_multi_week_plan(current_squad_df, available_df, ep_col, free_transfers, bank, weeks_ahead)
     
     # Points projection
     if has_real_team and not current_squad_df.empty:
@@ -284,8 +298,8 @@ def render_transfer_recommendations(current_squad_df, available_df, ep_col):
     if not current_squad_df.empty:
         st.markdown("**Recommended OUT** (lowest score in your squad)", unsafe_allow_html=True)
         out_candidates = current_squad_df.nsmallest(5, 'transfer_score')
-        out_display = out_candidates[['web_name', 'team_name', 'position', 'now_cost', ep_col, 'form', 'transfer_score']].copy()
-        out_display.columns = ['Player', 'Team', 'Pos', 'Price', 'EP', 'Form', 'Score']
+        out_display = out_candidates[['web_name', 'team_name', 'position', 'now_cost', 'poisson_ep', 'fpl_ep', 'blended_ep', 'form', 'transfer_score']].copy()
+        out_display.columns = ['Player', 'Team', 'Pos', 'Price', 'Poisson', 'FPL', 'Blend', 'Form', 'Score']
         st.dataframe(style_df_with_injuries(out_display), hide_index=True, use_container_width=True)
         
         st.markdown("**Recommended IN** (best available)", unsafe_allow_html=True)
@@ -433,14 +447,14 @@ def render_ai_transfer_plan(current_squad_df, available_df, ep_col, free_transfe
             with tc1:
                 st.markdown(f'''<div class="rule-card">
                     <div style="color:#ef4444;font-weight:600;">OUT: {t['out_name']}</div>
-                    <div class="rule-label">{t['out_team']} | {t['out_pos']} | {t['out_price']:.1f}m | EP {t['out_ep']:.1f}</div>
+                    <div class="rule-label">{t['out_team']} | {t['out_pos']} | {t['out_price']:.1f}m | Blend {t['out_ep']:.2f}</div>
                 </div>''', unsafe_allow_html=True)
             with tc2:
                 st.markdown('<div style="text-align:center;padding-top:1rem;color:#fff;font-size:1.5rem;">></div>', unsafe_allow_html=True)
             with tc3:
                 st.markdown(f'''<div class="rule-card">
                     <div style="color:#22c55e;font-weight:600;">IN: {t['in_name']}</div>
-                    <div class="rule-label">{t['in_team']} | {t['in_pos']} | {t['in_price']:.1f}m | EP {t['in_ep']:.1f}</div>
+                    <div class="rule-label">{t['in_team']} | {t['in_pos']} | {t['in_price']:.1f}m | Blend {t['in_ep']:.2f}</div>
                 </div>''', unsafe_allow_html=True)
 
         # Summary
@@ -484,8 +498,8 @@ def render_position_recommendations(available_df, ep_col):
         pos_df = available_df[available_df['position'] == pos].nlargest(5, 'transfer_score')
         if not pos_df.empty:
             st.markdown(f"**{pos} Recommendations**")
-            display_df = pos_df[['web_name', 'team_name', 'now_cost', ep_col, 'form', 'selected_by_percent', 'transfer_score']].copy()
-            display_df.columns = ['Player', 'Team', 'Price', 'EP', 'Form', 'Owned%', 'Score']
+            display_df = pos_df[['web_name', 'team_name', 'now_cost', 'poisson_ep', 'fpl_ep', 'blended_ep', 'form', 'selected_by_percent', 'transfer_score']].copy()
+            display_df.columns = ['Player', 'Team', 'Price', 'Poisson', 'FPL', 'Blend', 'Form', 'Owned%', 'Score']
             st.dataframe(style_df_with_injuries(display_df), hide_index=True, use_container_width=True)
 
 
@@ -493,8 +507,8 @@ def render_top_picks(available_df, ep_col):
     """Render top 10 overall picks."""
     st.markdown('<p class="section-title">Top 10 Overall Picks</p>', unsafe_allow_html=True)
     top_10 = available_df.nlargest(10, 'transfer_score')
-    top_display = top_10[['web_name', 'team_name', 'position', 'now_cost', ep_col, 'form', 'selected_by_percent', 'transfer_score']].copy()
-    top_display.columns = ['Player', 'Team', 'Pos', 'Price', 'EP', 'Form', 'Owned%', 'Score']
+    top_display = top_10[['web_name', 'team_name', 'position', 'now_cost', 'poisson_ep', 'fpl_ep', 'blended_ep', 'form', 'selected_by_percent', 'transfer_score']].copy()
+    top_display.columns = ['Player', 'Team', 'Pos', 'Price', 'Poisson', 'FPL', 'Blend', 'Form', 'Owned%', 'Score']
     st.dataframe(style_df_with_injuries(top_display), hide_index=True, use_container_width=True)
 
 
@@ -531,138 +545,3 @@ def render_points_projection(current_squad_df, available_df, ep_col):
     st.plotly_chart(fig_proj, use_container_width=True, key='opt_points_projection')
 
 
-def render_multi_week_plan(current_squad_df, available_df, ep_col, free_transfers, bank, weeks_ahead):
-    """
-    Multi-week transfer planning: simulate rolling transfers over 2-3 GWs.
-    Shows how the squad evolves and free transfers accumulate.
-    """
-    st.markdown('<p class="section-title">Multi-Week Transfer Plan</p>', unsafe_allow_html=True)
-    st.caption(
-        "Simulate transfers across multiple gameweeks. "
-        "Free transfers roll over (max 5). Each extra transfer costs 4 pts."
-    )
-
-    plan_gws = st.slider("Plan Ahead (GWs)", min_value=2, max_value=4, value=min(3, weeks_ahead), key="opt_multiweek_gws")
-    transfers_per_gw = st.slider("Transfers per GW", min_value=0, max_value=3, value=1, key="opt_multiweek_tpg")
-
-    if current_squad_df.empty or available_df.empty:
-        st.info("Load your team first to generate a multi-week plan.")
-        return
-
-    # Simulate GW-by-GW
-    squad_ids = set(current_squad_df['id'].tolist())
-    all_players = pd.concat([current_squad_df, available_df]).drop_duplicates('id')
-    running_fts = free_transfers
-    running_bank = bank
-    cumulative_hits = 0
-    cumulative_ep_gain = 0.0
-    gw_plans = []
-
-    for gw_offset in range(1, plan_gws + 1):
-        # Decay EP slightly for further GWs (less certainty)
-        decay = 0.95 ** (gw_offset - 1)
-
-        # Determine transfers for this GW
-        n_transfers = min(transfers_per_gw, len(squad_ids))
-        paid = max(0, n_transfers - running_fts)
-        hit_cost = paid * TRANSFER_HIT_COST
-
-        # Find weakest players in current squad
-        squad_df = all_players[all_players['id'].isin(squad_ids)].copy()
-        squad_df['_score'] = safe_numeric(squad_df.get('transfer_score', squad_df.get(ep_col, pd.Series([0]*len(squad_df))))) * decay
-
-        outs = squad_df.nsmallest(n_transfers, '_score') if n_transfers > 0 else pd.DataFrame()
-        out_ids = set(outs['id'].tolist()) if not outs.empty else set()
-
-        # Find best replacements
-        avail = all_players[~all_players['id'].isin(squad_ids - out_ids)].copy()
-        avail['_score'] = safe_numeric(avail.get('transfer_score', avail.get(ep_col, pd.Series([0]*len(avail))))) * decay
-
-        transfers_this_gw = []
-        new_squad_ids = squad_ids.copy()
-        gw_ep_gain = 0.0
-
-        for _, out_player in outs.iterrows():
-            pos = out_player['position']
-            pos_avail = avail[(avail['position'] == pos) & (~avail['id'].isin(new_squad_ids))].copy()
-            max_budget = running_bank + out_player['now_cost']
-            pos_avail = pos_avail[pos_avail['now_cost'] <= max_budget + 0.1]
-
-            if pos_avail.empty:
-                continue
-
-            best = pos_avail.nlargest(1, '_score').iloc[0]
-            ep_diff = safe_numeric(pd.Series([best.get(ep_col, 0)])).iloc[0] - safe_numeric(pd.Series([out_player.get(ep_col, 0)])).iloc[0]
-
-            transfers_this_gw.append({
-                'out': out_player['web_name'],
-                'out_price': out_player['now_cost'],
-                'in': best['web_name'],
-                'in_price': best['now_cost'],
-                'ep_diff': ep_diff,
-            })
-            new_squad_ids.discard(out_player['id'])
-            new_squad_ids.add(best['id'])
-            running_bank += out_player['now_cost'] - best['now_cost']
-            gw_ep_gain += ep_diff
-
-        squad_ids = new_squad_ids
-        cumulative_hits += hit_cost
-        cumulative_ep_gain += gw_ep_gain
-
-        # Roll FTs: used n_transfers, gain 1 next GW, cap at 5
-        used = min(n_transfers, running_fts)
-        running_fts = min(running_fts - used + 1, 5)
-
-        gw_plans.append({
-            'gw_offset': gw_offset,
-            'transfers': transfers_this_gw,
-            'fts_after': running_fts,
-            'bank_after': running_bank,
-            'hit_cost': hit_cost,
-            'ep_gain': gw_ep_gain,
-        })
-
-    # Display each GW plan
-    for plan in gw_plans:
-        gw_label = f"GW+{plan['gw_offset']}"
-        hit_label = f" (-{plan['hit_cost']} hit)" if plan['hit_cost'] > 0 else ""
-        st.markdown(f"**{gw_label}**{hit_label} | FTs after: {plan['fts_after']} | Bank: {plan['bank_after']:.1f}m")
-
-        if not plan['transfers']:
-            st.caption("No transfers this GW (roll FT)")
-        else:
-            for t in plan['transfers']:
-                tc1, tc2, tc3 = st.columns([5, 1, 5])
-                with tc1:
-                    st.markdown(
-                        f'<div style="background:#fff;border:1px solid rgba(0,0,0,0.06);border-radius:8px;'
-                        f'padding:0.5rem 0.7rem;text-align:center;">'
-                        f'<span style="color:#ef4444;font-weight:600;">OUT</span> '
-                        f'{t["out"]} ({t["out_price"]:.1f}m)</div>',
-                        unsafe_allow_html=True,
-                    )
-                with tc2:
-                    st.markdown('<div style="text-align:center;padding-top:0.3rem;color:#fff;">></div>', unsafe_allow_html=True)
-                with tc3:
-                    st.markdown(
-                        f'<div style="background:#fff;border:1px solid rgba(0,0,0,0.06);border-radius:8px;'
-                        f'padding:0.5rem 0.7rem;text-align:center;">'
-                        f'<span style="color:#22c55e;font-weight:600;">IN</span> '
-                        f'{t["in"]} ({t["in_price"]:.1f}m)</div>',
-                        unsafe_allow_html=True,
-                    )
-
-    # Summary
-    st.markdown(
-        f'<div class="rule-card" style="margin-top:0.5rem;">'
-        f'<span style="color:#888;">Total EP Gain:</span> '
-        f'<span style="color:{"#22c55e" if cumulative_ep_gain > 0 else "#ef4444"};font-weight:600;">{cumulative_ep_gain:+.1f}</span>'
-        f' | <span style="color:#888;">Total Hits:</span> '
-        f'<span style="color:{"#ef4444" if cumulative_hits > 0 else "#22c55e"};font-weight:600;">-{cumulative_hits} pts</span>'
-        f' | <span style="color:#888;">Net Gain:</span> '
-        f'<span style="color:{"#22c55e" if (cumulative_ep_gain - cumulative_hits) > 0 else "#ef4444"};font-weight:600;">'
-        f'{cumulative_ep_gain - cumulative_hits:+.1f}</span>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )

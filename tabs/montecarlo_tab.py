@@ -66,20 +66,25 @@ def render_monte_carlo_tab(processor, players_df: pd.DataFrame):
 
         # Player selection
         st.markdown("**Individual Player Analysis**")
-        player_search = st.text_input("Search player", key="mc_player_search")
+        player_search = st.text_input("Search player", key="mc_player_search", placeholder="First or last name...")
 
         if player_search:
-            search_norm = normalize_name(player_search.lower().strip())
-            players_df['_name_norm'] = players_df['web_name'].apply(lambda x: normalize_name(str(x).lower()))
+            q = normalize_name(player_search.lower().strip())
+            # Match if query starts with beginning of either name
+            if 'first_normalized' not in players_df.columns:
+                players_df['first_normalized'] = players_df['first_name'].apply(lambda x: normalize_name(str(x).lower()))
+                players_df['second_normalized'] = players_df['second_name'].apply(lambda x: normalize_name(str(x).lower()))
+            
             matched = players_df[
-                players_df['_name_norm'].str.contains(search_norm, na=False)
-            ]
+                (players_df['first_normalized'].str.startswith(q, na=False)) |
+                (players_df['second_normalized'].str.startswith(q, na=False))
+            ].sort_values('full_name').head(20)
 
             if not matched.empty:
                 selected_player = st.selectbox(
                     "Select Player",
                     options=matched["id"].tolist(),
-                    format_func=lambda x: matched[matched["id"] == x]["web_name"].iloc[0] if not matched[matched["id"] == x].empty else f"ID:{x}",
+                    format_func=lambda x: matched[matched["id"] == x]["full_name"].iloc[0] if not matched[matched["id"] == x].empty else f"ID:{x}",
                     key="mc_player_select",
                 )
 

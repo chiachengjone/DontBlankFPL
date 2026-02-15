@@ -171,6 +171,11 @@ def render_history_tab(processor, players_df: pd.DataFrame, fetcher):
     
     st.markdown("---")
     
+    # ── Team Evolution (Set & Forget Comparison) ──
+    render_team_evolution(team_id, gw_history, fetcher, players_df)
+    
+    st.markdown("---")
+    
     # ── Best/Worst GWs ──
     st.markdown("### Highlights")
     
@@ -292,6 +297,252 @@ def render_history_tab(processor, players_df: pd.DataFrame, fetcher):
                 <div style="color:#86868b;font-size:0.72rem;text-transform:uppercase;">Red Arrows</div>
             </div>
             ''', unsafe_allow_html=True)
+        
+
+def render_team_evolution(team_id, gw_history, fetcher, players_df):
+    """Analyze how previous team versions would have performed if unchanged."""
+    st.markdown("### Team Evolution Analysis")
+    st.caption("Compare your actual performance vs 'frozen' versions of your squad (Set & Forget)")
+    
+    if not gw_history:
+        return
+
+    # Identify unique versions based on picks
+    versions = []
+    last_picks_set = set()
+    
+    current_gw = fetcher.get_current_gameweek()
+    
+    # We need player information to identify captains/subs correctly if we wanted full accuracy,
+    # but for "Team Evolution", we'll use the 11 starters + captain bonus of that specific GW.
+    # To keep it simple and fast, we'll use the starting 11 IDs.
+    
+    with st.spinner("Analyzing squad evolution history..."):
+        all_gw_picks = {}
+        for gw in gw_history:
+            num = gw.get('event')
+            if not num: continue
+            
+            picks_data = fetcher.get_team_picks(team_id, num)
+            if not picks_data or 'picks' not in picks_data: continue
+            
+            picks = picks_data['picks']
+            # Starters only (position 1-11)
+            starters = [p['element'] for p in picks if p['position'] <= 11]
+            captain = next((p['element'] for p in picks if p['is_captain']), None)
+            
+            picks_set = set(starters)
+            
+            if picks_set != last_picks_set:
+                versions.append({
+                    'gw': num,
+                    'starters': starters,
+                    'captain': captain,
+                    'label': f"GW{num} Squad"
+                })
+                last_picks_set = picks_set
+            
+            all_gw_picks[num] = {
+                'starters': starters,
+                'captain': captain
+            }
+
+        if not versions:
+            st.info("No squad changes detected yet.")
+            return
+
+        # Fetch live data (player points) for all GWs analyzed
+        gw_points_map = {} # {gw: {player_id: points}}
+        for gw in gw_history:
+            num = gw.get('event')
+            live_data = fetcher.get_event_live(num)
+            elements = live_data.get('elements', [])
+            player_scores = {e['id']: e['stats']['total_points'] for e in elements}
+            gw_points_map[num] = player_scores
+
+    # Calculate points for each version in each GW
+    evolution_data = []
+    
+    for gw_entry in gw_history:
+        num = gw_entry.get('event')
+        actual_pts = gw_entry.get('points', 0)
+        
+        row = {'GW': num, 'Actual': actual_pts}
+        v_points = []
+        v_labels = []
+        
+        for v in versions:
+            if num < v['gw']:
+                row[v['label']] = None
+            else:
+                # Calculate points for this frozen squad in this GW
+                v_starters = v['starters']
+                v_captain = v['captain']
+                
+                gw_scores = gw_points_map.get(num, {})
+                v_pts = sum(gw_scores.get(pid, 0) for pid in v_starters)
+                cap_points = gw_scores.get(v_captain, 0)
+                v_pts += cap_points 
+                
+                row[v['label']] = v_pts
+                v_points.append(v_pts)
+                v_labels.append(v['label'])
+        
+        # Calculate Hindsight Best for this GW
+        # Include current actual performance (pre-hits) as a version to ensure 
+        # Ultimate Team >= Actual (and accounts for chips/subs)
+        hits = gw_entry.get('event_transfers_cost', 0)
+        pre_hit_actual = actual_pts + hits
+        v_points.append(pre_hit_actual)
+        v_labels.append("Actual (Pre-Hits)")
+
+        if v_points:
+            max_p = max(v_points)
+            best_idx = v_points.index(max_p)
+            row['Hindsight Best'] = max_p
+            source = v_labels[best_idx].replace(" Squad", "")
+            row['Best Source'] = source if source != "Actual (Pre-Hits)" else "Actual"
+        else:
+            row['Hindsight Best'] = actual_pts
+            row['Best Source'] = "Actual"
+
+        evolution_data.append(row)
+
+    df_evo = pd.DataFrame(evolution_data)
+    
+    # Chart
+    fig = go.Figure()
+    
+    # Hindsight Best (Hindsight Optimal) - Fixed background line
+    fig.add_trace(go.Scatter(
+        x=df_evo['GW'], y=df_evo['Hindsight Best'], 
+        name='Ultimate Team (Optimal)', 
+        line=dict(color='rgba(139, 92, 246, 0.4)', width=4, dash='dot'),
+        mode='lines+text+markers',
+        text=df_evo['Best Source'],
+        textposition="top center",
+        textfont=dict(size=9, color='rgba(139, 92, 246, 0.8)'),
+        hoverinfo='skip',
+        showlegend=True
+    ))
+
+    # Actual performance
+    fig.add_trace(go.Scatter(
+        x=df_evo['GW'], y=df_evo['Actual'], 
+        name='Actual Points', 
+        line=dict(color='#3b82f6', width=3),
+        mode='lines+markers'
+    ))
+    
+    # Version filters
+    selected_versions = st.multiselect(
+        "Compare with versions from (Max 3):",
+        options=[v['label'] for v in versions],
+        default=[v['label'] for v in versions if v['gw'] == versions[0]['gw']][:3], # Default to first version, capped
+        max_selections=3
+    )
+    
+    colors = ['#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#10b981']
+    
+    for i, label in enumerate(selected_versions):
+        if label in df_evo.columns:
+            fig.add_trace(go.Scatter(
+                x=df_evo['GW'], y=df_evo[label], 
+                name=label,
+                line=dict(color=colors[i % len(colors)], dash='dot'),
+                mode='lines'
+            ))
+            
+    fig.update_layout(
+        height=400,
+        template='plotly_white',
+        paper_bgcolor='#ffffff',
+        plot_bgcolor='#ffffff',
+        font=dict(family='Inter, sans-serif', color='#86868b', size=11),
+        legend=dict(orientation='h', yanchor='bottom', y=1.02),
+        margin=dict(l=50, r=30, t=40, b=50),
+        hovermode='x unified'
+    )
+    
+    fig.update_xaxes(title_text='Gameweek', gridcolor='#e5e5ea')
+    fig.update_yaxes(title_text='Points', gridcolor='#e5e5ea')
+    
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Insights
+    if not df_evo.empty:
+        latest_gw = df_evo['GW'].max()
+        actual_total = df_evo['Actual'].sum()
+        hindsight_total = df_evo['Hindsight Best'].sum()
+        
+        st.markdown("**Version Efficiency**")
+        
+        # Performance summary metrics
+        m1, m2, m3 = st.columns(3)
+        with m1:
+            st.metric("Actual Total", f"{int(actual_total)} pts")
+        with m2:
+            st.metric("Ultimate Team", f"{int(hindsight_total)} pts", f"{int(actual_total - hindsight_total)} pts", delta_color="inverse")
+        with m3:
+            gap = hindsight_total - actual_total
+            efficiency = (actual_total / hindsight_total * 100) if hindsight_total > 0 else 100
+            st.metric("Hindsight Efficiency", f"{efficiency:.1f}%", f"{gap:.0f} pts mismatch")
+
+        st.markdown("---")
+        st.markdown("**Specific Version Comparison**")
+        
+        if len(selected_versions) > 0:
+            cols = st.columns(len(selected_versions))
+            for i, label in enumerate(selected_versions):
+                v_total = df_evo[label].sum()
+                diff = actual_total - v_total
+                with cols[i]:
+                    delta_color = "normal" if diff >= 0 else "inverse"
+                    st.metric(label, f"{int(v_total)} pts", f"{int(diff):+d} vs Actual", delta_color=delta_color)
+
+        # ── Consolidated Squad Overlap Analysis ──
+        st.markdown("---")
+        st.markdown("**Squad Evolution Summary (Unique vs Common)**")
+        
+        if selected_versions:
+            # Get latest num for actual squad reference
+            latest_num = gw_history[-1].get('event')
+            actual_picks = fetcher.get_team_picks(team_id, latest_num).get('picks', [])
+            actual_starters = [p['element'] for p in actual_picks if p['position'] <= 11]
+            actual_starters_set = set(actual_starters)
+            
+            # Prepare player name helper
+            def get_names(ids):
+                names = [players_df[players_df['id'] == pid]['web_name'].iloc[0] if pid in players_df['id'].values else f"ID:{pid}" for pid in ids]
+                return ", ".join(sorted(names)) if names else "None"
+
+            # Track sets for all versions
+            version_sets = {}
+            for label in selected_versions:
+                v = next((ver for ver in versions if ver['label'] == label), None)
+                if v:
+                    version_sets[label] = set(v['starters'])
+            
+            # Common to ALL (Actual + selected versions)
+            all_sets = [actual_starters_set] + list(version_sets.values())
+            common_all_ids = set.intersection(*all_sets)
+            
+            # Construct consolidated table data (Wide Format)
+            overlap_data = {
+                "Retained (All)": [get_names(common_all_ids)]
+            }
+            
+            for label in selected_versions:
+                v_set = version_sets[label]
+                trans_in = actual_starters_set - v_set
+                trans_out = v_set - actual_starters_set
+                
+                overlap_data[f"{label} In"] = [get_names(trans_in)]
+                overlap_data[f"{label} Out"] = [get_names(trans_out)]
+            
+            st.dataframe(pd.DataFrame(overlap_data), hide_index=True, use_container_width=True)
+        else:
+            st.info("Select squad versions above to see evolution analysis.")
 
 
 def render_general_analysis(processor, players_df: pd.DataFrame, fetcher):

@@ -553,7 +553,8 @@ def calculate_poisson_ep_for_dataframe(
     df: pd.DataFrame,
     fixtures_df: pd.DataFrame,
     current_gw: int,
-    team_stats: Optional[pd.DataFrame] = None
+    team_stats: Optional[pd.DataFrame] = None,
+    horizon: int = 1
 ) -> pd.DataFrame:
     """
     Main entry point: Calculate Poisson-based EP for all players.
@@ -562,7 +563,7 @@ def calculate_poisson_ep_for_dataframe(
     ``team_stats``).  Falls back to the old FDR proxy only when
     Understat team data is missing.
     
-    DGW is handled properly by iterating each fixture independently
+    DGW/Multi-GW is handled properly by iterating each fixture independently
     through ``calculate_single_fixture_xp()``.
     
     Args:
@@ -571,6 +572,7 @@ def calculate_poisson_ep_for_dataframe(
         current_gw: Current gameweek number
         team_stats: DataFrame from ``build_team_stats_df()`` with real
                     per-match xGA / xG columns, or None for fallback.
+        horizon: Number of gameweeks to look ahead (summing all fixtures)
     
     Returns:
         DataFrame with new expected_points_poisson column and breakdown
@@ -676,8 +678,12 @@ def calculate_poisson_ep_for_dataframe(
             "using FDR proxy for ALL teams", reason,
         )
     
-    # ── Get next-GW fixtures per team ──
-    next_gw_fixtures = fixtures_df[fixtures_df['event'] == current_gw + 1]
+    # ── Get fixtures per team for the horizon ──
+    # Select all fixtures from next GW up to next GW + horizon - 1
+    horizon_fixtures = fixtures_df[
+        (fixtures_df['event'] >= current_gw + 1) & 
+        (fixtures_df['event'] < current_gw + 1 + horizon)
+    ]
     
     # Build id→name lookup for logging FDR fallback teams
     id_to_name: Dict[int, str] = {}
@@ -694,9 +700,9 @@ def calculate_poisson_ep_for_dataframe(
     
     team_fixture_list: Dict[int, List[Dict]] = {}  # team_id -> list of fixture dicts
     for team_id in df['team'].unique():
-        team_fixtures = next_gw_fixtures[
-            (next_gw_fixtures['team_h'] == team_id) |
-            (next_gw_fixtures['team_a'] == team_id)
+        team_fixtures = horizon_fixtures[
+            (horizon_fixtures['team_h'] == team_id) |
+            (horizon_fixtures['team_a'] == team_id)
         ]
         
         fixtures_list: List[Dict] = []
@@ -736,14 +742,9 @@ def calculate_poisson_ep_for_dataframe(
                 'opponent_id': opp_id,
             })
         
-        # No fixtures found → default
+        # No fixtures found in horizon?
         if not fixtures_list:
-            fixtures_list = [{
-                'is_home': True,
-                'opp_xGA_per90': LEAGUE_AVG_XGA_PER_MATCH,
-                'opp_xG_per90': LEAGUE_AVG_XG_PER_MATCH,
-                'opponent_id': 0,
-            }]
+            fixtures_list = []
         
         team_fixture_list[team_id] = fixtures_list
     
@@ -759,11 +760,7 @@ def calculate_poisson_ep_for_dataframe(
     results = []
     for _, player in df.iterrows():
         team_id = player.get('team', 0)
-        player_fixtures = team_fixture_list.get(team_id, [{
-            'is_home': True,
-            'opp_xGA_per90': LEAGUE_AVG_XGA_PER_MATCH,
-            'opp_xG_per90': LEAGUE_AVG_XG_PER_MATCH,
-        }])
+        player_fixtures = team_fixture_list.get(team_id, [])
         
         player_dict = player.to_dict()
         
@@ -773,9 +770,14 @@ def calculate_poisson_ep_for_dataframe(
         total_xp_assists = 0.0
         total_xp_cs = 0.0
         total_xp_bonus = 0.0
-        first_opp_xga = player_fixtures[0].get('opp_xGA_per90', LEAGUE_AVG_XGA_PER_MATCH)
-        first_opp_xg = player_fixtures[0].get('opp_xG_per90', LEAGUE_AVG_XG_PER_MATCH)
         total_p_cs = 0.0
+        
+        if player_fixtures:
+            first_opp_xga = player_fixtures[0].get('opp_xGA_per90', LEAGUE_AVG_XGA_PER_MATCH)
+            first_opp_xg = player_fixtures[0].get('opp_xG_per90', LEAGUE_AVG_XG_PER_MATCH)
+        else:
+            first_opp_xga = LEAGUE_AVG_XGA_PER_MATCH
+            first_opp_xg = LEAGUE_AVG_XG_PER_MATCH
         
         for fx in player_fixtures:
             opponent_dict = {

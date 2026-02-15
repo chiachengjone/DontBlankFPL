@@ -140,6 +140,23 @@ class FPLDataFetcher:
             return data
         except requests.RequestException as e:
             raise FPLAPIError(f"Failed to fetch fixtures: {e}")
+            
+    def get_event_live(self, gameweek: int) -> Dict:
+        """Fetch all player points/stats for a specific gameweek."""
+        cache_key = f'live_{gameweek}'
+        cached = self._get_cached(cache_key)
+        if cached:
+            return cached
+            
+        try:
+            response = self.session.get(f"{FPL_BASE_URL}/event/{gameweek}/live/")
+            response.raise_for_status()
+            response.encoding = 'utf-8'
+            data = response.json()
+            self._set_cache(cache_key, data)
+            return data
+        except requests.RequestException as e:
+            raise FPLAPIError(f"Failed to fetch live data for GW{gameweek}: {e}")
     
     def get_current_gameweek(self) -> int:
         """Determine the current gameweek."""
@@ -241,6 +258,9 @@ class FPLDataProcessor:
         """Build comprehensive player DataFrame with all raw stats."""
         players = self.bootstrap_data['elements']
         df = pd.DataFrame(players)
+        
+        # Add full name for better search and display
+        df['full_name'] = df['first_name'] + " " + df['second_name']
         
         # Convert price to actual value (API returns tenths, e.g. 106 = £10.6m)
         df['now_cost'] = (pd.to_numeric(df['now_cost'], errors='coerce').fillna(50) / 10.0).round(1)
@@ -686,30 +706,19 @@ class FPLDataProcessor:
         
         # ── Poisson-based Expected Points (professional-grade model) ──
         try:
+            from poisson_ep import calculate_poisson_ep_for_dataframe
+            # Pass real Understat team stats if available
+            team_stats = st.session_state.get('_understat_team_stats', None) if st is not None else None
+            
+            # ALWAYS calculate Poisson EP so specialized tabs (Analytics, Captains) have it
+            df = calculate_poisson_ep_for_dataframe(
+                df, fixtures, current_gw, team_stats=team_stats, horizon=weeks_ahead
+            )
+            
+            # Determine whether to use Poisson EP as primary comparison column
             use_poisson = st.session_state.get('use_poisson_xp', True) if st is not None else True
             
             if use_poisson:
-                from poisson_ep import calculate_poisson_ep_for_dataframe
-                # Pass real Understat team stats if available
-                team_stats = st.session_state.get('_understat_team_stats', None) if st is not None else None
-                has_real_xga = (
-                    team_stats is not None
-                    and isinstance(team_stats, pd.DataFrame)
-                    and not team_stats.empty
-                )
-                import logging as _plog
-                _plogger = _plog.getLogger(__name__)
-                if has_real_xga:
-                    _plogger.info(
-                        "Poisson EP: using real Understat team xGA (%d teams)",
-                        len(team_stats),
-                    )
-                else:
-                    _plogger.warning(
-                        "Poisson EP: no Understat team stats available; "
-                        "FDR proxy will be used for opponent strength"
-                    )
-                df = calculate_poisson_ep_for_dataframe(df, fixtures, current_gw, team_stats=team_stats)
                 # Use Poisson EP as primary expected_points if available
                 if 'expected_points_poisson' in df.columns:
                     # Blend: 70% Poisson model, 30% FPL baseline for stability
@@ -717,7 +726,7 @@ class FPLDataProcessor:
                     base_ep = pd.to_numeric(df['ep_next_num'], errors='coerce').fillna(0)
                     df['expected_points'] = (poisson_ep * 0.7 + base_ep * 0.3).clip(lower=0)
             else:
-                # Use raw FPL ep_next
+                # Use raw FPL ep_next as primary
                 df['expected_points'] = df['ep_next_num']
         except Exception as e:
             import logging

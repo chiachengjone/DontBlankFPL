@@ -191,7 +191,7 @@ def main():
     
     with tab4:
         render_tab_header("Captain", "Compare captain candidates using Poisson, ML and FPL estimates")
-        render_captain_tab(processor, players_df)
+        render_captain_tab(processor, players_df, fetcher)
     
     with tab5:
         render_tab_header("Teams", "Team-level analysis — defensive stats, xG and fixture runs")

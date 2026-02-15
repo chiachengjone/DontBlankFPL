@@ -31,34 +31,45 @@ def normalize_name(name: str) -> str:
 
 def search_players(df: pd.DataFrame, query: str, limit: int = 10) -> pd.DataFrame:
     """
-    Search players by name with accent normalization.
-    Returns matching players sorted by ownership (most popular first).
+    Search players by name with 'starts with' matching on first or last name.
+    Returns matching players with full_name.
     """
     if not query or len(query) < 1:
         return pd.DataFrame()
     
     query_normalized = normalize_name(query.lower().strip())
     
-    # Create normalized name column for matching if not exists
-    if 'name_normalized' not in df.columns:
+    # Create normalized components if not exists
+    if 'first_normalized' not in df.columns:
         df = df.copy()
-        df['name_normalized'] = df['web_name'].apply(lambda x: normalize_name(str(x).lower()))
+        df['first_normalized'] = df['first_name'].apply(lambda x: normalize_name(str(x).lower()))
+        df['second_normalized'] = df['second_name'].apply(lambda x: normalize_name(str(x).lower()))
     
-    # Match against normalized names
-    mask = df['name_normalized'].str.contains(query_normalized, na=False)
+    # Match if query starts with the beginning of either first or second name
+    mask = (
+        df['first_normalized'].str.startswith(query_normalized, na=False) |
+        df['second_normalized'].str.startswith(query_normalized, na=False)
+    )
     matches = df[mask].copy()
     
     if not matches.empty:
         # Sort by ownership (most popular first) for autocomplete
         if 'selected_by_percent' in matches.columns:
             matches = matches.sort_values('selected_by_percent', ascending=False)
-    
+            
     return matches.head(limit)
 
 
 def safe_numeric(series, default=0):
-    """Safely convert series to numeric, handling NaN values."""
-    return pd.to_numeric(series, errors='coerce').fillna(default)
+    """Safely convert series or scalar to numeric, handling NaN values."""
+    try:
+        if isinstance(series, (pd.Series, pd.Index, np.ndarray)):
+            return pd.to_numeric(series, errors='coerce').fillna(default)
+        # Scalar case
+        val = pd.to_numeric(series, errors='coerce')
+        return val if pd.notnull(val) else default
+    except:
+        return default
 
 
 def get_player_name(player_id: int, players_df: pd.DataFrame) -> str:
