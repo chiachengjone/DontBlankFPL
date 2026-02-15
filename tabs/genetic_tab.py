@@ -6,11 +6,14 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from utils.helpers import safe_numeric, round_df, style_df_with_injuries, get_consensus_label
+from utils.helpers import safe_numeric, round_df, style_df_with_injuries, get_consensus_label, calculate_consensus_ep
 
 
 def render_genetic_tab(processor, players_df: pd.DataFrame):
     """Genetic Algorithm Optimizer tab — its own top-level tab."""
+    # Ensure consensus_ep is available
+    active_models = st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])
+    players_df = calculate_consensus_ep(players_df, active_models)
 
     st.markdown('<p class="section-title">Genetic Optimizer</p>', unsafe_allow_html=True)
     

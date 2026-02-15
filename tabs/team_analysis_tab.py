@@ -47,6 +47,57 @@ def get_fixture_string(processor, team_id: int, num_gws: int = 5) -> list:
         return []
 
 
+def get_predicted_lineup(team_players: pd.DataFrame) -> pd.DataFrame:
+    """Select best 11 players by Model xP using standard FPL formation rules."""
+    if team_players.empty:
+        return team_players
+        
+    df = team_players.copy()
+    # Sort by consensus_ep (Model xP)
+    df = df.sort_values('consensus_ep', ascending=False)
+    
+    lineup = []
+    positions = {'GKP': 0, 'DEF': 0, 'MID': 0, 'FWD': 0}
+    
+    # 1. Mandatory Minimums
+    # 1 GKP
+    gkps = df[df['position'] == 'GKP'].head(1)
+    lineup.append(gkps)
+    positions['GKP'] += len(gkps)
+    
+    # 3 DEFs
+    defs = df[(df['position'] == 'DEF') & (~df['id'].isin(pd.concat(lineup)['id'] if lineup else []))].head(3)
+    lineup.append(defs)
+    positions['DEF'] += len(defs)
+    
+    # 2 MIDs
+    mids = df[(df['position'] == 'MID') & (~df['id'].isin(pd.concat(lineup)['id'] if lineup else []))].head(2)
+    lineup.append(mids)
+    positions['MID'] += len(mids)
+    
+    # 1 FWD
+    fwds = df[(df['position'] == 'FWD') & (~df['id'].isin(pd.concat(lineup)['id'] if lineup else []))].head(1)
+    lineup.append(fwds)
+    positions['FWD'] += len(fwds)
+    
+    # 2. Fill best remaining up to 11
+    current_ids = pd.concat(lineup)['id'] if lineup else []
+    remaining = df[~df['id'].isin(current_ids)]
+    
+    for _, p in remaining.iterrows():
+        if len(pd.concat(lineup)) >= 11:
+            break
+            
+        pos = p['position']
+        # Formation limits: 1 GKP, 3-5 DEF, 2-5 MID, 1-3 FWD
+        max_pos = {'GKP': 1, 'DEF': 5, 'MID': 5, 'FWD': 3}
+        if positions[pos] < max_pos[pos]:
+            lineup.append(pd.DataFrame([p]))
+            positions[pos] += 1
+            
+    return pd.concat(lineup) if lineup else pd.DataFrame()
+
+
 def render_team_analysis_tab(processor, players_df: pd.DataFrame):
     """Team Analysis tab - deep-dive into specific teams."""
     
@@ -107,25 +158,48 @@ def render_team_analysis_tab(processor, players_df: pd.DataFrame):
         team_players['selected_by_percent'] = safe_numeric(team_players['selected_by_percent'])
         
         # ── Team Summary ──
-        st.markdown("### Team Summary")
+        # Calculate stats for ALL teams to determine ranks globally
+        all_team_summary = []
+        for tid in processor.teams_df['id'].unique():
+            t_players = players_df[players_df['team'] == tid].copy()
+            # We need consensus_ep for all teams to rank
+            t_players = calculate_consensus_ep(t_players, active_models)
+            t_lineup = get_predicted_lineup(t_players)
+            
+            all_team_summary.append({
+                'id': tid,
+                'lineup_xp': safe_numeric(t_lineup['consensus_ep']).sum(),
+                'avg_xp': safe_numeric(t_players['consensus_ep']).mean()
+            })
+        
+        sum_df = pd.DataFrame(all_team_summary)
+        
+        def get_sum_rank(tid, metric):
+            ranks = sum_df[metric].rank(method='min', ascending=False)
+            return int(ranks[sum_df['id'] == tid].iloc[0])
+
+        st.markdown(f"### Team Summary (GW{processor.fetcher.get_current_gameweek()} Predicted Lineup)")
         
         sum_cols = st.columns(4)
         
         with sum_cols[0]:
-            total_ep = safe_numeric(team_players['consensus_ep']).sum()
+            team_lineup = get_predicted_lineup(team_players)
+            lineup_ep = safe_numeric(team_lineup['consensus_ep']).sum()
+            cp_rank = get_sum_rank(team_id, 'lineup_xp')
             st.markdown(f'''
             <div style="background:#ffffff;border:1px solid rgba(0,0,0,0.04);border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:1rem;text-align:center;">
-                <div style="color:#86868b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Total {con_label}</div>
-                <div style="color:#3b82f6;font-size:1.5rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{total_ep:.1f}</div>
+                <div style="color:#86868b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Best XI {con_label}</div>
+                <div style="color:#3b82f6;font-size:1.5rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{lineup_ep:.2f} <span style="font-size:0.8rem;color:#888;">({cp_rank}º)</span></div>
             </div>
             ''', unsafe_allow_html=True)
         
         with sum_cols[1]:
             avg_ep = safe_numeric(team_players['consensus_ep']).mean()
+            avg_rank = get_sum_rank(team_id, 'avg_xp')
             st.markdown(f'''
             <div style="background:#ffffff;border:1px solid rgba(0,0,0,0.04);border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:1rem;text-align:center;">
                 <div style="color:#86868b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Avg Player {con_label}</div>
-                <div style="color:#22c55e;font-size:1.5rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{avg_ep:.2f}</div>
+                <div style="color:#22c55e;font-size:1.5rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{avg_ep:.2f} <span style="font-size:0.8rem;color:#888;">({avg_rank}º)</span></div>
             </div>
             ''', unsafe_allow_html=True)
         
@@ -205,11 +279,11 @@ def render_team_analysis_tab(processor, players_df: pd.DataFrame):
                 </div>
                 <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;text-align:center;">
                     <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">xG</div>
-                    <div style="color:#22c55e;font-weight:600;font-family:'JetBrains Mono',monospace;">{total_xg:.1f}{get_rank(team_id, 'xg')}</div>
+                    <div style="color:#22c55e;font-weight:600;font-family:'JetBrains Mono',monospace;">{total_xg:.2f}{get_rank(team_id, 'xg')}</div>
                 </div>
                 <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;text-align:center;">
                     <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">xA</div>
-                    <div style="color:#3b82f6;font-weight:600;font-family:'JetBrains Mono',monospace;">{total_xa:.1f}{get_rank(team_id, 'xa')}</div>
+                    <div style="color:#3b82f6;font-weight:600;font-family:'JetBrains Mono',monospace;">{total_xa:.2f}{get_rank(team_id, 'xa')}</div>
                 </div>
             </div>
             ''', unsafe_allow_html=True)
@@ -226,7 +300,7 @@ def render_team_analysis_tab(processor, players_df: pd.DataFrame):
             <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:0.5rem;">
                 <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;text-align:center;">
                     <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">Avg CS</div>
-                    <div style="color:#22c55e;font-weight:600;font-family:'JetBrains Mono',monospace;">{total_cs:.1f}{get_rank(team_id, 'cs')}</div>
+                    <div style="color:#22c55e;font-weight:600;font-family:'JetBrains Mono',monospace;">{total_cs:.2f}{get_rank(team_id, 'cs')}</div>
                 </div>
                 <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;text-align:center;">
                     <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">Total Saves</div>
@@ -238,7 +312,7 @@ def render_team_analysis_tab(processor, players_df: pd.DataFrame):
                 </div>
                 <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;text-align:center;">
                     <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">Avg GC</div>
-                    <div style="color:#ef4444;font-weight:600;font-family:'JetBrains Mono',monospace;">{goals_conceded:.1f}{get_rank(team_id, 'gc', ascending=True)}</div>
+                    <div style="color:#ef4444;font-weight:600;font-family:'JetBrains Mono',monospace;">{goals_conceded:.2f}{get_rank(team_id, 'gc', ascending=True)}</div>
                 </div>
             </div>
             ''', unsafe_allow_html=True)
@@ -295,7 +369,7 @@ def render_team_analysis_tab(processor, players_df: pd.DataFrame):
                         style_df_with_injuries(display_df, players_df, format_dict={
                             'Price': '£{:.1f}m',
                             con_label: '{:.2f}',
-                            'Form': '{:.1f}',
+                            'Form': '{:.2f}',
                             'Mins': '{:.0f}',
                             'EO%': '{:.1f}%'
                         }),

@@ -201,12 +201,12 @@ def render_squad_performance(processor, players_df, current_gw, team_id):
 
         p1, p2, p3, p4 = st.columns(4)
         with p1:
-            st.metric("Avg Pts/Game", f"{avg_actual:.1f}")
+            st.metric("Avg Pts/Game", f"{avg_actual:.2f}")
         with p2:
-            st.metric(f"{get_consensus_label(st.session_state.active_models)}/Game", f"{avg_expected:.1f}")
+            st.metric(f"{get_consensus_label(st.session_state.active_models)}/Game", f"{avg_expected:.2f}")
         with p3:
             label = "Overperforming" if perf_delta >= 0 else "Underperforming"
-            st.metric(label, f"{perf_delta:+.1f} pts/gm", delta=f"{perf_pct:+.0f}%")
+            st.metric(label, f"{perf_delta:+.2f} pts/gm", delta=f"{perf_pct:+.0f}%")
         with p4:
             overperf_count = (squad_df['perf_diff'] > 0).sum()
             st.metric(f"Players Above {get_consensus_label(st.session_state.active_models, 1)}", f"{overperf_count}/{len(squad_df)}")
@@ -225,9 +225,9 @@ def render_squad_performance(processor, players_df, current_gw, team_id):
             x=chart_df['perf_diff'],
             orientation='h',
             marker_color=colors,
-            text=chart_df['perf_diff'].apply(lambda v: f"{v:+.1f}"),
+            text=chart_df['perf_diff'].apply(lambda v: f"{v:+.2f}"),
             textposition='outside',
-            hovertemplate='<b>%{y}</b><br>Actual: %{customdata[0]:.1f}/gm<br>xP: %{customdata[1]:.1f}/gm<extra></extra>',
+            hovertemplate='<b>%{y}</b><br>Actual: %{customdata[0]:.2f}/gm<br>xP: %{customdata[1]:.2f}/gm<extra></extra>',
             customdata=chart_df[['pts_per_game', 'expected_per_game']].values,
         ))
         fig.update_layout(
@@ -283,7 +283,7 @@ def render_top_picks_summary(players_df: pd.DataFrame):
                     f'{player_name}</div>'
                     f'<div style="color:#888;font-size:0.72rem;">'
                     f'{team_name} | {p["now_cost"]:.1f}m | '
-                    f'<span style="color:{POSITION_COLORS.get(pos, "#888")}">{get_consensus_label(st.session_state.active_models)} {p["ep"]:.1f}</span> | '
+                    f'<span style="color:{POSITION_COLORS.get(pos, "#888")}">{get_consensus_label(st.session_state.active_models)} {p["ep"]:.2f}</span> | '
                     f'<span style="color:{tier["color"]}">{tier["tier"]}</span>'
                     f'</div></div>',
                     unsafe_allow_html=True,
@@ -316,16 +316,35 @@ def render_captain_quick_pick(players_df: pd.DataFrame):
 
     for i, (_, cap) in enumerate(top3.iterrows()):
         with cap_cols[i]:
-            badge = ['1st', '2nd', '3rd'][i]
+            badge = ['1ST CHOICE', '2ND CHOICE', '3RD CHOICE'][i]
             cap_name = html.escape(str(cap["web_name"]) if pd.notna(cap["web_name"]) else "")
             cap_team = html.escape(str(cap.get("team_name", "")) if pd.notna(cap.get("team_name")) else "")
+            
+            # Match the standard card aesthetic from the rest of the app
+            bg_color = "#ffffff"
+            border_color = "rgba(0,0,0,0.06)"
+            text_color = "#1d1d1f"
+            secondary_text = "#86868b"
+            
+            # Highlight top choice with a subtle border color or shadow
+            card_shadow = "0 4px 12px rgba(0,0,0,0.06)"
+            if i == 0:
+                border_color = "#007AFF"
+                card_shadow = "0 4px 15px rgba(0,122,255,0.1)"
+                
             st.markdown(
-                f'<div class="rule-card">'
-                f'<div style="font-size:0.7rem;color:#888;">{badge}</div>'
-                f'<div style="font-size:1.1rem;font-weight:600;color:#fff;">{cap_name}</div>'
-                f'<div style="color:#888;font-size:0.8rem;">{cap_team} | {cap["now_cost"]:.1f}m</div>'
-                f'<div style="color:#ef4444;font-weight:600;margin-top:0.3rem;">{cap["captain_ev"]:.1f} xP</div>'
-                f'<div style="color:#888;font-size:0.72rem;">Form {cap["form"]:.1f} | {get_consensus_label(st.session_state.active_models)} {cap["ep"]:.1f}</div>'
+                f'<div style="background:{bg_color}; border:1px solid {border_color}; border-radius:14px; padding:1.25rem 1rem; text-align:center; '
+                f'box-shadow:{card_shadow}; transition:transform 0.2s ease; animation:fadeInUp 0.4s ease-out both;">'
+                f'<div style="font-size:0.6rem; color:{secondary_text}; letter-spacing:0.1em; font-weight:700;">{badge}</div>'
+                f'<div style="font-size:1.2rem; font-weight:700; color:{text_color}; margin:0.4rem 0;">{cap_name}</div>'
+                f'<div style="color:{secondary_text}; font-size:0.75rem;">{cap_team} | £{cap["now_cost"]:.1f}m</div>'
+                f'<div style="background:rgba(0,0,0,0.03); border-radius:8px; padding:0.4rem; margin-top:0.75rem;">'
+                f'<div style="color:{text_color}; font-weight:700; font-size:1.1rem; font-family:\'JetBrains Mono\',monospace;">{cap["captain_ev"]:.2f} xP</div>'
+                f'<div style="color:{secondary_text}; font-size:0.6rem; text-transform:uppercase;">Captain Expected Total</div>'
+                f'</div>'
+                f'<div style="color:{secondary_text}; font-size:0.7rem; margin-top:0.6rem; font-family:\'JetBrains Mono\',monospace;">'
+                f'Form {cap["form"]:.2f} | Base {cap["ep"]:.2f}'
+                f'</div>'
                 f'</div>',
                 unsafe_allow_html=True,
             )

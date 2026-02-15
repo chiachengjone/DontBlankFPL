@@ -380,7 +380,16 @@ def render_points_distribution(players_df: pd.DataFrame, con_ep_label: str):
 def render_value_by_position(players_df: pd.DataFrame, con_ep_label: str):
     """Render value (xP per million) box plot by position."""
     with st.expander("Metrics & Formulas"):
-        st.info("**Value Distribution Formula:** `Value = xP ÷ Price` | Measures efficiency of point generation relative to cost.")
+        st.markdown('''
+        <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;font-size:0.85rem;color:#1d1d1f;margin-bottom:0.5rem;">
+            <strong>Value Distribution Formula:</strong> <code>Value = xP ÷ Price</code> | Measures efficiency of point generation relative to cost.
+        </div>
+        ''', unsafe_allow_html=True)
+        st.markdown(f'''
+        <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;font-size:0.85rem;color:#1d1d1f;">
+            <strong>Value Analysis Formula:</strong> <code>xPPM ({con_ep_label} Per Million) = Cumulative {con_ep_label} ÷ Price</code> | <code>ROI/m = (xNP) ÷ Price</code>
+        </div>
+        ''', unsafe_allow_html=True)
     
     df = players_df.copy()
     # Use consensus_ep (Model xP) - the weighted blend of ML/Poisson/FPL
@@ -413,8 +422,6 @@ def render_value_by_position(players_df: pd.DataFrame, con_ep_label: str):
         margin=dict(l=50, r=30, t=20, b=40)
     )
     # Value Leaderboard Filters
-    st.markdown("---")
-    st.info(f"**Value Analysis Formula:** `xPPM ({con_ep_label} Per Million) = Cumulative {con_ep_label} ÷ Price` | `ROI/m = (xNP) ÷ Price`")
     vc1, vc2, vc3, vc4 = st.columns([1.5, 1, 1, 1])
     with vc1:
         v_search = st.text_input("Search player...", key="val_search", placeholder="Enter name")
@@ -501,7 +508,11 @@ def render_value_by_position(players_df: pd.DataFrame, con_ep_label: str):
 def render_cbit_analysis(players_df: pd.DataFrame):
     """Render CBIT (Clearances, Blocks, Interceptions, Tackles) analysis for all available players."""
     with st.expander("Metrics & Formulas"):
-        st.info("**CBIT (Clearances, Blocks, Interceptions, Tackles) Formula:** `Score = (AA90 × 0.4 + P(CBIT) × 5 + Floor × 0.2 + DTT × 0.1)` | AA90: Active Actions per 90m")
+        st.markdown('''
+        <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;font-size:0.85rem;color:#1d1d1f;">
+            <strong>CBIT (Clearances, Blocks, Interceptions, Tackles) Formula:</strong> <code>Score = (AA90 × 0.4 + P(CBIT) × 5 + Floor × 0.2 + DTT × 0.1)</code> | AA90: Active Actions per 90m
+        </div>
+        ''', unsafe_allow_html=True)
     
     # Show chart
     fig = create_cbit_chart(players_df)
@@ -549,8 +560,9 @@ def render_cbit_analysis(players_df: pd.DataFrame):
             df['aa90_rank'] = df['cbit_aa90'].rank(ascending=False, method='min').astype(int)
             df['prob_rank'] = df['cbit_prob'].rank(ascending=False, method='min').astype(int)
             
-            df['score_display'] = df.apply(lambda r: format_with_rank(f"{r['cbit_score']:.1f}", r['score_rank']), axis=1)
-            df['aa90_display'] = df.apply(lambda r: format_with_rank(f"{r['cbit_aa90']:.1f}", r['aa90_rank']), axis=1)
+            # Correct display format to 2dp for points
+            df['score_display'] = df.apply(lambda r: format_with_rank(f"{r['cbit_score']:.2f}", r['score_rank']), axis=1)
+            df['aa90_display'] = df.apply(lambda r: format_with_rank(f"{r['cbit_aa90']:.2f}", r['aa90_rank']), axis=1)
             df['prob_display'] = df.apply(lambda r: format_with_rank(f"{r['cbit_prob']:.0%}", r['prob_rank']), axis=1)
 
             team_col = 'team_name' if 'team_name' in df.columns else 'team'
@@ -605,7 +617,11 @@ def render_advanced_metrics(players_df: pd.DataFrame, con_ep_label: str):
     with am1:
         # Threat Momentum explanation
         with st.expander("Metrics & Formulas"):
-            st.info("**Threat Momentum Formula:** `momentum = rolling_xG + rolling_xA` | measures short-term attacking form")
+            st.markdown('''
+            <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;font-size:0.85rem;color:#1d1d1f;">
+                <strong>Threat Momentum Formula:</strong> <code>momentum = rolling_xG + rolling_xA</code> | measures short-term attacking form
+            </div>
+            ''', unsafe_allow_html=True)
         # Threat Momentum: Searchable scatter plot
         st.markdown("**Threat Momentum (xG/xA Trend)**")
         st.caption("Search for a player to highlight on the chart and see detailed stats")
@@ -703,9 +719,9 @@ def render_advanced_metrics(players_df: pd.DataFrame, con_ep_label: str):
                     # Over/underperformance
                     goal_overperf = goals - xg
                     assist_overperf = assists - xa
-                    goal_label = f"+{goal_overperf:.1f}" if goal_overperf >= 0 else f"{goal_overperf:.1f}"
+                    goal_label = f"+{goal_overperf:.2f}" if goal_overperf >= 0 else f"{goal_overperf:.2f}"
                     goal_color = '#22c55e' if goal_overperf > 0 else '#ef4444' if goal_overperf < 0 else '#888'
-                    assist_label = f"+{assist_overperf:.1f}" if assist_overperf >= 0 else f"{assist_overperf:.1f}"
+                    assist_label = f"+{assist_overperf:.2f}" if assist_overperf >= 0 else f"{assist_overperf:.2f}"
                     assist_color = '#22c55e' if assist_overperf > 0 else '#ef4444' if assist_overperf < 0 else '#888'
                     
                     direction_label = f"+{direction:.0%}" if direction >= 0 else f"{direction:.0%}"
@@ -715,13 +731,13 @@ def render_advanced_metrics(players_df: pd.DataFrame, con_ep_label: str):
                         f'<div style="background:#ffffff;border:1px solid rgba(0,0,0,0.04);border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:1rem;margin-bottom:0.5rem;">'
                         f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">'
                         f'<div><span style="color:{pos_color};font-weight:600;font-size:0.9rem;">{p["position"]}</span>'
-                        f' <span style="color:#fff;font-weight:700;font-size:1.2rem;">{p["web_name"]}</span>'
+                        f' <span style="color:#1d1d1f;font-weight:700;font-size:1.2rem;">{p["web_name"]}</span>'
                         f' <span style="color:#888;font-size:0.85rem;">{p.get("team_name", "")} | {p["now_cost"]:.1f}m</span></div>'
                         f'<div style="color:#888;font-size:0.8rem;">Own: {own:.1f}%</div></div>'
                         f'<div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:0.75rem;text-align:center;">'
-                        f'<div><div style="color:#888;font-size:0.7rem;">xP</div><div style="color:#1d1d1f;font-weight:600;">{ep:.1f}</div></div>'
+                        f'<div><div style="color:#888;font-size:0.7rem;">xP</div><div style="color:#1d1d1f;font-weight:600;">{ep:.2f}</div></div>'
                         f'<div><div style="color:#888;font-size:0.7rem;">xP/m</div><div style="color:#1d1d1f;font-weight:600;">{eppm:.2f}</div></div>'
-                        f'<div><div style="color:#888;font-size:0.7rem;">Form</div><div style="color:#1d1d1f;font-weight:600;">{form:.1f}</div></div>'
+                        f'<div><div style="color:#888;font-size:0.7rem;">Form</div><div style="color:#1d1d1f;font-weight:600;">{form:.2f}</div></div>'
                         f'<div><div style="color:#888;font-size:0.7rem;">Direction</div><div style="color:{direction_color};font-weight:600;">{direction_label}</div></div>'
                         f'</div>'
                         f'<div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:0.75rem;text-align:center;margin-top:0.5rem;">'
@@ -738,7 +754,11 @@ def render_advanced_metrics(players_df: pd.DataFrame, con_ep_label: str):
     with am2:
         # Differential explanation
         with st.expander("Metrics & Formulas"):
-            st.info("**Engineered Differentials Formula:** `Score = xNP × (1 + momentum) × matchup_quality` | xNP: Expected Net Points")
+            st.markdown('''
+            <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;font-size:0.85rem;color:#1d1d1f;">
+                <strong>Engineered Differentials Formula:</strong> <code>Score = xNP × (1 + momentum) × matchup_quality</code> | xNP: Expected Net Points
+            </div>
+            ''', unsafe_allow_html=True)
         # Differential Filters
         st.markdown("---")
         dc1, dc2, dc3, dc4 = st.columns([1.5, 1, 1, 1])
@@ -764,14 +784,14 @@ def render_advanced_metrics(players_df: pd.DataFrame, con_ep_label: str):
         eng_table = eng_table[(eng_table['now_cost'] <= d_max_price) & (eng_table['minutes'] >= d_min_mins)]
         
         if not eng_table.empty:
-            eng_display_cols = ['web_name', 'team_name', 'position', 'now_cost', 'expected_points',
-                                'differential_gain', 'diff_roi', 'eo_top10k', 'diff_profile', 'selected_by_percent', eng_sort]
+            eng_display_cols = ['web_name', 'team_name', 'position', 'now_cost', 'consensus_ep',
+                                'differential_gain', 'diff_roi', 'eo_top10k', 'matchup_quality', 'selected_by_percent', eng_sort]
             eng_display_cols = [c for c in eng_display_cols if c in eng_table.columns]
             display_eng = eng_table[eng_display_cols].copy()
             eng_rename = {
                 'web_name': 'Player', 'team_name': 'Team', 'position': 'Pos',
-                'now_cost': 'Price', 'expected_points': 'Poisson EP', 'consensus_ep': con_ep_label, 'differential_gain': 'xNP',
-                'diff_roi': 'ROI/m', 'eo_top10k': 'EO10k%', 'diff_profile': 'Profile',
+                'now_cost': 'Price', 'consensus_ep': con_ep_label, 'differential_gain': 'xNP',
+                'diff_roi': 'ROI/m', 'eo_top10k': 'EO10k%', 'matchup_quality': 'Matchup',
                 'selected_by_percent': 'Own%', 'engineered_diff': 'Score',
             }
             display_eng = display_eng.rename(columns=eng_rename)
@@ -802,7 +822,7 @@ def render_advanced_metrics(players_df: pd.DataFrame, con_ep_label: str):
                     st.markdown(
                         f'<div style="background:#ffffff;border:1px solid rgba(0,0,0,0.04);border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:0.7rem;">'
                         f'<div style="color:{pos_color};font-size:0.75rem;font-weight:600;">{p["position"]}</div>'
-                        f'<div style="color:#fff;font-size:1rem;font-weight:600;">{p["web_name"]}</div>'
+                        f'<div style="color:#1d1d1f;font-size:1rem;font-weight:600;">{p["web_name"]}</div>'
                         f'<div style="color:#888;font-size:0.8rem;">{p.get("team_name", "")} | {p["now_cost"]:.1f}m</div>'
                         f'<div style="margin-top:0.4rem;">'
                         f'<span style="color:#22c55e;">xNP {diff_gain:.2f}</span> | '
@@ -816,7 +836,11 @@ def render_advanced_metrics(players_df: pd.DataFrame, con_ep_label: str):
 def render_set_and_forget(players_df: pd.DataFrame, con_ep_label: str):
     """Render Set & Forget finder."""
     with st.expander("Metrics & Formulas"):
-        st.info("**Set & Forget Formula:** `Score = xP × 0.5 + Form × 0.2 + MinutesReliability × 3` | Measures consistency and output.")
+        st.markdown('''
+        <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;font-size:0.85rem;color:#1d1d1f;">
+            <strong>Set & Forget Formula:</strong> <code>Score = xP × 0.5 + Form × 0.2 + MinutesReliability × 3</code> | Measures consistency and output.
+        </div>
+        ''', unsafe_allow_html=True)
     
     df = players_df.copy()
     # Use consensus_ep (Model xP) - the weighted blend of ML/Poisson/FPL
@@ -842,7 +866,11 @@ def render_set_and_forget(players_df: pd.DataFrame, con_ep_label: str):
 def render_expected_vs_actual(players_df: pd.DataFrame, con_ep_label: str):
     """Render Expected vs Actual performance analysis with filters."""
     with st.expander("Metrics & Formulas"):
-        st.info("**Expected vs Actual:** Compares points achieved (`Total Points`) against the `Comprehensive xPts` model (sum of all expected actions).")
+        st.markdown('''
+        <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;font-size:0.85rem;color:#1d1d1f;">
+            <strong>Expected vs Actual:</strong> Compares points achieved (<code>Total Points</code>) against the <code>Comprehensive xPts</code> model (sum of all expected actions).
+        </div>
+        ''', unsafe_allow_html=True)
     
     df = players_df.copy()
     df['total_points'] = safe_numeric(df.get('total_points', pd.Series([0]*len(df))))

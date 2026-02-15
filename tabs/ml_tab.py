@@ -24,7 +24,7 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
         - **ML xP**: Model's predicted points for the player
         - **FPL xP**: Official FPL expected points estimate
         - **vs FPL**: Difference between ML and FPL predictions
-        - **Poisson xP**: Statistical model using xG/xA data
+        - **Poisson EP**: Statistical model using xG/xA data
         - **Certainty %**: Model confidence (higher = more reliable)
         
         **Understanding Certainty**
@@ -48,6 +48,10 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
         """)
 
     # ── Controls ──
+    current_horizon = st.session_state.get('pref_weeks_ahead', 1)
+    ml_label = f"ML xP x{current_horizon}" if current_horizon > 1 else "ML xP"
+    fpl_label = f"FPL xP x{current_horizon}" if current_horizon > 1 else "FPL xP"
+    poisson_label = f"Poisson EP ({current_horizon}GW)" if current_horizon > 1 else "Poisson EP"
     
     ctrl1, ctrl2, ctrl3 = st.columns([1, 1, 1])
     
@@ -79,12 +83,6 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
         ml_team_filter = st.selectbox("Team", ['All'] + all_teams, key="ml_team_filter")
         
     with ctrl5:
-        # Dynamic sort options matching Analytics tab style
-        horizon = st.session_state.get("ml_horizon", 1)
-        ml_label = f"ML xP x{horizon}" if horizon > 1 else "ML xP"
-        fpl_label = f"FPL xP x{horizon}" if horizon > 1 else "FPL xP"
-        poisson_label = f"Poisson xP x{horizon}" if horizon > 1 else "Poisson xP"
-        
         ml_sort_col = st.selectbox(
             "Sort By",
             [ml_label, fpl_label, poisson_label, "vs FPL (+)", "Certainty"],
@@ -93,12 +91,19 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
     
     with ctrl6:
         n_gameweeks = st.slider(
-            "Predict for (GW Horizon)",
-            min_value=1,
-            max_value=10,
-            value=st.session_state.get("ml_horizon", 1),
-            key="ml_horizon"
+            "xP Horizon (GWs)", 1, 5,
+            value=current_horizon,
+            help="Sum xP over the next N gameweeks using full engine",
+            key="ml_horizon_slider"
         )
+        if n_gameweeks != current_horizon:
+            st.session_state.pref_weeks_ahead = n_gameweeks
+            # Clear cached players_df to force recalculation in app.py
+            if 'players_df' in st.session_state:
+                del st.session_state.players_df
+            st.rerun()
+        
+        horizon = current_horizon # Use consistent state for current run
     
     search_player_input = st.text_input(
         "Search player",
@@ -141,30 +146,17 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
                 relative_uncertainty = ci_width * 50
             certainty = max(0, min(100, 100 - relative_uncertainty))
 
-            # Scale metrics by horizon using decay logic from Analytics tab for FPL and Poisson
+            # Scale metrics by horizon - match Analytics tab simple scaling for comparison
             horizon = n_gameweeks
             
-            # Use processor's multi-GW calculator for FPL and Poisson if possible
-            # Otherwise fallback to using pre-calculated value
-            try:
-                # Get weekly projections for Poisson
-                _, weekly_poisson = processor.calculate_expected_points(pid, weeks_ahead=horizon)
-                poisson_ep = sum(weekly_poisson)
-            except:
-                # Fallback: expected_points_poisson is already calculated for the horizon by the engine
-                # (processor.get_engineered_features_df handles multi-GW summing)
-                poisson_ep = player.get('expected_points_poisson', fpl_ep_raw)
+            # Use pre-calculated Poisson EP from engine (already totaled for horizon)
+            poisson_ep = safe_numeric(player.get('expected_points_poisson', 0.0))
             
-            # FPL EP scaling
-            fpl_ep = 0.0
-            for i in range(horizon):
-                fpl_ep += fpl_ep_raw * (0.85 ** i)
+            # FPL EP scaling (simple multiplier to match Analytics tab display)
+            fpl_ep = fpl_ep_raw * horizon
             
-            # ML Pred scaling (ML is typically trained on next-GW, so we apply decay)
-            ml_pred_total = 0.0
-            raw_ml = pred.predicted_points
-            for i in range(horizon):
-                ml_pred_total += raw_ml * (0.92 ** i) # ML slightly higher decay retention
+            # ML Pred scaling (simple multiplier to match Analytics tab comparison)
+            ml_pred_total = ml_pred * horizon
             
             # Certainty scaling (reduces with distance)
             certainty_base = certainty # From previous calculation
@@ -187,13 +179,13 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
                 "Team": player.get("team_name", "?"),
                 "Price": round(float(player.get("now_cost", 0)), 1),
                 "Minutes": player.get("minutes", 0),
-                "ML xP": round(ml_pred_total, 1),
+                "ML xP": round(ml_pred_total, 2),
                 "Avg ML": round(ml_pred_total / horizon, 2) if horizon > 1 else round(ml_pred_total, 2),
-                "Range": f"{scaled_ci_low:.1f}-{scaled_ci_high:.1f}",
-                "FPL xP": round(fpl_ep, 1),
-                "Poisson xP": round(poisson_ep, 1),
-                "vs FPL": round(ml_pred_total - fpl_ep, 1),
-                "vs Poisson": round(ml_pred_total - poisson_ep, 1),
+                "Range": f"{scaled_ci_low:.2f}-{scaled_ci_high:.2f}",
+                "FPL xP": round(fpl_ep, 2),
+                "Poisson EP": round(poisson_ep, 2),
+                "vs FPL": round(ml_pred_total - fpl_ep, 2),
+                "vs Poisson": round(ml_pred_total - poisson_ep, 2),
                 "Certainty": round(certainty_horizon, 0),
                 "EO%": player.get("selected_by_percent", 0),
                 "_ci_low": scaled_ci_low,
@@ -202,7 +194,8 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
                 # Raw sorting keys matching dynamic labels
                 f"ML xP x{horizon}" if horizon > 1 else "ML xP": ml_pred_total,
                 f"FPL xP x{horizon}" if horizon > 1 else "FPL xP": fpl_ep,
-                f"Poisson xP x{horizon}" if horizon > 1 else "Poisson xP": poisson_ep,
+                "Poisson EP": poisson_ep, # Match Analytics tab internal ID
+                poisson_label: poisson_ep,
             })
 
         pred_df = pd.DataFrame(pred_data)
@@ -234,15 +227,15 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
                 
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
-                    st.metric("ML xP", f"{p['ML xP']:.1f} pts")
+                    st.metric("ML xP", f"{p['ML xP']:.2f} pts")
                 with col2:
                     delta_color = "normal" if p["vs FPL"] >= 0 else "inverse"
-                    st.metric("vs FPL", f"{p['FPL xP']:.1f} pts", 
-                              f"{p['vs FPL']:+.1f}", delta_color=delta_color)
+                    st.metric("vs FPL", f"{p['FPL xP']:.2f} pts", 
+                              f"{p['vs FPL']:+.2f}", delta_color=delta_color)
                 with col3:
                     delta_color = "normal" if p["vs Poisson"] >= 0 else "inverse"
-                    st.metric("vs Poisson", f"{p['Poisson xP']:.1f} pts", 
-                              f"{p['vs Poisson']:+.1f}", delta_color=delta_color)
+                    st.metric("vs Poisson", f"{p['Poisson EP']:.2f} pts", 
+                              f"{p['vs Poisson']:+.2f}", delta_color=delta_color)
                 with col4:
                     st.metric("Prediction Range", p["Range"])
                 
@@ -346,7 +339,7 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
                 st.metric(
                     "Top Pick",
                     top_pick.iloc[0]["Player"],
-                    f"{top_pick.iloc[0]['ML xP']:.1f} pts",
+                    f"{top_pick.iloc[0]['ML xP']:.2f} pts",
                     help="Highest ML predicted points"
                 )
         
@@ -369,7 +362,7 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
                 st.metric(
                     "Underpriced",
                     biggest_upside.iloc[0]["Player"],
-                    f"+{biggest_upside.iloc[0]['vs FPL']:.1f} vs FPL",
+                    f"{biggest_upside.iloc[0]['vs FPL']:+.2f} vs FPL",
                     help="ML thinks this player is underrated"
                 )
         
@@ -388,10 +381,7 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
         st.markdown(f"### ML Predictions (next {gws} GW{'s' if gws > 1 else ''}) — {len(pred_df)} found")
         
         # Prepare display dataframe
-        horizon = n_gameweeks
-        ml_label = f"ML xP x{horizon}" if horizon > 1 else "ML xP"
-        fpl_label = f"FPL xP x{horizon}" if horizon > 1 else "FPL xP"
-        poisson_label = f"Poisson xP x{horizon}" if horizon > 1 else "Poisson xP"
+        poisson_label = f"Poisson EP ({horizon}GW)" if horizon > 1 else "Poisson EP"
         
         display_cols = ["Player", "Pos", "Team", "Price", "Minutes", ml_label]
         if horizon > 1:
@@ -404,11 +394,11 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
         col_config = {
             "Price": st.column_config.NumberColumn("Price", format="£%.1fm"),
             "Minutes": st.column_config.NumberColumn("Mins", format="%d"),
-            ml_label: st.column_config.NumberColumn(ml_label, format="%.1f"),
-            fpl_label: st.column_config.NumberColumn(fpl_label, format="%.1f"),
-            "vs FPL": st.column_config.NumberColumn("vs FPL", format="%+.1f"),
-            poisson_label: st.column_config.NumberColumn(poisson_label, format="%.1f"),
-            "vs Poisson": st.column_config.NumberColumn("vs Poisson", format="%+.1f"),
+            ml_label: st.column_config.NumberColumn(ml_label, format="%.2f"),
+            fpl_label: st.column_config.NumberColumn(fpl_label, format="%.2f"),
+            "vs FPL": st.column_config.NumberColumn("vs FPL", format="%+.2f"),
+            poisson_label: st.column_config.NumberColumn(poisson_label, format="%.2f"),
+            "vs Poisson": st.column_config.NumberColumn("vs Poisson", format="%+.2f"),
             "Certainty": st.column_config.NumberColumn("Certainty", format="%.0f%%"),
         }
         if "Avg ML" in full_df.columns:
@@ -534,17 +524,18 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
                     if pos_df.empty:
                         st.info(f"No {pos} predictions available")
                     else:
-                        pos_display = pos_df[["Player", "Team", "Price", "ML xP", "vs FPL", "vs Poisson", "Certainty"]].copy()
+                        pos_display = pos_df[["Player", "Team", "Price", "ML xP", "vs FPL", "vs Poisson", "Certainty", poisson_label]].copy()
                         st.dataframe(
                             pos_display,
                             use_container_width=True,
                             hide_index=True,
                             column_config={
                                 "Price": st.column_config.NumberColumn("Price", format="£%.1fm"),
-                                "ML Pred": st.column_config.NumberColumn("ML Pred", format="%.1f"),
-                                "vs FPL": st.column_config.NumberColumn("vs FPL", format="%+.1f"),
-                                "vs Poisson": st.column_config.NumberColumn("vs Poisson", format="%+.1f"),
+                                "ML Pred": st.column_config.NumberColumn("ML Pred", format="%.2f"),
+                                "vs FPL": st.column_config.NumberColumn("vs FPL", format="%+.2f"),
+                                "vs Poisson": st.column_config.NumberColumn("vs Poisson", format="%+.2f"),
                                 "Certainty": st.column_config.NumberColumn("Certainty", format="%.0f%%"),
+                                poisson_label: st.column_config.NumberColumn(poisson_label, format="%.2f"),
                             }
                         )
     

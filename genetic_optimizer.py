@@ -80,7 +80,7 @@ class GeneticOptimizer:
         # Ensure numeric
         df['now_cost'] = pd.to_numeric(df['now_cost'], errors='coerce').fillna(5.0)
         df['expected_points'] = pd.to_numeric(
-            df.get('expected_points', df.get('ep_next', 2.0)),
+            df.get('consensus_ep', df.get('expected_points', df.get('ep_next', 2.0))),
             errors='coerce'
         ).fillna(2.0)
         

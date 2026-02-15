@@ -27,7 +27,7 @@ def render_captain_tab(processor, players_df: pd.DataFrame, fetcher):
         - Higher score = better captain pick confidence
         
         **Model xP (Standardized)**
-        - Consensus prediction for points this GW
+        - Model prediction for points this GW
         - Based on fixture difficulty, form, and historical data
         
         **ML xP**
@@ -142,7 +142,7 @@ def render_captain_tab(processor, players_df: pd.DataFrame, fetcher):
                                 <div style="color:#86868b;font-size:0.85rem;">{player.get('team_name', '')} | {player['position']}</div>
                                 <div style="margin-top:0.75rem;padding-top:0.5rem;border-top:1px solid rgba(0,0,0,0.08);">
                                     <div style="color:#86868b;font-size:0.65rem;text-transform:uppercase;">{get_consensus_label(st.session_state.active_models)} Prediction</div>
-                                    <div style="color:#1d1d1f;font-size:1.1rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{player['consensus']:.1f}</div>
+                                    <div style="color:#1d1d1f;font-size:1.1rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{player['consensus']:.2f}</div>
                                 </div>
                                 <div style="color:#86868b;font-size:0.7rem;margin-top:0.3rem;">Captain Score: {player['captain_score']:.2f}</div>
                             </div>
@@ -192,12 +192,12 @@ def render_captain_tab(processor, players_df: pd.DataFrame, fetcher):
             # Prepare Stat Grid items based on enabled models
             stat_grid_items = []
             if enable_poisson:
-                stat_grid_items.append(f'<div><div style="color:#86868b;font-size:0.65rem;text-transform:uppercase;">Poisson xP</div><div style="color:#3b82f6;font-weight:600;font-family:\'JetBrains Mono\',monospace;">{ep_poisson:.1f}</div></div>')
+                stat_grid_items.append(f'<div><div style="color:#86868b;font-size:0.65rem;text-transform:uppercase;">Poisson EP</div><div style="color:#3b82f6;font-weight:600;font-family:\'JetBrains Mono\',monospace;">{ep_poisson:.2f}</div></div>')
             if enable_fpl:
-                stat_grid_items.append(f'<div><div style="color:#86868b;font-size:0.65rem;text-transform:uppercase;">FPL xP</div><div style="color:#22c55e;font-weight:600;font-family:\'JetBrains Mono\',monospace;">{fpl_ep:.1f}</div></div>')
+                stat_grid_items.append(f'<div><div style="color:#86868b;font-size:0.65rem;text-transform:uppercase;">FPL xP</div><div style="color:#22c55e;font-weight:600;font-family:\'JetBrains Mono\',monospace;">{fpl_ep:.2f}</div></div>')
             if enable_ml:
-                stat_grid_items.append(f'<div><div style="color:#86868b;font-size:0.65rem;text-transform:uppercase;">ML xP</div><div style="color:#f59e0b;font-weight:600;font-family:\'JetBrains Mono\',monospace;">{ml:.1f}</div></div>')
-            stat_grid_items.append(f'<div><div style="color:#86868b;font-size:0.65rem;text-transform:uppercase;">Form</div><div style="color:#1d1d1f;font-weight:600;font-family:\'JetBrains Mono\',monospace;">{form:.1f}</div></div>')
+                stat_grid_items.append(f'<div><div style="color:#86868b;font-size:0.65rem;text-transform:uppercase;">ML xP</div><div style="color:#f59e0b;font-weight:600;font-family:\'JetBrains Mono\',monospace;">{ml:.2f}</div></div>')
+            stat_grid_items.append(f'<div><div style="color:#86868b;font-size:0.65rem;text-transform:uppercase;">Form</div><div style="color:#1d1d1f;font-weight:600;font-family:\'JetBrains Mono\',monospace;">{form:.2f}</div></div>')
             
             grid_columns = 2
             stat_grid_html = f'<div style="display:grid;grid-template-columns:repeat({grid_columns},1fr);gap:0.5rem;padding:0 1rem;text-align:center;background:#fff;border-left:1px solid rgba(0,0,0,0.04);border-right:1px solid rgba(0,0,0,0.04);">' + "".join(stat_grid_items) + '</div>'
@@ -207,7 +207,7 @@ def render_captain_tab(processor, players_df: pd.DataFrame, fetcher):
                 <div style="background:#fff;border:1px solid rgba(0,0,0,0.04);border-top:none;border-radius:10px;border-top-left-radius:0;border-top-right-radius:0;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:0 1rem 1rem 1rem;text-align:center;">
                     <div style="margin-top:0.75rem;padding-top:0.5rem;border-top:1px solid rgba(0,0,0,0.08);">
                         <div style="color:#86868b;font-size:0.65rem;text-transform:uppercase;">{get_consensus_label(st.session_state.active_models)}</div>
-                        <div style="color:#1d1d1f;font-size:1.1rem;font-weight:700;font-family:\'JetBrains Mono\',monospace;">{consensus:.1f}</div>
+                        <div style="color:#1d1d1f;font-size:1.1rem;font-weight:700;font-family:\'JetBrains Mono\',monospace;">{consensus:.2f}</div>
                     </div>
                     <div style="color:#86868b;font-size:0.7rem;margin-top:0.3rem;">EO: {eo:.1f}%</div>
                 </div>
@@ -267,7 +267,7 @@ def render_captain_tab(processor, players_df: pd.DataFrame, fetcher):
             format_dict['ML Pred'] = '{:.2f}'
             
         cols_to_keep.extend(['consensus', 'form', 'selected_by_percent', 'captain_score'])
-        col_names.extend(['Consensus', 'Form', 'EO%', 'Score'])
+        col_names.extend(['Model xP', 'Form', 'EO%', 'Score'])
         
         display_df = filtered[cols_to_keep].copy()
         display_df.columns = col_names
@@ -438,16 +438,16 @@ def render_captain_tab(processor, players_df: pd.DataFrame, fetcher):
                 items = []
                 if enable_poisson:
                     win = "✓" if p1_data['poisson_ep'] >= p2_data['poisson_ep'] else ""
-                    items.append(f'<div style="display:flex;justify-content:space-between;"><span>Poisson EP:</span><span style="color:#1d1d1f;">{p1_data["poisson_ep"]:.1f} {win}</span></div>')
+                    items.append(f'<div style="display:flex;justify-content:space-between;"><span>Poisson EP:</span><span style="color:#1d1d1f;">{p1_data["poisson_ep"]:.2f} {win}</span></div>')
                 if enable_fpl:
                     win = "✓" if p1_data['ep_next_num'] >= p2_data['ep_next_num'] else ""
-                    items.append(f'<div style="display:flex;justify-content:space-between;"><span>FPL EP:</span><span style="color:#1d1d1f;">{p1_data["ep_next_num"]:.1f} {win}</span></div>')
+                    items.append(f'<div style="display:flex;justify-content:space-between;"><span>FPL xP:</span><span style="color:#1d1d1f;">{p1_data["ep_next_num"]:.2f} {win}</span></div>')
                 if enable_ml:
                     win = "✓" if p1_data['ml_pred'] >= p2_data['ml_pred'] else ""
-                    items.append(f'<div style="display:flex;justify-content:space-between;"><span>ML Pred:</span><span style="color:#1d1d1f;">{p1_data["ml_pred"]:.1f} {win}</span></div>')
+                    items.append(f'<div style="display:flex;justify-content:space-between;"><span>ML xP:</span><span style="color:#1d1d1f;">{p1_data["ml_pred"]:.2f} {win}</span></div>')
                 
                 win_form = "✓" if p1_data['form'] >= p2_data['form'] else ""
-                items.append(f'<div style="display:flex;justify-content:space-between;"><span>Form:</span><span style="color:#1d1d1f;">{p1_data["form"]:.1f} {win_form}</span></div>')
+                items.append(f'<div style="display:flex;justify-content:space-between;"><span>Form:</span><span style="color:#1d1d1f;">{p1_data["form"]:.2f} {win_form}</span></div>')
                 items.append(f'<div style="display:flex;justify-content:space-between;"><span>EO:</span><span style="color:#1d1d1f;">{p1_data["selected_by_percent"]:.1f}%</span></div>')
                 
                 st.markdown(f'''
@@ -463,16 +463,16 @@ def render_captain_tab(processor, players_df: pd.DataFrame, fetcher):
                 items = []
                 if enable_poisson:
                     win = "✓" if p2_data['poisson_ep'] >= p1_data['poisson_ep'] else ""
-                    items.append(f'<div style="display:flex;justify-content:space-between;"><span>Poisson EP:</span><span style="color:#1d1d1f;">{p2_data["poisson_ep"]:.1f} {win}</span></div>')
+                    items.append(f'<div style="display:flex;justify-content:space-between;"><span>Poisson EP:</span><span style="color:#1d1d1f;">{p2_data["poisson_ep"]:.2f} {win}</span></div>')
                 if enable_fpl:
                     win = "✓" if p2_data['ep_next_num'] >= p1_data['ep_next_num'] else ""
-                    items.append(f'<div style="display:flex;justify-content:space-between;"><span>FPL EP:</span><span style="color:#1d1d1f;">{p2_data["ep_next_num"]:.1f} {win}</span></div>')
+                    items.append(f'<div style="display:flex;justify-content:space-between;"><span>FPL xP:</span><span style="color:#1d1d1f;">{p2_data["ep_next_num"]:.2f} {win}</span></div>')
                 if enable_ml:
                     win = "✓" if p2_data['ml_pred'] >= p1_data['ml_pred'] else ""
-                    items.append(f'<div style="display:flex;justify-content:space-between;"><span>ML Pred:</span><span style="color:#1d1d1f;">{p2_data["ml_pred"]:.1f} {win}</span></div>')
+                    items.append(f'<div style="display:flex;justify-content:space-between;"><span>ML xP:</span><span style="color:#1d1d1f;">{p2_data["ml_pred"]:.2f} {win}</span></div>')
                 
                 win_form = "✓" if p2_data['form'] >= p1_data['form'] else ""
-                items.append(f'<div style="display:flex;justify-content:space-between;"><span>Form:</span><span style="color:#1d1d1f;">{p2_data["form"]:.1f} {win_form}</span></div>')
+                items.append(f'<div style="display:flex;justify-content:space-between;"><span>Form:</span><span style="color:#1d1d1f;">{p2_data["form"]:.2f} {win_form}</span></div>')
                 items.append(f'<div style="display:flex;justify-content:space-between;"><span>EO:</span><span style="color:#1d1d1f;">{p2_data["selected_by_percent"]:.1f}%</span></div>')
                 
                 st.markdown(f'''
