@@ -6,7 +6,7 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from utils.helpers import safe_numeric, round_df
+from utils.helpers import safe_numeric, round_df, style_df_with_injuries
 
 
 def render_genetic_tab(processor, players_df: pd.DataFrame):
@@ -92,10 +92,10 @@ def render_genetic_tab(processor, players_df: pd.DataFrame):
             bench_df = squad_df[squad_df["Status"] == "Bench"].copy()
 
             st.markdown("**Starting XI**")
-            st.dataframe(round_df(starting_df, 2), use_container_width=True, hide_index=True)
+            st.dataframe(style_df_with_injuries(starting_df, players_df), use_container_width=True, hide_index=True)
 
             st.markdown("**Bench**")
-            st.dataframe(round_df(bench_df, 2), use_container_width=True, hide_index=True)
+            st.dataframe(style_df_with_injuries(bench_df, players_df), use_container_width=True, hide_index=True)
 
             # Convergence chart
             st.markdown("**Evolution Convergence**")

@@ -65,7 +65,7 @@ class MonteCarloEngine:
         self,
         players_df: pd.DataFrame,
         n_simulations: int = 10000,
-        random_seed: int = 42
+        random_seed: int = None
     ):
         self.players_df = players_df.copy()
         self.n_simulations = n_simulations

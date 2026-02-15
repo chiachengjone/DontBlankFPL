@@ -415,6 +415,10 @@ DARK_THEME_CSS = """
     [data-testid="stExpander"] summary::-webkit-details-marker { display: none; }
     [data-testid="stExpander"] summary::marker { display: none; content: ""; }
     [data-testid="stExpander"] summary svg { display: none !important; }
+    [data-testid="stExpander"] summary [data-testid="stIconMaterial"],
+    [data-testid="stExpander"] summary .material-symbols-rounded {
+        display: none !important;
+    }
     [data-testid="stExpander"] summary:hover { background: rgba(0,0,0,0.02); }
     .stExpander > div[data-testid="stExpanderDetails"] {
         border-top: 1px solid rgba(0,0,0,0.06);

@@ -8,7 +8,6 @@ import plotly.graph_objects as go
 from config import (
     CAPTAIN_MULTIPLIER,
     DASHBOARD_TOP_PICKS,
-    DASHBOARD_INJURY_ALERTS,
     DASHBOARD_FIXTURE_SWINGS,
     POSITION_COLORS,
     FDR_COLOR_MAP,
@@ -97,8 +96,6 @@ def render_dashboard_tab(processor, players_df: pd.DataFrame):
     # ── Captaincy Quick Pick ──
     render_captain_quick_pick(players_df)
 
-    # ── Injury Alerts (popular players) ──
-    render_injury_alerts_summary(players_df)
 
     # ── Fixture Swings ──
     render_fixture_swings(processor)
@@ -272,54 +269,6 @@ def render_captain_quick_pick(players_df: pd.DataFrame):
             )
 
 
-def render_injury_alerts_summary(players_df: pd.DataFrame):
-    """Flagged injuries for popular players."""
-    st.markdown('<p class="section-title">Injury & Availability Alerts</p>', unsafe_allow_html=True)
-    st.caption("Popular players (>1% ownership) flagged as injured, doubtful, or suspended")
-
-    df = players_df.copy()
-    df['chance_of_playing'] = safe_numeric(
-        df.get('chance_of_playing_next_round', pd.Series([100] * len(df))), 100
-    )
-    df['status'] = df.get('status', 'a')
-    df['news'] = df.get('news', '').fillna('')
-    df['selected_by_percent'] = safe_numeric(df['selected_by_percent'])
-
-    flagged = df[
-        ((df['status'].isin(['i', 'd', 's', 'u'])) | (df['chance_of_playing'] < 100))
-        & (df['selected_by_percent'] > 1)
-    ].sort_values('selected_by_percent', ascending=False).head(DASHBOARD_INJURY_ALERTS)
-
-    if flagged.empty:
-        st.success("No major injury concerns among popular players")
-        return
-
-    display = flagged[['web_name', 'team_name', 'position', 'selected_by_percent', 'chance_of_playing', 'news']].copy()
-    display.columns = ['Player', 'Team', 'Pos', 'Own%', 'Chance', 'News']
-    display['Own%'] = display['Own%'].round(1)
-
-    chance_values = display['Chance'].astype(int).tolist()
-    display['Chance'] = display['Chance'].astype(int).astype(str) + '%'
-
-    def style_rows(sdf):
-        styles = []
-        for i in range(len(sdf)):
-            c = chance_values[i] if i < len(chance_values) else 100
-            if c == 0:
-                bg = 'background-color: rgba(239,68,68,0.4)'
-            elif c <= 25:
-                bg = 'background-color: rgba(239,68,68,0.3)'
-            elif c <= 50:
-                bg = 'background-color: rgba(249,115,22,0.3)'
-            elif c <= 75:
-                bg = 'background-color: rgba(245,158,11,0.25)'
-            else:
-                bg = 'background-color: rgba(250,204,21,0.15)'
-            styles.append([bg] * len(sdf.columns))
-        return pd.DataFrame(styles, index=sdf.index, columns=sdf.columns)
-
-    st.dataframe(display.style.apply(style_rows, axis=None), hide_index=True, use_container_width=True)
-
 
 def render_fixture_swings(processor):
     """Teams with biggest upcoming fixture difficulty changes."""
@@ -463,14 +412,14 @@ def render_transfer_trends(players_df: pd.DataFrame):
         risers = df.nlargest(8, 'transfers_in_event')[['web_name', 'team_name', 'now_cost', 'transfers_in_event']].copy()
         risers.columns = ['Player', 'Team', 'Price', 'Transfers In']
         risers['Transfers In'] = risers['Transfers In'].apply(lambda x: f"+{int(x):,}")
-        st.dataframe(round_df(risers), hide_index=True, use_container_width=True)
+        st.dataframe(style_df_with_injuries(risers), hide_index=True, use_container_width=True)
 
     with t2:
         st.markdown("**Most Transferred Out**")
         fallers = df.nlargest(8, 'transfers_out_event')[['web_name', 'team_name', 'now_cost', 'transfers_out_event']].copy()
         fallers.columns = ['Player', 'Team', 'Price', 'Transfers Out']
         fallers['Transfers Out'] = fallers['Transfers Out'].apply(lambda x: f"-{int(x):,}")
-        st.dataframe(round_df(fallers), hide_index=True, use_container_width=True)
+        st.dataframe(style_df_with_injuries(fallers), hide_index=True, use_container_width=True)
 
 
 # ── Internal Helpers ──

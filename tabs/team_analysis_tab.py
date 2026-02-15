@@ -166,7 +166,7 @@ def render_team_analysis_tab(processor, players_df: pd.DataFrame):
                     display_df.columns = ['Player', 'Pos', 'Price', 'EP', 'Form', 'Mins', 'EO%']
                     
                     st.dataframe(
-                        display_df.style.format({
+                        style_df_with_injuries(display_df, players_df, format_dict={
                             'Price': '£{:.1f}m',
                             'EP': '{:.2f}',
                             'Form': '{:.1f}',

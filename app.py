@@ -122,8 +122,8 @@ def main():
         render_status_bar(f"{len(players_df)} players loaded")
     
     # Settings row (compact) -- Team ID + Toggles
-    settings_left, settings_right = st.columns([1, 1])
-    with settings_left:
+    set_col1, set_col2, set_col3 = st.columns(3, vertical_alignment="center")
+    with set_col1:
         team_id_input = st.number_input(
             "FPL Team ID",
             min_value=0,
@@ -138,25 +138,23 @@ def main():
         ustat_active = st.session_state.get('_understat_active', None)
         if ustat_active is False:
             st.warning("Understat offline - using FPL fallback")
-    with settings_right:
-        tog1, tog2 = st.columns(2)
-        with tog1:
-            new_poisson = st.toggle(
-                "Poisson xP",
-                value=st.session_state.use_poisson_xp,
-                help="ON = Poisson model (70/30 blend with opponent strength). OFF = Raw FPL ep_next."
-            )
-            if new_poisson != st.session_state.use_poisson_xp:
-                st.session_state.use_poisson_xp = new_poisson
-                st.session_state.pop('players_df', None)
-                st.cache_resource.clear()  # Clear cached data to force regeneration
-                st.rerun()
-        with tog2:
-            st.session_state.injury_highlight = st.toggle(
-                "Injury highlights",
-                value=st.session_state.injury_highlight,
-                help="Color-code rows by injury status"
-            )
+    with set_col2:
+        new_poisson = st.toggle(
+            "Poisson xP",
+            value=st.session_state.use_poisson_xp,
+            help="ON = Poisson model (70/30 blend with opponent strength). OFF = Raw FPL ep_next."
+        )
+        if new_poisson != st.session_state.use_poisson_xp:
+            st.session_state.use_poisson_xp = new_poisson
+            st.session_state.pop('players_df', None)
+            st.cache_resource.clear()  # Clear cached data to force regeneration
+            st.rerun()
+    with set_col3:
+        st.session_state.injury_highlight = st.toggle(
+            "Injury highlights",
+            value=st.session_state.injury_highlight,
+            help="Color-code rows by injury status"
+        )
     
     # Navigation tabs
     tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12 = st.tabs([

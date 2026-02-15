@@ -140,7 +140,7 @@ def render_captain_tab(processor, players_df: pd.DataFrame):
         display_df.columns = ['Player', 'Team', 'Pos', 'Price', 'Poisson EP', 'FPL EP', 'ML Pred', 'Form', 'EO%', 'Score']
         
         st.dataframe(
-            display_df.style.format({
+            style_df_with_injuries(display_df, players_df, format_dict={
                 'Price': '£{:.1f}m',
                 'Poisson EP': '{:.2f}',
                 'FPL EP': '{:.2f}',

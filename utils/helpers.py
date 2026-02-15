@@ -215,7 +215,7 @@ def round_df(df: pd.DataFrame, max_dp: int = 2) -> pd.DataFrame:
     return df
 
 
-def style_df_with_injuries(df: pd.DataFrame, players_df: pd.DataFrame = None, player_col: str = 'Player') -> pd.DataFrame:
+def style_df_with_injuries(df: pd.DataFrame, players_df: pd.DataFrame = None, player_col: str = 'Player', format_dict: dict = None) -> pd.DataFrame:
     """
     Apply injury-based row coloring to a dataframe.
     Returns a styled dataframe if injury_highlight is enabled.
@@ -224,19 +224,42 @@ def style_df_with_injuries(df: pd.DataFrame, players_df: pd.DataFrame = None, pl
         df: DataFrame to style
         players_df: Full players DataFrame with injury data (optional, uses session_state if not provided)
         player_col: Name of the column containing player names (web_name)
+        format_dict: Optional dict of column format strings, e.g. {'Price': '£{:.1f}m'}
     """
     import streamlit as st
     
+    def _apply_safe_format(styled_or_df, fmt_dict):
+        """Apply format_dict safely, handling non-numeric values."""
+        if not fmt_dict:
+            return styled_or_df
+        # If it's a plain DataFrame, convert to Styler first
+        if isinstance(styled_or_df, pd.DataFrame):
+            styled_or_df = styled_or_df.style
+        safe_fmt = {}
+        for col, fmt in fmt_dict.items():
+            if col in df.columns:
+                def _make_safe(f):
+                    def _fmt(v):
+                        try:
+                            return f.format(v)
+                        except (ValueError, TypeError):
+                            return str(v) if pd.notna(v) else ''
+                    return _fmt
+                safe_fmt[col] = _make_safe(fmt)
+        return styled_or_df.format(safe_fmt, na_rep='')
+    
     # Check if highlighting is disabled
     if not st.session_state.get('injury_highlight', True):
-        return round_df(df)
+        result = round_df(df)
+        return _apply_safe_format(result, format_dict) if format_dict else result
     
     # Get players_df from session state if not provided
     if players_df is None:
         players_df = st.session_state.get('players_df')
     
     if players_df is None or player_col not in df.columns:
-        return round_df(df)
+        result = round_df(df)
+        return _apply_safe_format(result, format_dict) if format_dict else result
     
     # Round all floats to 3dp first
     df = round_df(df)
@@ -278,7 +301,8 @@ def style_df_with_injuries(df: pd.DataFrame, players_df: pd.DataFrame = None, pl
             styles.append([bg] * len(display_df.columns))
         return pd.DataFrame(styles, index=display_df.index, columns=display_df.columns)
     
-    return df.style.apply(style_rows, axis=None)
+    styled = df.style.apply(style_rows, axis=None)
+    return _apply_safe_format(styled, format_dict) if format_dict else styled
 
 
 # ── Rotation Risk ──

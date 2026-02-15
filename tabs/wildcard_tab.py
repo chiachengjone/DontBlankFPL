@@ -4,7 +4,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-from utils.helpers import safe_numeric
+from utils.helpers import safe_numeric, round_df, style_df_with_injuries
 from optimizer import MAX_PLAYERS_PER_TEAM, MAX_BUDGET
 from components.styles import render_section_title
 
@@ -258,7 +258,7 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
             display_df['Starting'] = display_df['Starting'].apply(lambda x: 'Starting' if x else 'Bench')
             
             st.dataframe(
-                display_df.style.format({
+                style_df_with_injuries(display_df, players_df, format_dict={
                     'Price': '£{:.1f}m',
                     'EP': '{:.2f}',
                     'Form': '{:.1f}',
@@ -302,7 +302,7 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
             full_df['Starter'] = full_df['Starter'].apply(lambda x: 'Yes' if x else 'Bench')
             
             st.dataframe(
-                full_df.style.format({
+                style_df_with_injuries(full_df, players_df, format_dict={
                     'Price': '£{:.1f}m',
                     'EP': '{:.2f}',
                     'Form': '{:.1f}',
