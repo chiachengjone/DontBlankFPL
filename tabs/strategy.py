@@ -9,7 +9,7 @@ from utils.helpers import (
     safe_numeric, get_injury_status, style_df_with_injuries, round_df, normalize_name,
     calculate_consensus_ep, get_consensus_label, calculate_enhanced_captain_score
 )
-from components.charts import create_ep_ownership_scatter
+from components.charts import create_strategy_scatter
 from components.cards import render_player_detail_card
 from fpl_api import CBIT_BONUS_THRESHOLD, CBIT_BONUS_POINTS, MAX_FREE_TRANSFERS, CAPTAIN_MULTIPLIER
 
@@ -89,6 +89,29 @@ def render_strategy_tab(processor, players_df: pd.DataFrame):
         max_price = st.slider("Max Price", 4.0, 15.0, 15.0, 0.5, key="strat_price")
     with f4:
         search_player = st.text_input("Search player", placeholder="Type name to highlight...", key="strat_search")
+
+    st.markdown('<div style="margin-top: -1rem;"></div>', unsafe_allow_html=True) # Counteract Streamlit spacing
+    
+    # Second filter row for the dynamic chart
+    f2_col1, f2_col2, f2_col3 = st.columns([1, 1, 2])
+    with f2_col1:
+        x_metric_label = st.selectbox(
+            "X-Axis Metric",
+            ["Ownership", "Form", "Price", "Net Transfers", "Points", "Minutes"],
+            index=0,
+            key="strat_x_metric"
+        )
+        
+        # Mapping labels to columns
+        x_metric_map = {
+            "Ownership": ("selected_by_percent", "Ownership %"),
+            "Form": ("form", "Form"),
+            "Price": ("now_cost", "Price"),
+            "Net Transfers": ("net_transfers", "Net Transfers"),
+            "Points": ("total_points", "Total Points"),
+            "Minutes": ("minutes", "Minutes Played")
+        }
+        x_col, x_label = x_metric_map.get(x_metric_label, ("selected_by_percent", "Ownership %"))
     
     # Use base player data for fast graph rendering
     df = players_df.copy()
@@ -126,7 +149,23 @@ def render_strategy_tab(processor, players_df: pd.DataFrame):
     
     # Scatter plot - uses consensus_ep (Model xP) calculated at top of tab
     if 'consensus_ep' in df.columns or 'expected_points_poisson' in df.columns or 'ep_next' in df.columns:
-        fig = create_ep_ownership_scatter(df, pos_filter, search_player=search_player, ep_label=con_label)
+        # Calculate calculated metrics if needed
+        if x_col == 'net_transfers':
+            df['transfers_in_event'] = safe_numeric(df.get('transfers_in_event', 0))
+            df['transfers_out_event'] = safe_numeric(df.get('transfers_out_event', 0))
+            df['net_transfers'] = df['transfers_in_event'] - df['transfers_out_event']
+        elif x_metric_label in ["Form", "Points", "Minutes"]:
+            col_name = "form" if x_metric_label == "Form" else "total_points" if x_metric_label == "Points" else "minutes"
+            df[x_col] = safe_numeric(df.get(col_name, 0))
+
+        fig = create_strategy_scatter(
+            df, 
+            x_col=x_col, 
+            x_label=x_label, 
+            position_filter=pos_filter, 
+            search_player=search_player, 
+            y_label=con_label
+        )
         if fig:
             st.plotly_chart(fig, use_container_width=True, key='strategy_ep_ownership_scatter')
     else:
@@ -135,9 +174,6 @@ def render_strategy_tab(processor, players_df: pd.DataFrame):
     # Quick stats
     st.markdown('<p class="section-title">Quick Stats</p>', unsafe_allow_html=True)
     render_quick_stats(df)
-    
-    # Form vs EP bubble chart
-    render_form_vs_ep_chart(df)
     
     # Captain planning
     render_captain_planning(players_df, processor)
@@ -189,70 +225,6 @@ def render_quick_stats(df: pd.DataFrame):
         st.metric("Avg Price", f"{avg_price:.1f}m")
 
 
-def render_form_vs_ep_chart(df: pd.DataFrame):
-    """Render Form vs EP bubble chart — size = price, color = position."""
-    active_models = st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])
-    current_h = st.session_state.get('pref_weeks_ahead', 1)
-    con_label = get_consensus_label(active_models, current_h)
-    
-    st.markdown(f'<p class="section-title">Form vs {con_label}</p>', unsafe_allow_html=True)
-    st.caption("Bubble size = price. Top-right = hot and high-ceiling players.")
-    
-    chart_df = df.copy()
-    chart_df['form'] = safe_numeric(chart_df.get('form', pd.Series([0]*len(chart_df))))
-    
-    # Use Model xP (Consensus)
-    if 'consensus_ep' in chart_df.columns:
-        chart_df['ep'] = safe_numeric(chart_df['consensus_ep'])
-    else:
-        chart_df['ep'] = safe_numeric(chart_df.get('expected_points', chart_df.get('ep_next', pd.Series([2]*len(chart_df)))))
-    chart_df['minutes'] = safe_numeric(chart_df.get('minutes', pd.Series([0]*len(chart_df))))
-    chart_df = chart_df[chart_df['minutes'] > 200]
-    
-    if chart_df.empty or len(chart_df) < 5:
-        return
-    
-    pos_colors = {'GKP': '#3b82f6', 'DEF': '#22c55e', 'MID': '#f59e0b', 'FWD': '#ef4444'}
-    
-    fig = go.Figure()
-    for pos, color in pos_colors.items():
-        pos_df = chart_df[chart_df['position'] == pos]
-        if pos_df.empty:
-            continue
-        fig.add_trace(go.Scatter(
-            x=pos_df['form'],
-            y=pos_df['ep'],
-            mode='markers',
-            name=pos,
-            marker=dict(
-                size=pos_df['now_cost'].clip(lower=4, upper=14) * 2.5,
-                color=color,
-                opacity=0.7,
-                line=dict(width=1, color='rgba(0,0,0,0.06)')
-            ),
-            text=pos_df['web_name'],
-            hovertemplate='<b>%{text}</b><br>Form: %{x:.1f}<br>xP: %{y:.1f}<br><extra></extra>'
-        ))
-    
-    # Add quadrant lines at medians
-    med_form = chart_df['form'].median()
-    med_ep = chart_df['ep'].median()
-    
-    fig.add_hline(y=med_ep, line_dash="dot", line_color="rgba(0,0,0,0.08)")
-    fig.add_vline(x=med_form, line_dash="dot", line_color="rgba(0,0,0,0.08)")
-    
-    fig.update_layout(
-        height=420,
-        template='plotly_white',
-        paper_bgcolor='#ffffff',
-        plot_bgcolor='#ffffff',
-        font=dict(family='Inter, sans-serif', color='#86868b', size=11),
-        xaxis=dict(title='Form', gridcolor='#e5e5ea', zerolinecolor='#e5e5ea'),
-        yaxis=dict(title=con_label, gridcolor='#e5e5ea', zerolinecolor='#e5e5ea'),
-        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
-        margin=dict(l=50, r=30, t=30, b=50)
-    )
-    st.plotly_chart(fig, use_container_width=True, key='strategy_form_vs_ep')
 
 
 def render_captain_planning(players_df: pd.DataFrame, processor):

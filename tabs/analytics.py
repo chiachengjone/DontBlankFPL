@@ -68,7 +68,7 @@ def render_analytics_tab(processor, players_df: pd.DataFrame):
         sort_options = [con_ep_label]
         if current_horizon > 1 and len(active_models) > 1:
             sort_options.append(f'Avg {con_ep_label}')
-        sort_options.extend([ep_label, fpl_ep_label, ml_ep_label, 'Total Points', 'Threat Momentum', 'xNP', 'Price', 'Own%'])
+        sort_options.extend([ep_label, fpl_ep_label, ml_ep_label, 'Total Points', 'Threat Momentum', 'xNP', 'CBIT', 'Price', 'Own%'])
         
         sort_col = st.selectbox(
             "Sort By",
@@ -128,18 +128,29 @@ def render_analytics_tab(processor, players_df: pd.DataFrame):
     # Use centralized consensus calculator
     df = calculate_consensus_ep(df, st.session_state.active_models, horizon)
         
-    # Calculate Differential & Value Metrics
-    if 'differential_gain' not in df.columns:
-        eo = safe_numeric(df['selected_by_percent'], 5).clip(lower=0.1)
-        eo_frac = eo / 100.0
-        import numpy as np
-        eo_10k = (1.5 * np.power(eo_frac, 1.4) + 0.01).clip(0.01, 0.99)
-        df['eo_top10k'] = (eo_10k * 100).round(1)
-        df['differential_gain'] = (df['consensus_ep'] * (1 - eo_10k)).round(2)
-        df['diff_roi'] = (df['differential_gain'] / safe_numeric(df['now_cost'], 5).clip(lower=4)).round(3)
+    # Calculate Differential & Value Metrics (RECALCULATE for current models/horizon)
+    eo = safe_numeric(df['selected_by_percent'], 5).clip(lower=0.1)
+    eo_frac = eo / 100.0
+    import numpy as np
+    eo_10k = (1.5 * np.power(eo_frac, 1.4) + 0.01).clip(0.01, 0.99)
+    df['eo_top10k'] = (eo_10k * 100).round(1)
     
-    if 'differential_score' not in df.columns:
-        df['differential_score'] = df['differential_gain']
+    # Core RRI: xNP (Expected Net Points) = Model xP * (1 - EO)
+    df['differential_gain'] = (df['consensus_ep'] * (1 - eo_10k)).round(2)
+    df['xnp'] = df['differential_gain'] # Standardize naming for helpers
+    df['diff_roi'] = (df['differential_gain'] / safe_numeric(df['now_cost'], 5).clip(lower=4)).round(3)
+    
+    # Recalculate Engineered Differential Score using updated components
+    low_own_bonus = np.where(eo < 10, (10 - eo) / 10, 0)
+    df['engineered_diff'] = (
+        df['differential_gain'] * 0.35 +
+        safe_numeric(df.get('eppm', 0)) * 0.25 +
+        safe_numeric(df.get('threat_momentum', 0)) * 0.20 +
+        safe_numeric(df.get('matchup_quality', 0)) * 0.10 +
+        low_own_bonus * 0.10
+    ).round(2)
+    
+    df['differential_score'] = df['differential_gain']
     
     df['cbit_propensity'] = safe_numeric(df.get('cbit_propensity', pd.Series([0]*len(df))))
     if df['cbit_propensity'].sum() == 0 and 'clean_sheets' in df.columns:
@@ -237,6 +248,7 @@ def render_analytics_tab(processor, players_df: pd.DataFrame):
         'xNP': 'differential_gain',
         'Price': 'now_cost',
         'Own%': 'selected_by_percent',
+        'CBIT': 'cbit_score'
     }
     sort_by = sort_map.get(sort_col, 'consensus_ep')
     if sort_by in df.columns:

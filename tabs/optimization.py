@@ -32,13 +32,14 @@ def render_optimization_tab(processor, players_df: pd.DataFrame, fetcher):
         - Using more than FTs available costs -4 pts per extra transfer
         
         **Strategy Options**
-        - **Balanced**: 35% xP, 20% Form, 20% Value, 15% Mins, 10% Diff
-        - **Maximum Points**: 55% xP, 25% Form, 20% Mins (best for high budget)
-        - **Differential**: 35% xP, 35% Diff, 15% Form, 15% Mins (rank chasing)
-        - **Value**: 45% Value (xP/m), 30% xP, 25% Mins (tight budget)
+        - **Balanced**: Weighted blend of xP, Form, ROI, and Tactical potential.
+        - **Maximum Points**: Prioritizes absolute ceiling and attacking potential.
+        - **Differential**: Prioritizes low ownership and high xGI upside.
+        - **Value**: Prioritizes ROI (Points per Million).
         
         **Transfer Recommendations**
         - Shows best OUT → IN swaps for your squad
+        - Transfer Score: Comprehensive metric including xP, Form, Status, and Tactics.
         - xP Gain: Predicted points improvement
         - Value: Price difference (positive = saves money)
         
@@ -115,7 +116,7 @@ def analyze_transfers(processor, players_df, fetcher, team_id, weeks_ahead, free
     # Prepare EP metrics - Horizon-Aware Re-calculation
     try:
         from poisson_ep import calculate_poisson_ep_for_dataframe
-        fixtures_df = fetcher.get_fixtures_df()
+        fixtures_df = processor.fixtures_df
         current_gw = fetcher.get_current_gameweek()
         team_stats = st.session_state.get('_understat_team_stats', None)
         
@@ -149,7 +150,7 @@ def analyze_transfers(processor, players_df, fetcher, team_id, weeks_ahead, free
     calculate_transfer_scores(featured_df, ep_col, strategy)
     
     st.markdown('<p class="section-title">Transfer Recommendations</p>', unsafe_allow_html=True)
-    st.caption("Score 0-10: higher = better player to bring IN")
+    st.caption("Transfer Score: higher = better. Weighted by xP, Form, ROI, and Status.")
     
     if has_real_team and your_squad:
         your_squad_set = set(your_squad)
@@ -184,43 +185,54 @@ def analyze_transfers(processor, players_df, fetcher, team_id, weeks_ahead, free
 
 
 def calculate_transfer_scores(df, ep_col, strategy):
-    """Calculate transfer scores based on strategy."""
-    # Normalize EP
-    ep_min = df[ep_col].min()
-    ep_max = df[ep_col].max()
-    ep_range = max(ep_max - ep_min, 0.1)
-    df['ep_norm'] = (df[ep_col] - ep_min) / ep_range * 10
+    """
+    Enhanced Transfer Scoring algorithm.
+    Combines Model xP, Form, Value (ROI), Availability, and Tactical metrics (CBIT/xGI).
+    """
+    # ── 1. Tactical Upside ──
+    # CBIT Bonus for Defenders (Prob of hitting defensive action threshold)
+    cbit_factor = df.apply(
+        lambda r: r.get('cbit_prob', 0) * 2.0 if r.get('position') == 'DEF' else 0.0, 
+        axis=1
+    )
     
-    # Normalize form
-    form_max = df['form'].max()
-    df['form_norm'] = (df['form'] / max(form_max, 0.1)) * 10
+    # Attacking Upside (xGI per 90) for MIDs/FWDs
+    xg_per_90 = safe_numeric(df.get('expected_goals_per_90', 0))
+    xa_per_90 = safe_numeric(df.get('expected_assists_per_90', 0))
+    xgi_factor = (xg_per_90 + xa_per_90).clip(0, 1.5) * 2.0
     
-    # Normalize value
-    df['value_raw'] = df[ep_col] / df['now_cost'].clip(lower=4)
-    v_max = df['value_raw'].max()
-    df['value_norm'] = (df['value_raw'] / max(v_max, 0.1)) * 10
+    # ── 2. ROI (Value Added Per Million) ──
+    # VAPM = (Points - 2) / Cost. We use simple xP/Cost as proxy.
+    df['roi'] = (safe_numeric(df[ep_col]) / df['now_cost'].clip(lower=4)).round(2)
     
-    # Minutes reliability
-    df['mins_norm'] = (df['minutes'].clip(upper=2000) / 2000) * 10
+    # ── 3. Availability & Risk ──
+    # Status Penalty
+    status_map = {'i': -10, 's': -8, 'd': -3, 'u': -5, 'n': -5}
+    status_penalty = df['status'].map(status_map).fillna(0)
     
-    # Differential
-    df['diff_norm'] = (100 - df['selected_by_percent'].clip(upper=100)) / 10
+    # Chance of playing weighting (0-100 scale to 0-1)
+    cop = (safe_numeric(df.get('chance_of_playing_next_round', 100)) / 100).clip(0, 1)
     
-    # Calculate based on strategy
+    # ── 4. Tactical Weighting ──
+    # Base Raw Points (xP + Form)
+    raw_points = (safe_numeric(df[ep_col]) * 0.7 + safe_numeric(df['form']) * 0.3)
+    
+    # Apply Strategy weights
     if strategy == 'Maximum Points':
-        df['transfer_score'] = df['ep_norm'] * 0.55 + df['form_norm'] * 0.25 + df['mins_norm'] * 0.20
+        # Focus on absolute ceiling
+        base_score = raw_points * 1.5 + xgi_factor + cbit_factor
     elif strategy == 'Differential':
-        df['transfer_score'] = df['ep_norm'] * 0.35 + df['diff_norm'] * 0.35 + df['form_norm'] * 0.15 + df['mins_norm'] * 0.15
+        # Focus on ownership upside
+        diff_bonus = (100 - df['selected_by_percent'].clip(upper=100)) / 20
+        base_score = raw_points + diff_bonus + xgi_factor * 0.5
     elif strategy == 'Value':
-        df['transfer_score'] = df['value_norm'] * 0.45 + df['ep_norm'] * 0.30 + df['mins_norm'] * 0.25
+        # Focus on ROI
+        base_score = df['roi'] * 15 + raw_points * 0.5
     else:  # Balanced
-        df['transfer_score'] = df['ep_norm'] * 0.35 + df['form_norm'] * 0.20 + df['value_norm'] * 0.20 + df['mins_norm'] * 0.15 + df['diff_norm'] * 0.10
+        base_score = raw_points + df['roi'] * 5 + xgi_factor * 0.5 + cbit_factor * 0.5
     
-    # Scale to 0-10
-    ts_min = df['transfer_score'].min()
-    ts_max = df['transfer_score'].max()
-    ts_range = max(ts_max - ts_min, 0.1)
-    df['transfer_score'] = ((df['transfer_score'] - ts_min) / ts_range * 10).round(1)
+    # Final adjustment: apply availability and status
+    df['transfer_score'] = (base_score * cop + status_penalty).round(1)
 
 
 def render_team_value_tracker(current_squad_df, bank):
@@ -302,7 +314,7 @@ def render_transfer_recommendations(current_squad_df, available_df, ep_col):
     if not current_squad_df.empty:
         st.markdown("**Recommended OUT** (lowest score in your squad)", unsafe_allow_html=True)
         out_candidates = current_squad_df.nsmallest(5, 'transfer_score')
-        out_display = out_candidates[['web_name', 'team_name', 'position', 'now_cost', 'poisson_ep', 'fpl_ep', 'consensus_ep', 'form', 'transfer_score']].copy()
+        out_display = out_candidates[['web_name', 'team_name', 'position', 'now_cost', 'poisson_ep', 'ep_next_num', 'consensus_ep', 'form', 'transfer_score']].copy()
         out_display.columns = ['Player', 'Team', 'Pos', 'Price', 'Poisson xP', 'FPL xP', get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])), 'Form', 'Score']
         st.dataframe(style_df_with_injuries(out_display), hide_index=True, use_container_width=True)
         
@@ -502,7 +514,7 @@ def render_position_recommendations(available_df, ep_col):
         pos_df = available_df[available_df['position'] == pos].nlargest(5, 'transfer_score')
         if not pos_df.empty:
             st.markdown(f"**{pos} Recommendations**")
-            display_df = pos_df[['web_name', 'team_name', 'now_cost', 'poisson_ep', 'fpl_ep', 'consensus_ep', 'form', 'selected_by_percent', 'transfer_score']].copy()
+            display_df = pos_df[['web_name', 'team_name', 'now_cost', 'poisson_ep', 'ep_next_num', 'consensus_ep', 'form', 'selected_by_percent', 'transfer_score']].copy()
             display_df.columns = ['Player', 'Team', 'Price', 'Poisson xP', 'FPL xP', get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])), 'Form', 'Owned%', 'Score']
             st.dataframe(style_df_with_injuries(display_df), hide_index=True, use_container_width=True)
 
@@ -511,7 +523,7 @@ def render_top_picks(available_df, ep_col):
     """Render top 10 overall picks."""
     st.markdown('<p class="section-title">Top 10 Overall Picks</p>', unsafe_allow_html=True)
     top_10 = available_df.nlargest(10, 'transfer_score')
-    top_display = top_10[['web_name', 'team_name', 'position', 'now_cost', 'poisson_ep', 'fpl_ep', 'consensus_ep', 'form', 'selected_by_percent', 'transfer_score']].copy()
+    top_display = top_10[['web_name', 'team_name', 'position', 'now_cost', 'poisson_ep', 'ep_next_num', 'consensus_ep', 'form', 'selected_by_percent', 'transfer_score']].copy()
     top_display.columns = ['Player', 'Team', 'Pos', 'Price', 'Poisson xP', 'FPL xP', get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])), 'Form', 'Owned%', 'Score']
     st.dataframe(style_df_with_injuries(top_display), hide_index=True, use_container_width=True)
 

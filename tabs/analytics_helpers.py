@@ -265,7 +265,7 @@ def render_cbit_analysis(players_df: pd.DataFrame):
     with st.expander("Metrics & Formulas"):
         st.markdown('''
         <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;font-size:0.85rem;color:#1d1d1f;">
-            <strong>CBIT (Clearances, Blocks, Interceptions, Tackles) Formula:</strong> <code>Score = (AA90 × 0.4 + P(CBIT) × 5 + Floor × 0.2 + DTT × 0.1)</code> | AA90: Active Actions per 90m
+            <strong>CBIT (Clearances, Blocks, Interceptions, Tackles) Formula:</strong> <code>Score = (P(CBIT) × 4 + Floor × 0.3 + Starts% × 1.5 + MatchupBonus)</code> | P(CBIT): Poisson prob of 10+ actions (DEF).
         </div>
         ''', unsafe_allow_html=True)
 
@@ -312,8 +312,8 @@ def render_cbit_analysis(players_df: pd.DataFrame):
             df['prob_display'] = df.apply(lambda r: format_with_rank(f"{r['cbit_prob']:.0%}", r['prob_rank']), axis=1)
 
             team_col = 'team_name' if 'team_name' in df.columns else 'team'
-            display_df = df[['web_name', team_col, 'now_cost', 'aa90_display', 'prob_display', 'cbit_floor', 'cbit_dtt', 'score_display', 'minutes']].copy()
-            display_df.columns = ['Player', 'Team', 'Price', 'AA90', 'P(CBIT)', 'Floor', 'DTT', 'Score', 'minutes']
+            display_df = df[['web_name', team_col, 'now_cost', 'aa90_display', 'prob_display', 'cbit_floor', 'cbit_dtt', 'cbit_matchup', 'score_display', 'minutes']].copy()
+            display_df.columns = ['Player', 'Team', 'Price', 'AA90', 'P(CBIT)', 'Floor', 'DTT', 'Matchup', 'Score', 'minutes']
 
             c_sort_mapping = {"Score": "cbit_score", "AA90": "cbit_aa90", "P(CBIT)": "cbit_prob", "Price": "now_cost"}
             c_asc = (c_sort == "Price")

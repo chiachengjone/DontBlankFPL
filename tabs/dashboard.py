@@ -136,15 +136,14 @@ def render_dashboard_tab(processor, players_df: pd.DataFrame):
             avg_ep = safe_numeric(players_df.get('expected_points', players_df.get('ep_next', pd.Series([0] * len(players_df))))).mean()
             st.metric("Avg xP (all)", f"{avg_ep:.2f}")
 
-    # ── Squad Performance ──
-    render_squad_performance(processor, players_df, current_gw, team_id)
-
     # ── Top Picks ──
     render_top_picks_summary(players_df)
 
     # ── Captaincy Quick Pick ──
     render_captain_quick_pick(players_df)
 
+    # ── Squad Performance ──
+    render_squad_performance(processor, players_df, current_gw, team_id)
 
     # ── Fixture Swings ──
     render_fixture_swings(processor)

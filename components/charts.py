@@ -9,13 +9,15 @@ from config import POSITION_COLORS
 from utils.helpers import safe_numeric
 
 
-def create_ep_ownership_scatter(
+def create_strategy_scatter(
     players_df: pd.DataFrame, 
+    x_col: str = 'selected_by_percent',
+    x_label: str = 'Ownership %',
     position_filter: str = "All", 
     search_player: str = "",
-    ep_label: str = "Model xP"
+    y_label: str = "Model xP"
 ) -> Optional[go.Figure]:
-    """Create interactive Expected Points vs Ownership scatter plot - dark theme."""
+    """Create interactive xP vs dynamic metric scatter plot - dark theme."""
     df = players_df.copy()
     
     if position_filter != "All":
@@ -24,10 +26,10 @@ def create_ep_ownership_scatter(
     df['minutes'] = safe_numeric(df.get('minutes', pd.Series([0]*len(df))))
     df = df[df['minutes'] > 0]
     
-    df['selected_by_percent'] = safe_numeric(df.get('selected_by_percent', pd.Series([0]*len(df))))
+    # Ensure X column is numeric
+    df[x_col] = safe_numeric(df.get(x_col, pd.Series([0]*len(df))))
     
     # Use consensus_ep (Model xP) as primary - the weighted blend of ML/Poisson/FPL
-    # Fallback chain: consensus_ep → expected_points_poisson → ep_next_num
     if 'consensus_ep' in df.columns:
         df['ep'] = safe_numeric(df['consensus_ep'])
     elif 'expected_points_poisson' in df.columns and df['expected_points_poisson'].notna().any():
@@ -44,7 +46,7 @@ def create_ep_ownership_scatter(
     if df.empty or len(df) < 3:
         return None
     
-    avg_own = df['selected_by_percent'].mean()
+    avg_x = df[x_col].mean()
     avg_ep = df['ep'].mean()
     
     # Determine if we're searching for a specific player
@@ -70,7 +72,7 @@ def create_ep_ownership_scatter(
             # Non-matching players - greyed out
             if not pos_non_match.empty:
                 fig.add_trace(go.Scatter(
-                    x=pos_non_match['selected_by_percent'],
+                    x=pos_non_match[x_col],
                     y=pos_non_match['ep'],
                     mode='markers',
                     marker=dict(size=6, color='#c7c7cc', opacity=0.2),
@@ -83,7 +85,7 @@ def create_ep_ownership_scatter(
             # Matching players - full color with labels
             if not pos_match.empty:
                 fig.add_trace(go.Scatter(
-                    x=pos_match['selected_by_percent'],
+                    x=pos_match[x_col],
                     y=pos_match['ep'],
                     mode='markers+text',
                     marker=dict(
@@ -98,7 +100,7 @@ def create_ep_ownership_scatter(
                     name=pos,
                     legendgroup=pos,
                     showlegend=True,
-                    hovertemplate='<b>%{text}</b><br>Ownership: %{x:.1f}%<br>EP: %{y:.1f}<extra></extra>'
+                    hovertemplate=f'<b>%{{text}}</b><br>{x_label}: %{{x:.1f}}<br>EP: %{{y:.1f}}<extra></extra>'
                 ))
     else:
         # Normal view - show top players per position with labels
@@ -114,21 +116,21 @@ def create_ep_ownership_scatter(
             non_top = pos_df[~pos_df['is_top']]
             if not non_top.empty:
                 fig.add_trace(go.Scatter(
-                    x=non_top['selected_by_percent'],
+                    x=non_top[x_col],
                     y=non_top['ep'],
                     mode='markers',
                     marker=dict(size=non_top['now_cost'] * 1.2, color=POSITION_COLORS[pos], opacity=0.5),
                     name=pos,
                     legendgroup=pos,
                     showlegend=False,
-                    hovertemplate='<b>%{customdata}</b><br>Ownership: %{x:.1f}%<br>xP: %{y:.1f}<extra></extra>',
+                    hovertemplate=f'<b>%{{customdata}}</b><br>{x_label}: %{{x:.1f}}<br>xP: %{{y:.1f}}<extra></extra>',
                     customdata=non_top['web_name']
                 ))
             
             top = pos_df[pos_df['is_top']]
             if not top.empty:
                 fig.add_trace(go.Scatter(
-                    x=top['selected_by_percent'],
+                    x=top[x_col],
                     y=top['ep'],
                     mode='markers+text',
                     marker=dict(size=top['now_cost'] * 1.5, color=POSITION_COLORS[pos], opacity=1.0),
@@ -138,7 +140,7 @@ def create_ep_ownership_scatter(
                     name=pos,
                     legendgroup=pos,
                     showlegend=True,
-                    hovertemplate='<b>%{text}</b><br>Ownership: %{x:.1f}%<br>EP: %{y:.1f}<extra></extra>'
+                    hovertemplate=f'<b>%{{text}}</b><br>{x_label}: %{{x:.1f}}<br>EP: %{{y:.1f}}<extra></extra>'
                 ))
     
     # Ensure all positions appear in legend
@@ -152,9 +154,9 @@ def create_ep_ownership_scatter(
             ))
     
     fig.add_hline(y=avg_ep, line_dash="dash", line_color="rgba(0,0,0,0.1)", 
-                  annotation_text="Avg EP", annotation_font_color="#888")
-    fig.add_vline(x=avg_own, line_dash="dash", line_color="rgba(0,0,0,0.1)", 
-                  annotation_text="Avg Own%", annotation_font_color="#888")
+                   annotation_text="Avg EP", annotation_font_color="#888")
+    fig.add_vline(x=avg_x, line_dash="dash", line_color="rgba(0,0,0,0.1)", 
+                   annotation_text=f"Avg {x_label}", annotation_font_color="#888")
     
     fig.update_layout(
         height=500,
@@ -162,8 +164,8 @@ def create_ep_ownership_scatter(
         paper_bgcolor='#ffffff',
         plot_bgcolor='#ffffff',
         font=dict(family='Inter, sans-serif', color='#86868b', size=11),
-        xaxis_title='Ownership %',
-        yaxis_title=ep_label,
+        xaxis_title=x_label,
+        yaxis_title=y_label,
         xaxis=dict(gridcolor='#e5e5ea', zerolinecolor='#e5e5ea'),
         yaxis=dict(gridcolor='#e5e5ea', zerolinecolor='#e5e5ea'),
         legend=dict(

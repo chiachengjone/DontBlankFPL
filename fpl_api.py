@@ -19,6 +19,17 @@ from config import (
 
 logger = logging.getLogger(__name__)
 
+
+def safe_numeric(series, default=0):
+    """Safely convert series or scalar to numeric, replacing NaN with default."""
+    try:
+        if isinstance(series, (pd.Series, pd.Index, np.ndarray)):
+            return pd.to_numeric(series, errors='coerce').fillna(default)
+        val = pd.to_numeric(series, errors='coerce')
+        return val if pd.notnull(val) else default
+    except Exception:
+        return default
+
 # Maximum number of entries kept in the in-memory cache.
 # Each entry is keyed by endpoint/param combo; this prevents unbounded growth
 # when many unique player/team lookups are performed.
@@ -367,36 +378,39 @@ class FPLDataProcessor:
         threshold_map = {'GKP': 12, 'DEF': 10, 'MID': 12, 'FWD': 12}
         df['cbit_threshold'] = df['position'].map(threshold_map).fillna(12).astype(int)
         
-        # Games played
-        df['_games'] = (df['minutes'].fillna(0) / 90).clip(lower=0.1)
+        # Games played and reliability
+        minutes = safe_numeric(df.get('minutes', 0))
+        total_gws = max(df.get('starts', pd.Series([1]*len(df))).max() + df.get('subs_bench', pd.Series([0]*len(df))).max(), 1)
         
-        # ── Estimate Average Actions per 90 (AA90) ──
-        # FPL API doesn't provide tackles/interceptions/clearances/blocks directly
-        # Use position-based baseline + clean sheet rate as defensive solidity proxy
-        cs_rate = (df['clean_sheets'].fillna(0) / df['_games']).clip(0, 1)
+        # Starts % and Minutes per game are better proxies for "active reliability"
+        starts_pct = safe_numeric(df.get('starts_pct', 0.8)).clip(0, 1)
+        mins_per_game = safe_numeric(df.get('minutes_per_game', 70)).clip(20, 90)
         
-        # Base defensive action rates by position (empirical estimates)
+        # Base defensive action rates by position
         base_aa90 = {
-            'GKP': 4.0,   # GKs get fewer field actions but more saves
-            'DEF': 12.0,  # CBs average ~12 actions, WBs slightly less
-            'MID': 7.0,   # CDMs higher, CAMs lower
-            'FWD': 3.0,   # Minimal defensive work
+            'GKP': 4.5,   # Saves + basic clearances
+            'DEF': 12.5,  # CBs ~13-14, WBs ~10-11
+            'MID': 7.5,   # DMs ~10, AMs ~4
+            'FWD': 3.2,   # Pressing and defensive set pieces
         }
         df['_base_aa90'] = df['position'].map(base_aa90).fillna(5.0)
         
-        # Adjust by CS rate (good defenders do more defensive work in games they keep CS)
-        # Also adjust by minutes consistency (rotation = less reliable)
-        mins_consistency = (df['minutes'] / (df['_games'] * 90).clip(lower=1)).clip(0, 1)
+        # Adjust by Clean Sheet propensity (defensive solidity proxy)
+        # Using historical CS rate or Poisson P(CS)
+        if 'poisson_p_cs' in df.columns:
+            p_cs = safe_numeric(df['poisson_p_cs']).clip(0, 0.7)
+        else:
+            historical_cs = (safe_numeric(df.get('clean_sheets', 0)) / (minutes / 90).clip(lower=1)).clip(0, 1)
+            p_cs = historical_cs.clip(0, 0.6)
+
+        # Scaling: High P(CS) (+20% actions), Low P(CS) (-10% actions)
+        cs_adjustment = 0.9 + (p_cs * 0.4)
         
-        # For DEF: high CS rate correlates with solid defensive actions
-        # Scaling: 0.5 CS rate → +20% actions, 0.0 CS rate → -10%
-        cs_adjustment = np.where(
-            df['position'].isin(['GKP', 'DEF']),
-            1.0 + (cs_rate - 0.3) * 0.5,  # 30% CS is baseline
-            1.0  # No adjustment for MID/FWD
-        )
+        # Rotation Risk Penalty
+        # If a player starts < 60% of games, their per-90 actions are less likely to hit the threshold in a full match
+        rotation_penalty = np.where(starts_pct < 0.6, 0.85, 1.0)
         
-        df['cbit_aa90'] = (df['_base_aa90'] * cs_adjustment * mins_consistency).round(1)
+        df['cbit_aa90'] = (df['_base_aa90'] * cs_adjustment * rotation_penalty).round(1)
         
         # ── Distance to Threshold (DTT) ──
         # Positive = exceeds threshold, Negative = below threshold
@@ -416,15 +430,16 @@ class FPLDataProcessor:
         
         # ── Hit Rate (Season %) ──
         # Combination of probability and minutes consistency
+        # Minutes consistency = how reliably the player gets playing time
+        mins_consistency = (mins_per_game / 90).clip(0, 1)
         df['cbit_hit_rate'] = (df['cbit_prob'] * mins_consistency).round(2)
         
         # ── Clean Sheet Probability (xCS) ──
-        # Prefer Poisson p_cs from fixture-based calculation, fallback to CS rate
+        # Prefer Poisson p_cs from fixture-based calculation, fallback to historical CS rate
         if 'poisson_p_cs' in df.columns:
-            p_cs = pd.to_numeric(df['poisson_p_cs'], errors='coerce').fillna(cs_rate)
-            df['_xcs'] = p_cs.clip(0, 0.7)  # Cap at 70%
+            df['_xcs'] = safe_numeric(df['poisson_p_cs']).clip(0, 0.7)  # Cap at 70%
         else:
-            df['_xcs'] = cs_rate.clip(0, 0.6)  # Cap at 60%
+            df['_xcs'] = p_cs.clip(0, 0.6)  # Cap at 60%
         
         # ── Defensive Floor Score ──
         # xP_floor = xCS × 4pts + P(CBIT) × 2pts
@@ -450,10 +465,10 @@ class FPLDataProcessor:
         # ── Composite CBIT Score (for display) ──
         # Weighted: 40% prob, 30% floor, 20% consistency, 10% matchup bonus
         df['cbit_score'] = (
-            df['cbit_prob'] * 0.4 * 10 +
+            df['cbit_prob'] * 4.0 +
             df['cbit_floor'] * 0.3 +
-            df['cbit_hit_rate'] * 0.2 * 10 +
-            (df['cbit_matchup'] - 1) * 0.1 * 5
+            starts_pct * 1.5 +
+            (df['cbit_matchup'] - 1.0).clip(-0.5, 0.5) * 2.0
         ).round(2)
         
         # ── Legacy compatibility ──
