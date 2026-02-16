@@ -206,7 +206,7 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
     st.markdown("---")
     
     # ── Generate Button ──
-    if st.button("Generate Wildcard Squad", type="primary", use_container_width=True):
+    if st.button("Generate Wildcard Squad", type="primary", width="stretch"):
         with st.spinner(f"Optimizing squad for next {horizon} GWs..."):
             squad = generate_wildcard_squad(players_df, formation, strategy, budget, horizon)
             
@@ -293,7 +293,7 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
                     'EO%': '{:.1f}%'
                 }),
                 hide_index=True,
-                use_container_width=True,
+                width="stretch",
                 height=min(200, len(pos_players) * 40 + 40)
             )
         
@@ -338,6 +338,6 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
                     'EO%': '{:.1f}%'
                 }),
                 hide_index=True,
-                use_container_width=True,
+                width="stretch",
                 height=600
             )

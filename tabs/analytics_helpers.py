@@ -95,7 +95,7 @@ def render_player_table(df: pd.DataFrame, horizon: int = 1):
     renamed = renamed.loc[:, ~renamed.columns.duplicated()]
 
     st.markdown(f'<p class="section-title">Players ({len(df)} found)</p>', unsafe_allow_html=True)
-    st.dataframe(style_df_with_injuries(renamed), hide_index=True, use_container_width=True, height=600)
+    st.dataframe(style_df_with_injuries(renamed), hide_index=True, width="stretch", height=600)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -127,7 +127,7 @@ def render_points_distribution(players_df: pd.DataFrame, con_ep_label: str):
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
         margin=dict(l=50, r=30, t=30, b=50),
     )
-    st.plotly_chart(fig, use_container_width=True, key='analytics_ep_distribution')
+    st.plotly_chart(fig, width="stretch", key='analytics_ep_distribution')
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -223,7 +223,7 @@ def render_value_by_position(players_df: pd.DataFrame, con_ep_label: str):
 
     st.dataframe(
         style_df_with_injuries(val_display, players_df),
-        hide_index=True, use_container_width=True, height=400,
+        hide_index=True, width="stretch", height=400,
     )
 
     # xP/m by position chart
@@ -253,7 +253,7 @@ def render_value_by_position(players_df: pd.DataFrame, con_ep_label: str):
         margin=dict(l=50, r=30, t=40, b=80),
         barmode='group',
     )
-    st.plotly_chart(fig, use_container_width=True, key='analytics_eppm_chart_v2')
+    st.plotly_chart(fig, width="stretch", key='analytics_eppm_chart_v2')
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -272,7 +272,7 @@ def render_cbit_analysis(players_df: pd.DataFrame):
 
     fig = create_cbit_chart(players_df)
     if fig:
-        st.plotly_chart(fig, use_container_width=True, key='analytics_cbit_chart')
+        st.plotly_chart(fig, width="stretch", key='analytics_cbit_chart')
 
     df = players_df.copy()
     cbit_cols = ['cbit_aa90', 'cbit_prob', 'cbit_floor', 'cbit_dtt', 'cbit_matchup', 'cbit_score', 'minutes']
@@ -325,7 +325,7 @@ def render_cbit_analysis(players_df: pd.DataFrame):
             display_df['Floor'] = display_df['Floor'].apply(lambda x: f"{x:.1f}")
             display_df = display_df.drop(columns=['minutes'])
 
-            st.dataframe(style_df_with_injuries(display_df, players_df), hide_index=True, use_container_width=True, height=400, key='cbit_table_final')
+            st.dataframe(style_df_with_injuries(display_df, players_df), hide_index=True, width="stretch", height=400, key='cbit_table_final')
         else:
             st.info("No players match the CBIT filter criteria")
     else:
@@ -428,7 +428,7 @@ def render_advanced_metrics(players_df: pd.DataFrame, con_ep_label: str):
             fig.add_annotation(x=scatter_df['threat_momentum'].quantile(0.9), y=scatter_df['matchup_quality'].quantile(0.1),
                                text="High Threat", showarrow=False, font=dict(color='#f59e0b', size=9))
 
-            st.plotly_chart(fig, use_container_width=True, key='analytics_momentum_scatter')
+            st.plotly_chart(fig, width="stretch", key='analytics_momentum_scatter')
 
             if is_searching and not matched_df.empty:
                 st.markdown("**Player Details**")
@@ -553,7 +553,7 @@ def render_advanced_metrics(players_df: pd.DataFrame, con_ep_label: str):
                 if c in display_eng.columns and pd.api.types.is_numeric_dtype(display_eng[c]):
                     display_eng[c] = display_eng[c].round(2)
 
-            st.dataframe(style_df_with_injuries(display_eng), hide_index=True, use_container_width=True, height=400)
+            st.dataframe(style_df_with_injuries(display_eng), hide_index=True, width="stretch", height=400)
         else:
             st.info("No engineered differentials found")
 
@@ -760,7 +760,7 @@ def render_expected_vs_actual(players_df: pd.DataFrame, con_ep_label: str):
                            showarrow=False, font=dict(color='#22c55e', size=10))
         fig.add_annotation(x=max_val * 0.85, y=max_val * 0.15, text="Underperforming",
                            showarrow=False, font=dict(color='#ef4444', size=10))
-        st.plotly_chart(fig, use_container_width=True, key='analytics_expected_vs_actual')
+        st.plotly_chart(fig, width="stretch", key='analytics_expected_vs_actual')
 
     if 'threat_momentum' not in df.columns:
         df['threat_momentum'] = 0.0
@@ -779,7 +779,7 @@ def render_expected_vs_actual(players_df: pd.DataFrame, con_ep_label: str):
         under['xPts'] = under['xPts'].round(0).astype(int)
         under['Diff'] = under['Diff'].round(0).astype(int)
         under['Threat'] = under['Threat'].round(2)
-        st.dataframe(style_df_with_injuries(under), hide_index=True, use_container_width=True)
+        st.dataframe(style_df_with_injuries(under), hide_index=True, width="stretch")
 
     with xva2:
         st.markdown("**Overperformers** (may regress)")
@@ -789,7 +789,7 @@ def render_expected_vs_actual(players_df: pd.DataFrame, con_ep_label: str):
         over['xPts'] = over['xPts'].round(0).astype(int)
         over['Diff'] = over['Diff'].round(0).astype(int)
         over['Threat'] = over['Threat'].round(2)
-        st.dataframe(style_df_with_injuries(over), hide_index=True, use_container_width=True)
+        st.dataframe(style_df_with_injuries(over), hide_index=True, width="stretch")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -821,7 +821,7 @@ def render_set_and_forget(players_df: pd.DataFrame, con_ep_label: str):
             pos_df = df[df['position'] == pos].nlargest(3, 'sf_score')[['web_name', 'now_cost', 'sf_score']]
             pos_df.columns = ['Player', 'Price', 'S&F Score']
             pos_df['S&F Score'] = pos_df['S&F Score'].round(1)
-            st.dataframe(style_df_with_injuries(pos_df), hide_index=True, use_container_width=True)
+            st.dataframe(style_df_with_injuries(pos_df), hide_index=True, width="stretch")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -835,6 +835,6 @@ def render_ownership_trends(players_df: pd.DataFrame):
 
     fig = create_ownership_trends_chart(players_df, limit=20)
     if fig:
-        st.plotly_chart(fig, use_container_width=True, key='analytics_ownership_trends')
+        st.plotly_chart(fig, width="stretch", key='analytics_ownership_trends')
     else:
         st.info("Transfer data unavailable")

@@ -88,7 +88,7 @@ def render_monte_carlo_tab(processor, players_df: pd.DataFrame):
                     key="mc_player_select",
                 )
 
-                if st.button("Simulate Player", type="primary", use_container_width=True):
+                if st.button("Simulate Player", type="primary", width="stretch"):
                     # Clear previous results so they don't stack
                     st.session_state.pop("mc_player_result", None)
                     st.session_state.pop("mc_player_id", None)
@@ -117,7 +117,7 @@ def render_monte_carlo_tab(processor, players_df: pd.DataFrame):
         team_id = st.session_state.get("fpl_team_id", 0)
         if team_id and team_id > 0:
             st.caption(f"Team ID: {team_id}")
-            if st.button("Simulate My Squad", use_container_width=True):
+            if st.button("Simulate My Squad", width="stretch"):
                 # Clear previous results so they don't stack
                 st.session_state.pop("mc_player_result", None)
                 st.session_state.pop("mc_player_id", None)
@@ -201,7 +201,7 @@ def render_monte_carlo_tab(processor, players_df: pd.DataFrame):
                         "Sharpe": round(res.sharpe_ratio, 2),
                     })
                 contrib_df = pd.DataFrame(contrib_data).sort_values("Mean Pts", ascending=False)
-                st.dataframe(style_df_with_injuries(contrib_df, players_df), use_container_width=True, hide_index=True)
+                st.dataframe(style_df_with_injuries(contrib_df, players_df), width="stretch", hide_index=True)
 
             st.markdown("---")
 
@@ -256,7 +256,7 @@ def render_monte_carlo_tab(processor, players_df: pd.DataFrame):
                 plot_bgcolor="#ffffff",
                 font=dict(family="Inter, sans-serif", color="#86868b", size=11),
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
             # Risk metrics
             st.markdown("**Risk Analysis**")

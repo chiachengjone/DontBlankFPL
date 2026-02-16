@@ -77,15 +77,28 @@ class MonteCarloEngine:
         df = self.players_df.copy()
         
         # Ensure numeric columns
-        df['form'] = pd.to_numeric(df.get('form', 2), errors='coerce').fillna(2.0)
-        df['ep_next'] = pd.to_numeric(df.get('expected_points', df.get('ep_next', 2)), errors='coerce').fillna(2.0)
-        df['total_points'] = pd.to_numeric(df.get('total_points', 0), errors='coerce').fillna(0)
-        df['minutes'] = pd.to_numeric(df.get('minutes', 0), errors='coerce').fillna(0)
+        def get_col(col_name, default_val):
+            if col_name in df.columns:
+                return pd.to_numeric(df[col_name], errors='coerce').fillna(default_val)
+            return pd.Series(default_val, index=df.index)
+
+        df['form'] = get_col('form', 2.0)
+        
+        ep_source = 'expected_points' if 'expected_points' in df.columns else 'ep_next'
+        df['ep_next'] = get_col(ep_source, 2.0)
+        
+        df['total_points'] = get_col('total_points', 0)
+        df['minutes'] = get_col('minutes', 0)
+        df['starts'] = get_col('starts', 0)
         
         # Calculate historical variance (for std estimation)
+        # Avoid division by zero warning
+        starts = df['starts']
+        points = df['total_points']
+        
         df['points_per_game'] = np.where(
-            df['starts'] > 0,
-            df['total_points'] / df['starts'],
+            starts > 0,
+            points / starts,
             0
         )
         
@@ -98,7 +111,8 @@ class MonteCarloEngine:
             (90 - df['minutes'].clip(0, 90*38) / 38) / 90 * 2  # Rotation adds variance
         ).clip(lower=0.5)
         
-        self.distributions = df[['id', 'ep_next', 'estimated_std', 'form', 'minutes']].to_dict('records')
+        # Optimize for O(1) lookup: dict of dicts keyed by id
+        self.distributions = df[['id', 'ep_next', 'estimated_std', 'form', 'minutes']].set_index('id').to_dict('index')
     
     def _simulate_player_gamma(self, player_id: int, ep: float, std: float) -> np.ndarray:
         """
@@ -217,7 +231,8 @@ class MonteCarloEngine:
             SimulationResult with statistics
         """
         # Get player data
-        player_data = next((p for p in self.distributions if p['id'] == player_id), None)
+        # Get player data - O(1) lookup
+        player_data = self.distributions.get(player_id)
         
         if player_data is None:
             # Default values
@@ -392,15 +407,14 @@ class MonteCarloEngine:
         for param_name, (min_val, max_val) in param_ranges.items():
             for val in np.linspace(min_val, max_val, n_steps):
                 # Update parameter temporarily
-                original_data = next((p for p in self.distributions if p['id'] == player_id), None)
+                original_data = self.distributions.get(player_id)
                 
                 if original_data:
                     temp_data = original_data.copy()
                     temp_data[param_name] = val
                     
-                    # Replace in distributions
-                    idx = next(i for i, p in enumerate(self.distributions) if p['id'] == player_id)
-                    self.distributions[idx] = temp_data
+                    # Replace in distributions - O(1) update
+                    self.distributions[player_id] = temp_data
                     
                     # Simulate
                     result = self.simulate_player(player_id, n_gameweeks=1, method='mixed')
@@ -414,7 +428,7 @@ class MonteCarloEngine:
                     })
                     
                     # Restore original
-                    self.distributions[idx] = original_data
+                    self.distributions[player_id] = original_data
         
         return pd.DataFrame(results)
     

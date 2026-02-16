@@ -297,7 +297,7 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
                         margin=dict(l=10, r=40, t=10, b=20),
                         bargap=0.3,
                     )
-                    st.plotly_chart(fig, use_container_width=True, key='ml_player_factors')
+                    st.plotly_chart(fig, width="stretch", key='ml_player_factors')
                 
                 st.markdown("---")
         
@@ -406,7 +406,7 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
 
         st.dataframe(
             style_df_with_injuries(full_df, players_df),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             height=600,
             column_config=col_config
@@ -510,7 +510,7 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
                             xaxis_title="Importance",
                             yaxis_title="",
                         )
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, width="stretch")
                 else:
                     st.info("Run predictions to see feature importance")
         
@@ -527,7 +527,7 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
                         pos_display = pos_df[["Player", "Team", "Price", "ML xP", "vs FPL", "vs Poisson", "Certainty", poisson_label]].copy()
                         st.dataframe(
                             pos_display,
-                            use_container_width=True,
+                            width="stretch",
                             hide_index=True,
                             column_config={
                                 "Price": st.column_config.NumberColumn("Price", format="£%.1fm"),

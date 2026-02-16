@@ -141,16 +141,20 @@ def main():
     # Settings row (compact) -- Team ID + Toggles
     set_col1, set_col2, set_col3 = st.columns(3, vertical_alignment="center")
     with set_col1:
-        team_id_input = st.number_input(
-            "FPL Team ID",
-            min_value=0,
-            max_value=99_999_999,
-            value=st.session_state.fpl_team_id,
-            step=1,
-            key="header_team_id",
-            help="Enter your FPL Team ID (find it in the URL of your team page). Used by Squad Builder and Monte Carlo."
-        )
-        st.session_state.fpl_team_id = int(team_id_input)
+        with st.form("team_id_form", border=False):
+            team_id_input = st.number_input(
+                "FPL Team ID",
+                min_value=0,
+                max_value=99_999_999,
+                value=st.session_state.fpl_team_id,
+                step=1,
+                help="Enter your FPL Team ID. Used by Squad Builder and Monte Carlo."
+            )
+            submitted = st.form_submit_button("Sync Team", width="stretch")
+            if submitted:
+                st.session_state.fpl_team_id = int(team_id_input)
+                st.rerun()
+
         # Understat warning only when offline
         ustat_active = st.session_state.get('_understat_active', None)
         if ustat_active is False:

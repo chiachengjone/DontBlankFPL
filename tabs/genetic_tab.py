@@ -73,7 +73,7 @@ def render_genetic_tab(processor, players_df: pd.DataFrame):
         st.caption("• Crossover: Multi-point")
         st.caption(f"• Mutation: {mutation_rate * 100:.0f} % rate")
 
-        if st.button("Evolve Squad", type="primary", use_container_width=True):
+        if st.button("Evolve Squad", type="primary", width="stretch"):
             with st.spinner(f"Evolving for {generations} generations…"):
                 try:
                     from genetic_optimizer import create_genetic_optimizer
@@ -125,10 +125,10 @@ def render_genetic_tab(processor, players_df: pd.DataFrame):
             bench_df = squad_df[squad_df["Status"] == "Bench"].copy()
 
             st.markdown("**Starting XI**")
-            st.dataframe(style_df_with_injuries(starting_df, players_df), use_container_width=True, hide_index=True)
+            st.dataframe(style_df_with_injuries(starting_df, players_df), width="stretch", hide_index=True)
 
             st.markdown("**Bench**")
-            st.dataframe(style_df_with_injuries(bench_df, players_df), use_container_width=True, hide_index=True)
+            st.dataframe(style_df_with_injuries(bench_df, players_df), width="stretch", hide_index=True)
 
             # Convergence chart
             st.markdown("**Evolution Convergence**")
@@ -184,6 +184,6 @@ def render_genetic_tab(processor, players_df: pd.DataFrame):
                 plot_bgcolor="#ffffff",
                 font=dict(family="Inter, sans-serif", color="#86868b", size=11),
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
         else:
             st.info("Configure the algorithm on the left and click **Evolve Squad** to see results here.")

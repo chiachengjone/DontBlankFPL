@@ -143,16 +143,20 @@ def render_dashboard_tab(processor, players_df: pd.DataFrame):
     render_captain_quick_pick(players_df)
 
     # ── Squad Performance ──
-    render_squad_performance(processor, players_df, current_gw, team_id)
+    with st.container():
+        render_squad_performance(processor, players_df, current_gw, team_id)
 
     # ── Fixture Swings ──
-    render_fixture_swings(processor)
+    with st.container():
+        render_fixture_swings(processor)
 
     # ── Ownership Breakdown ──
-    render_ownership_breakdown(players_df)
+    with st.container():
+        render_ownership_breakdown(players_df)
 
     # ── Transfer Trends ──
-    render_transfer_trends(players_df)
+    with st.container():
+        render_transfer_trends(players_df)
 
 
 # ── Section Renderers ──
@@ -239,7 +243,7 @@ def render_squad_performance(processor, players_df, current_gw, team_id):
             yaxis=dict(gridcolor='#e5e5ea'),
             margin=dict(l=120, r=50, t=20, b=40),
         )
-        st.plotly_chart(fig, use_container_width=True, key='dash_squad_perf')
+        st.plotly_chart(fig, width="stretch", key='dash_squad_perf')
 
     except Exception:
         pass
@@ -397,14 +401,14 @@ def render_fixture_swings(processor):
             improving = swing_df.nlargest(DASHBOARD_FIXTURE_SWINGS, 'Swing')
             improving_display = improving.copy()
             improving_display['Swing'] = improving_display['Swing'].apply(lambda x: f"+{x:.2f}" if x > 0 else f"{x:.2f}")
-            st.dataframe(improving_display, hide_index=True, use_container_width=True)
+            st.dataframe(improving_display, hide_index=True, width="stretch")
 
         with sw2:
             st.markdown("**Getting Harder**")
             declining = swing_df.nsmallest(DASHBOARD_FIXTURE_SWINGS, 'Swing')
             declining_display = declining.copy()
             declining_display['Swing'] = declining_display['Swing'].apply(lambda x: f"{x:.2f}")
-            st.dataframe(declining_display, hide_index=True, use_container_width=True)
+            st.dataframe(declining_display, hide_index=True, width="stretch")
 
         # Bar chart
         sorted_swing = swing_df.sort_values('Swing', ascending=True)
@@ -424,7 +428,7 @@ def render_fixture_swings(processor):
             yaxis=dict(title=''),
             margin=dict(l=60, r=60, t=20, b=40),
         ))
-        st.plotly_chart(fig, use_container_width=True, key='dashboard_fixture_swings_chart')
+        st.plotly_chart(fig, width="stretch", key='dashboard_fixture_swings_chart')
 
     except Exception as e:
         st.info(f"Fixture swing data unavailable: {e}")
@@ -459,7 +463,7 @@ def render_ownership_breakdown(players_df: pd.DataFrame):
             textfont=dict(color='#fff'),
         ))
         fig.update_layout(**get_chart_layout(height=280, showlegend=False, margin=dict(l=20, r=20, t=20, b=20)))
-        st.plotly_chart(fig, use_container_width=True, key='dashboard_ownership_pie')
+        st.plotly_chart(fig, width="stretch", key='dashboard_ownership_pie')
 
     with o2:
         st.markdown("**Tier Definitions**")
@@ -492,14 +496,14 @@ def render_transfer_trends(players_df: pd.DataFrame):
         risers = df.nlargest(8, 'transfers_in_event')[['web_name', 'team_name', 'now_cost', 'transfers_in_event']].copy()
         risers.columns = ['Player', 'Team', 'Price', 'Transfers In']
         risers['Transfers In'] = risers['Transfers In'].apply(lambda x: f"+{int(x):,}")
-        st.dataframe(style_df_with_injuries(risers), hide_index=True, use_container_width=True)
+        st.dataframe(style_df_with_injuries(risers), hide_index=True, width="stretch")
 
     with t2:
         st.markdown("**Most Transferred Out**")
         fallers = df.nlargest(8, 'transfers_out_event')[['web_name', 'team_name', 'now_cost', 'transfers_out_event']].copy()
         fallers.columns = ['Player', 'Team', 'Price', 'Transfers Out']
         fallers['Transfers Out'] = fallers['Transfers Out'].apply(lambda x: f"-{int(x):,}")
-        st.dataframe(style_df_with_injuries(fallers), hide_index=True, use_container_width=True)
+        st.dataframe(style_df_with_injuries(fallers), hide_index=True, width="stretch")
 
 
 # ── Internal Helpers ──

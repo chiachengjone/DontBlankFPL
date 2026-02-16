@@ -167,12 +167,18 @@ def render_history_tab(processor, players_df: pd.DataFrame, fetcher):
     fig.update_yaxes(title_text='Points', gridcolor='#e5e5ea', secondary_y=False)
     fig.update_yaxes(title_text='Rank', gridcolor='#e5e5ea', secondary_y=True, autorange='reversed')
     
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
     
     st.markdown("---")
     
     # ── Team Evolution (Set & Forget Comparison) ──
-    render_team_evolution(team_id, gw_history, fetcher, players_df)
+    st.markdown("### Team Evolution Analysis")
+    st.caption("Compare your actual performance vs 'frozen' versions of your squad (Set & Forget)")
+    
+    if st.button("Run Evolution Analysis", type="primary", width="stretch", key="run_evo_btn"):
+        render_team_evolution(team_id, gw_history, fetcher, players_df)
+    else:
+        st.info("Click to run Team Evolution analysis (analyzes all past gameweeks)")
     
     st.markdown("---")
     
@@ -261,12 +267,22 @@ def render_history_tab(processor, players_df: pd.DataFrame, fetcher):
         return manual_data
 
     # Use session state to avoid repeated heavy API calls
-    if f"manual_transfers_{team_id}" not in st.session_state:
-        with st.spinner("Analyzing squad history..."):
-            st.session_state[f"manual_transfers_{team_id}"] = get_manual_transfers(team_id, gw_history, fetcher)
-    
-    m_data = st.session_state[f"manual_transfers_{team_id}"]
-    total_transfers = [d['total'] for d in m_data]
+    if st.button("Analyze Transfer History", type="secondary", width="stretch", key="run_transfer_btn"):
+        if f"manual_transfers_{team_id}" not in st.session_state:
+            with st.spinner("Analyzing squad history (this may take 30s)..."):
+                st.session_state[f"manual_transfers_{team_id}"] = get_manual_transfers(team_id, gw_history, fetcher)
+        
+        m_data = st.session_state.get(f"manual_transfers_{team_id}", [])
+        total_transfers = [d['total'] for d in m_data]
+    else:
+        # Show cached data if available, otherwise show nothing/button
+        if f"manual_transfers_{team_id}" in st.session_state:
+             m_data = st.session_state[f"manual_transfers_{team_id}"]
+             total_transfers = [d['total'] for d in m_data]
+        else:
+             st.info("Click above to analyze transfer history (crawls all gameweeks)")
+             m_data = [] # empty to skip chart
+             total_transfers = []
     
     fig2 = go.Figure()
     
@@ -289,7 +305,7 @@ def render_history_tab(processor, players_df: pd.DataFrame, fetcher):
         margin=dict(l=50, r=30, t=40, b=50)
     )
     
-    st.plotly_chart(fig2, use_container_width=True)
+    st.plotly_chart(fig2, width="stretch")
     
     # Transfer ROI analysis
     st.markdown("**Transfer Hit ROI**")
@@ -306,7 +322,7 @@ def render_history_tab(processor, players_df: pd.DataFrame, fetcher):
             'Worth It?': 'Yes' if pts > avg_gw_points + cost else 'No'
         } for gw, cost, pts in gws_with_hits])
         
-        st.dataframe(hit_df, hide_index=True, use_container_width=True)
+        st.dataframe(hit_df, hide_index=True, width="stretch")
         
         hits_worth_it = sum(1 for gw, cost, pts in gws_with_hits if pts > avg_gw_points + cost)
         st.caption(f"Hits worth it: {hits_worth_it}/{len(gws_with_hits)} ({hits_worth_it/len(gws_with_hits)*100:.0f}%)")
@@ -525,7 +541,7 @@ def render_team_evolution(team_id, gw_history, fetcher, players_df):
     fig.update_xaxes(title_text='Gameweek', gridcolor='#e5e5ea')
     fig.update_yaxes(title_text='Points', gridcolor='#e5e5ea')
     
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
     
     # Insights
     if not df_evo.empty:
@@ -598,7 +614,7 @@ def render_team_evolution(team_id, gw_history, fetcher, players_df):
                 overlap_data[f"{label} In"] = [get_names(trans_in)]
                 overlap_data[f"{label} Out"] = [get_names(trans_out)]
             
-            st.dataframe(pd.DataFrame(overlap_data), hide_index=True, use_container_width=True)
+            st.dataframe(pd.DataFrame(overlap_data), hide_index=True, width="stretch")
         else:
             st.info("Select squad versions above to see evolution analysis.")
 
@@ -628,7 +644,7 @@ def render_general_analysis(processor, players_df: pd.DataFrame, fetcher):
                 'EO%': '{:.1f}%'
             }),
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
             height=300
         )
         
@@ -672,7 +688,7 @@ def render_general_analysis(processor, players_df: pd.DataFrame, fetcher):
                 yaxis=dict(title='Cumulative Points', gridcolor='#e5e5ea'),
                 margin=dict(l=40, r=20, t=30, b=40)
             )
-            st.plotly_chart(fig_tl, use_container_width=True)
+            st.plotly_chart(fig_tl, width="stretch")
     
     # Points per million leaders
     with st.expander("Season Value Leaders (Pts/£m)", expanded=False):
@@ -689,6 +705,6 @@ def render_general_analysis(processor, players_df: pd.DataFrame, fetcher):
                 'Pts/£m': '{:.2f}'
             }),
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
             height=450
         )

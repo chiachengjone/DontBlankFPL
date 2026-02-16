@@ -167,7 +167,7 @@ def render_strategy_tab(processor, players_df: pd.DataFrame):
             y_label=con_label
         )
         if fig:
-            st.plotly_chart(fig, use_container_width=True, key='strategy_ep_ownership_scatter')
+            st.plotly_chart(fig, width="stretch", key='strategy_ep_ownership_scatter')
     else:
         st.info("Data loading...")
     
@@ -382,7 +382,7 @@ def render_fixture_difficulty(processor):
                 })
             
             ranking_df = pd.DataFrame(ranking_data)
-            st.dataframe(ranking_df, hide_index=True, use_container_width=True)
+            st.dataframe(ranking_df, hide_index=True, width="stretch")
             
             # Heatmap view
             fdr_cols = [f'GW{gw}' for gw in gw_range]
@@ -422,7 +422,7 @@ def render_fixture_difficulty(processor):
                 margin=dict(l=80, r=40, t=20, b=40),
                 yaxis=dict(autorange='reversed' if sort_order == "Easiest First" else True)
             )
-            st.plotly_chart(fig, use_container_width=True, key='strategy_fixture_heatmap')
+            st.plotly_chart(fig, width="stretch", key='strategy_fixture_heatmap')
         
         else:
             # Show detailed view for selected team
@@ -466,7 +466,7 @@ def render_fixture_difficulty(processor):
                     fixture_df['Venue'] = fixture_df['Home'].apply(lambda x: 'Home' if x else 'Away')
                     fixture_df = fixture_df[['GW', 'Opponent', 'Venue', 'FDR', 'Difficulty']]
                     
-                    st.dataframe(fixture_df, hide_index=True, use_container_width=True)
+                    st.dataframe(fixture_df, hide_index=True, width="stretch")
                     
                     # FDR trend chart
                     gw_fdr = {}
@@ -505,7 +505,7 @@ def render_fixture_difficulty(processor):
                         yaxis=dict(title='FDR', range=[0, 5.5]),
                         xaxis=dict(title='')
                     )
-                    st.plotly_chart(fig, use_container_width=True, key='team_fdr_trend_strategy')
+                    st.plotly_chart(fig, width="stretch", key='team_fdr_trend_strategy')
                     
                     # Key players from this team
                     st.markdown("**Key Players**")
@@ -517,7 +517,7 @@ def render_fixture_difficulty(processor):
                             team_squad['ep'] = safe_numeric(team_squad.get('consensus_ep', team_squad.get('expected_points_poisson', pd.Series([0]*len(team_squad)))))
                             top_players = team_squad.nlargest(5, 'ep')[['web_name', 'position', 'now_cost', 'ep', 'selected_by_percent']]
                             top_players.columns = ['Player', 'Pos', 'Price', get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])), 'Own%']
-                            st.dataframe(top_players, hide_index=True, use_container_width=True)
+                            st.dataframe(top_players, hide_index=True, width="stretch")
                 else:
                     st.info("No upcoming fixtures found")
     
@@ -543,14 +543,14 @@ def render_price_watch(players_df: pd.DataFrame):
         risers = price_df.nlargest(8, 'net_transfers')[['web_name', 'team_name', 'now_cost', 'net_transfers']]
         risers.columns = ['Player', 'Team', 'Price', 'Net Transfers']
         risers['Net Transfers'] = risers['Net Transfers'].apply(lambda x: f"+{int(x):,}")
-        st.dataframe(style_df_with_injuries(risers), hide_index=True, use_container_width=True)
+        st.dataframe(style_df_with_injuries(risers), hide_index=True, width="stretch")
     
     with pr2:
         st.markdown("**Likely to Fall**")
         fallers = price_df.nsmallest(8, 'net_transfers')[['web_name', 'team_name', 'now_cost', 'net_transfers']]
         fallers.columns = ['Player', 'Team', 'Price', 'Net Transfers']
         fallers['Net Transfers'] = fallers['Net Transfers'].apply(lambda x: f"{int(x):,}")
-        st.dataframe(style_df_with_injuries(fallers), hide_index=True, use_container_width=True)
+        st.dataframe(style_df_with_injuries(fallers), hide_index=True, width="stretch")
 
 
 def render_injury_alerts(players_df: pd.DataFrame):
@@ -596,7 +596,7 @@ def render_injury_alerts(players_df: pd.DataFrame):
             return pd.DataFrame(styles, index=df.index, columns=df.columns)
         
         styled = display.style.apply(style_injury_rows, axis=None)
-        st.dataframe(styled, hide_index=True, use_container_width=True)
+        st.dataframe(styled, hide_index=True, width="stretch")
     else:
         st.success("No major injury concerns in popular players")
 
@@ -637,4 +637,4 @@ def render_ownership_trends(players_df: pd.DataFrame):
         margin=dict(l=40, r=40, t=40, b=80),
         xaxis_tickangle=-45
     )
-    st.plotly_chart(fig, use_container_width=True, key='strategy_ownership_trends')
+    st.plotly_chart(fig, width="stretch", key='strategy_ownership_trends')

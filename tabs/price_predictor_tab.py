@@ -137,7 +137,7 @@ def render_price_predictor_tab(processor, players_df: pd.DataFrame):
                 'EO%': '{:.1f}%'
             }),
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
             # height=None removed to allow auto-sizing or use default
         )
     else:
@@ -165,7 +165,7 @@ def render_price_predictor_tab(processor, players_df: pd.DataFrame):
                 'EO%': '{:.1f}%'
             }),
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
             # height=None removed
         )
     else:
@@ -195,7 +195,7 @@ def render_price_predictor_tab(processor, players_df: pd.DataFrame):
                     '% to Rise': '{:.0f}%'
                 }),
                 hide_index=True,
-                use_container_width=True
+                width="stretch"
             )
         else:
             st.info("No players currently on the rise watch list")
@@ -216,7 +216,7 @@ def render_price_predictor_tab(processor, players_df: pd.DataFrame):
                     '% to Fall': '{:.0f}%'
                 }),
                 hide_index=True,
-                use_container_width=True
+                width="stretch"
             )
         else:
             st.info("No players currently on the fall watch list")
@@ -300,7 +300,7 @@ def render_price_predictor_tab(processor, players_df: pd.DataFrame):
                     'EO%': '{:.1f}%'
                 }),
                 hide_index=True,
-                use_container_width=True
+                width="stretch"
             )
     
     with mover_tabs[1]:
@@ -319,7 +319,7 @@ def render_price_predictor_tab(processor, players_df: pd.DataFrame):
                     'EO%': '{:.1f}%'
                 }),
                 hide_index=True,
-                use_container_width=True
+                width="stretch"
             )
     
     st.markdown("---")
@@ -355,4 +355,4 @@ def render_price_predictor_tab(processor, players_df: pd.DataFrame):
         showlegend=False
     )
     
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")

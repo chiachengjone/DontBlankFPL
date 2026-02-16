@@ -10,6 +10,7 @@ import numpy as np
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 import time
+from dataclasses import dataclass, field
 
 from config import (
     FPL_BASE_URL, ODDS_API_BASE_URL, CBIT_BONUS_THRESHOLD,
@@ -34,6 +35,22 @@ def safe_numeric(series, default=0):
 # Each entry is keyed by endpoint/param combo; this prevents unbounded growth
 # when many unique player/team lookups are performed.
 _MAX_CACHE_ENTRIES: int = 500
+
+
+@dataclass
+class EngineStatus:
+    """Tracks the status and errors of various enrichment modules."""
+    understat_active: bool = False
+    understat_status: Dict = field(default_factory=dict)
+    poisson_active: bool = False
+    errors: List[str] = field(default_factory=list)
+
+
+@dataclass
+class EngineeredFeaturesResult:
+    """Return object for the engineered features pipeline."""
+    df: pd.DataFrame
+    status: EngineStatus
 
 
 class FPLDataFetcher:
@@ -629,48 +646,36 @@ class FPLDataProcessor:
         total_ep, _ = self.calculate_expected_points(player_id, weeks_ahead)
         
         # Get effective ownership
-        eo = float(player.get('selected_by_percent', 50) or 50)
-        eo = max(eo, 0.1)
+        eo = float(player.get('selected_by_percent', 0) or 0)
         
-        # Get fixture ease
-        fixture_ease = self.calculate_fixture_ease(player_id, weeks_ahead)
+        # EP_net: Points gained vs field
+        ep_net = total_ep * (1 - eo/100)
         
-        # Net Rank Gain: points you gain vs field
-        ep_net = total_ep * (1 - eo / 100)
-        
-        # Differential ROI: points per % ownership
+        # Diff_ROI: Points per % ownership
         diff_roi = total_ep / (eo + 1)
         
-        # Combined score
-        differential = ep_net * 0.5 + diff_roi * 100 * 0.3 + fixture_ease * 0.2
+        # Fixture ease
+        ease = self.calculate_fixture_ease(player_id, weeks_ahead)
         
-        return differential
-    
-    def get_engineered_features_df(self, weeks_ahead: int = 5) -> pd.DataFrame:
-        """
-        Build comprehensive DataFrame with all engineered features.
-        Uses vectorized operations per-team instead of per-player loops.
-        """
-        df = self.players_df.copy()
+        # Composite score
+        score = (ep_net * 0.5) + (diff_roi * 100 * 0.3) + (ease * 0.2)
         
-        # Calculate CBIT metrics (already vectorized)
-        df = self.calculate_cbit_metrics(df)
-        
-        # --- Vectorized: precompute per-TEAM data (20 teams, not 600 players) ---
+        return round(score, 2)
+
+    def _get_team_fixture_metrics(self, weeks_ahead: int) -> Tuple[Dict, Dict, Dict, List[float], float]:
+        """Calculates team-level fixture metrics (FDR, Blanks, Ease)."""
         current_gw = self.fetcher.get_current_gameweek()
         fixtures = self.fixtures_df
+        team_ids = self.teams_df['id'].unique()
         
-        # Build team-level lookups once
-        team_ids = df['team'].unique()
-        team_fdrs = {}        # team_id -> [fdr1, fdr2, ...]
-        team_blanks = {}      # team_id -> set of blank gw numbers
-        team_ease = {}        # team_id -> ease score
+        team_fdrs = {}
+        team_blanks = {}
+        team_ease = {}
         
         decay_weights = [0.95 ** i for i in range(weeks_ahead)]
         max_ease_denom = sum(5 * w for w in decay_weights)
         
         for tid in team_ids:
-            # FDR per gameweek
             team_fixtures = fixtures[
                 (fixtures['event'] >= current_gw) &
                 (fixtures['event'] < current_gw + weeks_ahead) &
@@ -691,181 +696,77 @@ class FPLDataProcessor:
             fdrs = fdrs[:weeks_ahead]
             team_fdrs[tid] = fdrs
             
-            # Blanks
             blanks = set()
             for gw in range(current_gw, current_gw + weeks_ahead):
                 if gw not in fixture_gws:
                     blanks.add(gw)
             team_blanks[tid] = blanks
             
-            # Fixture ease (vectorized per team)
             weighted_ease = sum((6 - fdr) * w for fdr, w in zip(fdrs, decay_weights))
             team_ease[tid] = weighted_ease / max_ease_denom if max_ease_denom > 0 else 0.5
-        
-        # --- Vectorized: map team-level data to all players at once ---
-        df['fixture_ease'] = df['team'].map(team_ease).fillna(0.5).astype(float)
-        df['blank_count'] = df['team'].map(
-            lambda tid: len(team_blanks.get(tid, set()))
-        ).fillna(0).astype(int)
-        
-        # Base EP from FPL (single GW next-match prediction)
-        if 'ep_next' in df.columns:
-            df['ep_next_num'] = pd.to_numeric(df['ep_next'], errors='coerce').fillna(0.0)
-        else:
-            df['ep_next_num'] = 0.0
-        
-        # Initialize expected_points from FPL data first
-        df['expected_points'] = df['ep_next_num'].copy()
-        
-        # Import streamlit for session state access (handle all exceptions)
-        st = None
-        try:
-            import streamlit as st
-        except Exception:
-            pass
-        
-        # ── Understat xG/xA enrichment ──
+            
+        return team_fdrs, team_blanks, team_ease, decay_weights, max_ease_denom
+
+    def _enrich_with_external_data(self, df: pd.DataFrame, status: EngineStatus) -> pd.DataFrame:
+        """Enriches the DataFrame with Understat data without direct st.session_state access."""
         try:
             from understat_api import enrich_with_understat
             df = enrich_with_understat(df)
-            if st is not None:
-                st.session_state['_understat_active'] = True
-                # Log data source quality summary
-                ustat_status = st.session_state.get('_understat_status', {})
-                team_count = ustat_status.get('team_stats_count', 0)
-                match_rate = ustat_status.get('player_match_rate', 0)
-                errs = ustat_status.get('errors', [])
-                import logging as _log
-                _ulog = _log.getLogger(__name__)
-                _ulog.info(
-                    "Understat enrichment OK: %d team stats, %.0f%% player match rate",
-                    team_count, match_rate * 100,
-                )
-                if errs:
-                    _ulog.warning("Understat enrichment warnings: %s", '; '.join(errs))
+            status.understat_active = True
+            # In a non-Streamlit environment, we can't easily populate st.session_state
+            # but we can return the status in the EngineStatus object.
         except Exception as e:
-            import logging
-            import traceback
-            logging.getLogger(__name__).error(
-                "Understat enrichment failed: %s\n%s", e, traceback.format_exc()
-            )
-            if st is not None:
-                st.session_state['_understat_active'] = False
-                st.session_state['_understat_status'] = {
-                    'players_fetched': 0, 'teams_fetched': 0,
-                    'team_stats_built': False, 'team_stats_count': 0,
-                    'player_match_rate': 0.0,
-                    'errors': [f"top-level: {e}"],
-                }
-        
-        # ── Poisson-based Expected Points (professional-grade model) ──
+            logger.error(f"Understat enrichment failed: {e}")
+            status.understat_active = False
+            status.errors.append(f"Understat: {str(e)}")
+        return df
+
+    def _calculate_poisson_metrics(self, df: pd.DataFrame, weeks_ahead: int, status: EngineStatus, 
+                                  team_stats: Optional[Dict] = None, use_poisson_primary: bool = True) -> pd.DataFrame:
+        """Calculates Poisson-based Expected Points."""
         try:
             from poisson_ep import calculate_poisson_ep_for_dataframe
-            # Pass real Understat team stats if available
-            team_stats = st.session_state.get('_understat_team_stats', None) if st is not None else None
+            current_gw = self.fetcher.get_current_gameweek()
+            fixtures = self.fixtures_df
             
-            # ALWAYS calculate Poisson EP so specialized tabs (Analytics, Captains) have it
             df = calculate_poisson_ep_for_dataframe(
                 df, fixtures, current_gw, team_stats=team_stats, horizon=weeks_ahead
             )
             
-            # Determine whether to use Poisson EP as primary comparison column
-            use_poisson = st.session_state.get('use_poisson_xp', True) if st is not None else True
+            status.poisson_active = True
             
-            if use_poisson:
-                # Use Poisson EP as primary expected_points if available
-                if 'expected_points_poisson' in df.columns:
-                    # Blend: 70% Poisson model, 30% FPL baseline for stability
-                    poisson_ep = pd.to_numeric(df['expected_points_poisson'], errors='coerce').fillna(0)
-                    base_ep = pd.to_numeric(df['ep_next_num'], errors='coerce').fillna(0)
-                    df['expected_points'] = (poisson_ep * 0.7 + base_ep * 0.3).clip(lower=0)
-            else:
-                # Use raw FPL ep_next as primary
-                df['expected_points'] = df['ep_next_num']
+            if use_poisson_primary and 'expected_points_poisson' in df.columns:
+                poisson_ep = pd.to_numeric(df['expected_points_poisson'], errors='coerce').fillna(0)
+                base_ep = pd.to_numeric(df.get('ep_next_num', 0), errors='coerce').fillna(0)
+                df['expected_points'] = (poisson_ep * 0.7 + base_ep * 0.3).clip(lower=0)
+            
         except Exception as e:
-            import logging
-            import traceback as _tb
-            logging.getLogger(__name__).error(
-                "Poisson EP calculation failed: %s\n%s", e, _tb.format_exc()
-            )
-        
-        # Ensure expected_points is numeric and exists
-        if 'expected_points' not in df.columns:
-            df['expected_points'] = df['ep_next_num']
-        df['expected_points'] = pd.to_numeric(df['expected_points'], errors='coerce').fillna(df['ep_next_num'])
-        
-        # ── Multi-week planning EP (for horizon-based features) ──
-        # This is used for differential calculations and planning, NOT for display
-        def _calc_horizon_ep(row):
-            tid = row['team']
-            base_ep = row.get('expected_points', 0)  # Use single-GW EP with safe fallback
-            if pd.isna(base_ep):
-                base_ep = 0
-            fdrs = team_fdrs.get(tid, [3.0] * weeks_ahead)
-            blanks = team_blanks.get(tid, set())
-            
-            total = 0.0
-            for i in range(weeks_ahead):
-                gw = current_gw + i
-                if gw in blanks:
-                    continue
-                decay = decay_weights[i]
-                fdr_mult = (6 - fdrs[i]) / 5 if i < len(fdrs) else 0.6
-                total += base_ep * decay * fdr_mult
-            
-            # CBIT bonus for defenders
-            if row.get('position') == 'DEF':
-                cbit_bonus = row.get('cbit_bonus_expected', 0)
-                if pd.notna(cbit_bonus):
-                    active_weeks = weeks_ahead - len(blanks & set(range(current_gw, current_gw + weeks_ahead)))
-                    total += cbit_bonus * active_weeks
-            
-            return total
-        
-        # Store horizon EP separately for planning features
-        df['expected_points_horizon'] = df.apply(_calc_horizon_ep, axis=1).astype(float)
-        
-        # ══════════════════════════════════════════════════════════════
-        # ── Relative Rank Impact (RRI) Differential Model ──
-        # Score = xP × (1 − EO_top10k)   ["Effective Net Points"]
-        # Tells you how many points a player gains you vs. the field.
-        # ══════════════════════════════════════════════════════════════
+            logger.error(f"Poisson EP calculation failed: {e}")
+            status.poisson_active = False
+            status.errors.append(f"Poisson: {str(e)}")
+        return df
 
-        # General ownership (0-100)
-        eo_general = pd.to_numeric(
-            df.get('selected_by_percent', 50), errors='coerce'
-        ).fillna(50).clip(lower=0.1)
-
-        # ── Estimate top-10k EO from general ownership ──
-        # Top-10k managers cluster heavily on template players.
-        # Empirical model: EO_10k ≈ clip(a·EO^1.4 + b, 1, 99)
-        #   - 70% general → ~97% top-10k (template)
-        #   - 10% general → ~20% top-10k
-        #   -  2% general → ~3%  top-10k
+    def _apply_differential_model(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Calculates RRI and other differential metrics."""
+        # Use safe_numeric for Series conversion
+        eo_general = safe_numeric(df.get('selected_by_percent', 50)).clip(lower=0.1)
         eo_frac = eo_general / 100.0
         eo_10k = (1.5 * np.power(eo_frac, 1.4) + 0.01).clip(0.01, 0.99)
         df['eo_top10k'] = (eo_10k * 100).round(1)
-
-        # ── Core RRI: Differential Gain ──
-        # xP × (1 − EO) = points you gain vs the field per GW
+        
         xp = df['expected_points']
         df['differential_gain'] = (xp * (1 - eo_10k)).round(2)
-
-        # ── Differential ROI per million ──
+        
         cost = pd.to_numeric(df['now_cost'], errors='coerce').fillna(5).clip(lower=4.0)
         df['diff_roi'] = (df['differential_gain'] / cost).round(3)
-
-        # ── Poisson variance (σ) for boom/bust classification ──
-        # σ of Poisson EP ≈ sqrt(λ_attack × goal_pts² + λ_creative × asst_pts²)
+        
         goal_pts_map = {'GKP': 10, 'DEF': 6, 'MID': 5, 'FWD': 4}
         asst_pts = 3
         gp = df['position'].map(goal_pts_map).fillna(4)
-        lam_a = pd.to_numeric(df.get('poisson_lambda_attack', pd.Series(0, index=df.index)), errors='coerce').fillna(0)
-        lam_c = pd.to_numeric(df.get('poisson_lambda_creative', pd.Series(0, index=df.index)), errors='coerce').fillna(0)
+        lam_a = safe_numeric(df.get('poisson_lambda_attack', pd.Series(0, index=df.index)))
+        lam_c = safe_numeric(df.get('poisson_lambda_creative', pd.Series(0, index=df.index)))
         df['poisson_sigma'] = np.sqrt(lam_a * gp**2 + lam_c * asst_pts**2).round(2)
-
-        # ── Boom/Bust label ──
-        # High σ → high-ceiling winger (chase rank), Low σ → floor defender (protect lead)
+        
         sigma_median = df['poisson_sigma'].median()
         sigma_median = sigma_median if sigma_median > 0 else 1.0
         df['sigma_ratio'] = df['poisson_sigma'] / sigma_median
@@ -874,31 +775,25 @@ class FPLDataProcessor:
             ['Boom/Bust', 'Floor'],
             default='Balanced'
         )
-
-        # ── Ownership-adjusted variance bonus ──
-        # Underperforming xG → "due" for regression upward → higher diff value
+        
         if 'us_goal_overperf' in df.columns:
             regression_signal = (
                 -df['us_goal_overperf'].fillna(0) * 0.5
-                + -df.get('us_assist_overperf', pd.Series(0, index=df.index)).fillna(0) * 0.3
+                + -df.get('us_assist_overperf', 0).fillna(0) * 0.3
             ).clip(-0.3, 0.5)
         else:
-            regression_signal = pd.Series(0.0, index=df.index)
+            regression_signal = 0.0
+            
         df['variance_adj_diff'] = (df['differential_gain'] * (1 + regression_signal)).round(2)
-
-        # ── Legacy compatibility aliases ──
         df['ep_net'] = df['differential_gain']
-
-        # ── Primary differential score (composite) ──
-        # Weighted blend of RRI, ROI, variance bonus, and fixtures
+        
         df['differential_score'] = (
-            df['differential_gain'] * 0.50          # Core RRI
-            + df['diff_roi'] * 100 * 0.25           # Value-per-million
-            + df['variance_adj_diff'] * 0.15        # Regression bonus
-            + df['fixture_ease'] * 0.10             # Fixture influence
+            df['differential_gain'] * 0.50 +
+            df['diff_roi'] * 100 * 0.25 +
+            df['variance_adj_diff'] * 0.15 +
+            df['fixture_ease'] * 0.10
         ).round(2)
-
-        # ── Diff verdict labels (for UI) ──
+        
         df['diff_verdict'] = np.select(
             [
                 (eo_10k > 0.60) & (xp >= 5),
@@ -908,45 +803,27 @@ class FPLDataProcessor:
             ['Template', 'Elite Diff', 'Trap'],
             default=''
         )
-        
-        # Ensure now_cost is numeric
-        df['now_cost'] = pd.to_numeric(df['now_cost'], errors='coerce').fillna(5.0)
-        
-        # Price sensitivity (EP per cost)
-        df['xg_per_pound'] = df['expected_points'] / df['now_cost'].clip(lower=4.0)
-        
-        # ── EPPM: Effective Points Per Million (next N gameweeks) ──
-        df['eppm'] = df['expected_points'] / df['now_cost'].clip(lower=4.0)
-        
-        # ── Threat Momentum: Weighted rolling xG/xA (recent form emphasized) ──
-        # Uses Understat per-90 stats with form weighting
+        return df
+
+    def _apply_momentum_and_matchup(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Calculates momentum and matchup quality."""
         if 'us_xG_per90' in df.columns:
-            # Form acts as recency weight (higher form = more recent performance)
             form = pd.to_numeric(df.get('form', 0), errors='coerce').fillna(0).clip(0, 10)
-            form_weight = 0.5 + (form / 20)  # 0.5 to 1.0 range
-            
+            form_weight = 0.5 + (form / 20)
             df['threat_momentum'] = (
                 df['us_xG_per90'].fillna(0) * form_weight +
                 df['us_xA_per90'].fillna(0) * form_weight * 0.7
             )
-            
-            # Momentum direction: form_weight centered on 0.75 (avg form=5)
-            # Above 0.75 = heating up, below = cooling off
             df['threat_direction'] = ((form_weight - 0.75) / 0.25).clip(-1, 1)
         else:
-            # Fallback using FPL expected stats
             form = pd.to_numeric(df.get('form', 0), errors='coerce').fillna(0).clip(0, 10)
             xg = pd.to_numeric(df.get('expected_goals', 0), errors='coerce').fillna(0)
             xa = pd.to_numeric(df.get('expected_assists', 0), errors='coerce').fillna(0)
             minutes = pd.to_numeric(df.get('minutes', 0), errors='coerce').fillna(0)
             games = (minutes / 90).clip(lower=1)
-            
             df['threat_momentum'] = ((xg + xa * 0.7) / games) * (0.5 + form / 20)
             df['threat_direction'] = 0.0
-        
-        # ── Matchup Quality: Player threat × Opponent defensive weakness ──
-        # matchup_quality = (Player_npxG_per_90) × (Opponent_xGA / League_Avg_xGA)
-        # Uses REAL Understat xGA from Poisson pipeline when available
+
         if 'us_npxG_per90' in df.columns:
             player_threat = df['us_npxG_per90'].fillna(0) + df['us_xA_per90'].fillna(0) * 0.5
         else:
@@ -955,43 +832,132 @@ class FPLDataProcessor:
             minutes = pd.to_numeric(df.get('minutes', 0), errors='coerce').fillna(0)
             games = (minutes / 90).clip(lower=1)
             player_threat = (xg + xa * 0.5) / games
-        
-        # Use real opponent xGA from Poisson pipeline if available
+            
         if 'poisson_opp_xGA_per90' in df.columns:
             poisson_opp = pd.to_numeric(df['poisson_opp_xGA_per90'], errors='coerce').fillna(0)
             league_avg_xga = poisson_opp[poisson_opp > 0].mean()
-            if league_avg_xga > 0:
-                opp_weakness = poisson_opp / league_avg_xga
-                # Clip to reasonable range (0.5x to 2.0x of league average)
-                opp_weakness = opp_weakness.clip(0.5, 2.0)
-            else:
-                opp_weakness = 0.5 + df['fixture_ease'].clip(0, 1)
+            opp_weakness = poisson_opp / league_avg_xga if league_avg_xga > 0 else 0.5 + df['fixture_ease'].clip(0, 1)
+            opp_weakness = opp_weakness.clip(0.5, 2.0)
         else:
-            # Fallback: fixture_ease as proxy (0–1 scale → 0.5–1.5 multiplier)
             opp_weakness = 0.5 + df['fixture_ease'].clip(0, 1)
-        
+            
         df['matchup_quality'] = player_threat * opp_weakness
+        return df
+
+    def get_engineered_features_result(self, weeks_ahead: int = 5, 
+                                      team_stats: Optional[Dict] = None, 
+                                      use_poisson_primary: bool = True) -> EngineeredFeaturesResult:
+        """
+        New modular entry point for feature engineering.
+        Returns an EngineeredFeaturesResult object.
+        """
+        status = EngineStatus()
+        df = self.players_df.copy()
         
-        # ── Engineered Differential: RRI-based with momentum + matchup ──
+        # 1. CBIT Metrics
+        df = self.calculate_cbit_metrics(df)
+        
+        # 2. Team Fixture Metrics
+        team_fdrs, team_blanks, team_ease, decay_weights, _ = self._get_team_fixture_metrics(weeks_ahead)
+        df['fixture_ease'] = df['team'].map(team_ease).fillna(0.5).astype(float)
+        df['blank_count'] = df['team'].map(lambda tid: len(team_blanks.get(tid, set()))).fillna(0).astype(int)
+        
+        # 3. Base EP Prep
+        df['ep_next_num'] = pd.to_numeric(df.get('ep_next', 0), errors='coerce').fillna(0.0)
+        df['expected_points'] = df['ep_next_num'].copy()
+        
+        # 4. Understat Enrichment
+        df = self._enrich_with_external_data(df, status)
+        
+        # 5. Poisson EP
+        df = self._calculate_poisson_metrics(df, weeks_ahead, status, team_stats, use_poisson_primary)
+        
+        # 6. Horizon EP (Vectorized where possible)
+        # Optimized horizon EP calculation
+        current_gw = self.fetcher.get_current_gameweek()
+        
+        # Precompute per-team horizon EP boost
+        team_horizon_mult = {}
+        for tid, fdrs in team_fdrs.items():
+            blanks = team_blanks.get(tid, set())
+            mult = 0.0
+            for i in range(weeks_ahead):
+                if (current_gw + i) not in blanks:
+                    decay = decay_weights[i]
+                    fdr_val = fdrs[i] if i < len(fdrs) else 3.0
+                    mult += decay * (6 - fdr_val) / 5
+            team_horizon_mult[tid] = mult
+            
+        df['horizon_multiplier'] = df['team'].map(team_horizon_mult).fillna(0.0)
+        df['expected_points_horizon'] = df['expected_points'] * df['horizon_multiplier']
+        
+        # Add CBIT bonus to horizon EP
+        if 'cbit_bonus_expected' in df.columns:
+            def_mask = df['position'] == 'DEF'
+            active_weeks = weeks_ahead - df['blank_count']
+            df.loc[def_mask, 'expected_points_horizon'] += df.loc[def_mask, 'cbit_bonus_expected'] * active_weeks
+            
+        # 7. Differential & Momentum
+        df = self._apply_differential_model(df)
+        df = self._apply_momentum_and_matchup(df)
+        
+        # 8. Composite scores
+        eo_general = pd.to_numeric(df.get('selected_by_percent', 50), errors='coerce').fillna(50)
         low_own_bonus = np.where(eo_general < 10, (10 - eo_general) / 10, 0)
+        
         df['engineered_diff'] = (
             df['differential_gain'] * 0.35 +
-            df['eppm'] * 0.25 +
+            (df['expected_points'] / df['now_cost'].clip(lower=4.0)) * 0.25 +
             df['threat_momentum'] * 0.20 +
             df['matchup_quality'] * 0.10 +
             low_own_bonus * 0.10
         ).round(2)
         
-        # Value score: combines EP, RRI, regression, fixture coverage
         df['value_score'] = (
             df['expected_points'] * 0.35 +
             df['differential_gain'] * 0.25 +
             df['variance_adj_diff'] * 0.10 +
-            df['diff_roi'] * 10 * 0.15 +
+            (df['differential_gain'] / df['now_cost'].clip(lower=4.0)) * 10 * 0.15 +
             (5.0 - df['blank_count'].astype(float)) * 0.15
         ).round(2)
         
-        return df
+        df['now_cost'] = pd.to_numeric(df['now_cost'], errors='coerce').fillna(5.0)
+        df['xg_per_pound'] = df['expected_points'] / df['now_cost'].clip(lower=4.0)
+        df['eppm'] = df['xg_per_pound']
+        
+        return EngineeredFeaturesResult(df=df, status=status)
+
+    def get_engineered_features_df(self, weeks_ahead: int = 5) -> pd.DataFrame:
+        """
+        Backward compatible entry point. 
+        Tries to handle Streamlit session state if available but doesn't require it.
+        """
+        # Attempt to get Streamlit specific settings if running in Streamlit
+        st = None
+        try:
+            import streamlit as st
+            team_stats = st.session_state.get('_understat_team_stats', None)
+            use_poisson = st.session_state.get('use_poisson_xp', True)
+        except Exception:
+            team_stats = None
+            use_poisson = True
+            st = None
+            
+        result = self.get_engineered_features_result(
+            weeks_ahead=weeks_ahead, 
+            team_stats=team_stats, 
+            use_poisson_primary=use_poisson
+        )
+        
+        # Update Streamlit session state if we are indeed in a Streamlit context
+        if st is not None:
+            try:
+                st.session_state['_understat_active'] = result.status.understat_active
+                # Some other legacy status might need to be set here if needed
+            except Exception:
+                pass
+                
+        return result.df
 
 
 class TransactionLedger:

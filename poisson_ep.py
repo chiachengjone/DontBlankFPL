@@ -753,74 +753,149 @@ def calculate_poisson_ep_for_dataframe(
             real_fixture_count / total_fixtures * 100,
         )
     
-    # ── Calculate Poisson EP for each player ──
-    results = []
-    for _, player in df.iterrows():
-        team_id = player.get('team', 0)
-        player_fixtures = team_fixture_list.get(team_id, [])
-        
-        player_dict = player.to_dict()
-        
-        # ── Iterate EACH fixture independently (proper DGW handling) ──
-        total_xp = 0.0
-        total_xp_goals = 0.0
-        total_xp_assists = 0.0
-        total_xp_cs = 0.0
-        total_xp_bonus = 0.0
-        total_p_cs = 0.0
-        
-        if player_fixtures:
-            first_opp_xga = player_fixtures[0].get('opp_xGA_per90', LEAGUE_AVG_XGA_PER_MATCH)
-            first_opp_xg = player_fixtures[0].get('opp_xG_per90', LEAGUE_AVG_XG_PER_MATCH)
-        else:
-            first_opp_xga = LEAGUE_AVG_XGA_PER_MATCH
-            first_opp_xg = LEAGUE_AVG_XG_PER_MATCH
-        
-        for fx in player_fixtures:
-            opponent_dict = {
-                'xGA_per90': fx['opp_xGA_per90'],
-                'xG_per90': fx['opp_xG_per90'],
-            }
-            fx_result = engine.calculate_single_fixture_xp(
-                player_dict, opponent_dict, fx['is_home']
-            )
-            total_xp += fx_result.get('xp_total', 0)
-            total_xp_goals += fx_result.get('xp_goals', 0)
-            total_xp_assists += fx_result.get('xp_assists', 0)
-            total_xp_cs += fx_result.get('xp_cs', 0)
-            total_xp_bonus += fx_result.get('xp_bonus', 0)
-            total_p_cs += fx_result.get('p_cs', 0)
-        
-        # Average p_cs across fixtures (for CBIT calculations)
-        avg_p_cs = total_p_cs / len(player_fixtures) if player_fixtures else 0.0
-        
-        results.append({
-            'player_id': player.get('id', 0),
-            'xp_total': round(total_xp, 2),
-            'xp_goals': round(total_xp_goals, 2),
-            'xp_assists': round(total_xp_assists, 2),
-            'xp_cs': round(total_xp_cs, 2),
-            'xp_bonus': round(total_xp_bonus, 2),
-            'p_cs': round(avg_p_cs, 3),
-            'fixture_count': len(player_fixtures),
-            'opp_xGA_per90': round(first_opp_xga, 3),
-            'opp_xG_per90': round(first_opp_xg, 3),
-        })
+    # ── Vectorized Calculation (Pandas) ──
+    # Expand fixtures to player-rows
+    fixture_rows = []
+    for team_id, fixtures in team_fixture_list.items():
+        for fx in fixtures:
+            fixture_rows.append({
+                'team': team_id,
+                'is_home': fx['is_home'],
+                'opp_xGA_per90': fx['opp_xGA_per90'],
+                'opp_xG_per90': fx['opp_xG_per90'],
+                'opponent_id': fx['opponent_id']
+            })
+            
+    if not fixture_rows or df.empty:
+        df = df.copy()
+        df['expected_points_poisson'] = 0.0
+        return df
+
+    fixtures_long = pd.DataFrame(fixture_rows)
     
-    # ── Merge results back to DataFrame ──
-    ep_df = pd.DataFrame(results)
-    result_df = df.copy()
+    # Ensure keys match types
+    df = df.copy()
+    df['team'] = df['team'].astype(int)
+    fixtures_long['team'] = fixtures_long['team'].astype(int)
     
-    if not ep_df.empty and 'player_id' in ep_df.columns:
-        ep_df = ep_df.set_index('player_id')
-        for col in ['xp_total', 'xp_goals', 'xp_assists', 'xp_cs', 'xp_bonus',
-                     'lambda_attack', 'lambda_creative', 'p_cs', 'p_cbit',
-                     'opp_xGA_per90', 'opp_xG_per90']:
-            if col in ep_df.columns:
-                result_df[f'poisson_{col}'] = result_df['id'].map(ep_df[col]).fillna(0)
+    # Inner join - players without fixtures (or blanks) will be dropped from this calculation
+    # but we will merge results back to original df later
+    merged = pd.merge(df, fixtures_long, on='team', how='inner')
+    
+    if merged.empty:
+        df['expected_points_poisson'] = 0.0
+        return df
         
-        result_df['expected_points_poisson'] = result_df['id'].map(
-            ep_df['xp_total']
-        ).fillna(0)
+    # Vectorized Parameter Prep
+    pos_map_goals = merged['position'].map(GOAL_PTS).fillna(4)
+    pos_map_cs = merged['position'].map(CS_PTS).fillna(0)
     
-    return result_df
+    # Safe column retrieval
+    def get_col(df, col, default_val):
+        if col in df.columns:
+            return pd.to_numeric(df[col], errors='coerce').fillna(default_val)
+        return pd.Series(default_val, index=df.index)
+
+    mins_per_game = get_col(merged, 'minutes_per_game', 70)
+    starts_pct = get_col(merged, 'starts_pct', 0.8)
+    
+    cop = get_col(merged, 'chance_of_playing_next_round', 100)
+    status_map = {'a': 100, 'd': 75, 'i': 0, 's': 0, 'n': 0, 'u': 0}
+    if 'status' in merged.columns:
+         fallback_cop = merged['status'].map(status_map).fillna(100)
+         cop = np.where(cop.isna(), fallback_cop, cop)
+    
+    p_plays = (starts_pct * (cop / 100.0)).clip(0, 1)
+    
+    conditions = [
+        mins_per_game >= 80,
+        mins_per_game >= 60,
+        mins_per_game >= 45
+    ]
+    choices = [0.95, 0.85, 0.50]
+    p_60_plus = np.select(conditions, choices, default=0.25)
+    
+    xp_appearance = p_plays * (p_60_plus * 2 + (1 - p_60_plus) * 1)
+    
+    # Attack Lambda (Goals)
+    if 'us_xG_per90' in merged.columns:
+        xg_per90 = get_col(merged, 'us_xG_per90', 0)
+    else:
+        xg_per90 = get_col(merged, 'expected_goals_per_90', 0)
+
+    venue_mult_att = np.where(merged['is_home'], HOME_ADVANTAGE_ATTACK, AWAY_MULTIPLIER_ATTACK)
+    avg_xga = LEAGUE_AVG_XGA_PER_MATCH
+    opp_factor = merged['opp_xGA_per90'] / avg_xga if avg_xga > 0 else 1.0
+    
+    mins_factor = (mins_per_game / 90.0).clip(0, 1)
+    lambda_att = xg_per90 * opp_factor * venue_mult_att * mins_factor
+    
+    xp_goals = lambda_att * pos_map_goals * p_plays
+    
+    # Creative Lambda (Assists)
+    if 'us_xA_per90' in merged.columns:
+        xa_per90 = get_col(merged, 'us_xA_per90', 0)
+    else:
+        xa_per90 = get_col(merged, 'expected_assists_per_90', 0)
+
+    avg_xg = LEAGUE_AVG_XG_PER_MATCH
+    creative_factor = (merged['opp_xG_per90'] / avg_xg if avg_xg > 0 else 1.0).clip(0.7, 1.4)
+    lambda_creat = xa_per90 * creative_factor * venue_mult_att * mins_factor
+    
+    xp_assists = lambda_creat * ASSIST_PTS * p_plays
+    
+    # Clean Sheets
+    venue_mult_def = np.where(merged['is_home'], HOME_ADVANTAGE_DEFENSE, AWAY_MULTIPLIER_DEFENSE)
+    team_def_qual = get_col(merged, 'team_xga_ratio', 1.0)
+    lambda_opp = merged['opp_xG_per90'] * team_def_qual * venue_mult_def
+    
+    p_cs = np.exp(-lambda_opp).clip(0, CLEAN_SHEET_PROBABILITY_CAP)
+    xp_cs = p_cs * pos_map_cs * p_plays * p_60_plus
+    
+    # Goals Conceded Penalty
+    is_def = merged['position'].isin(['GKP', 'DEF'])
+    xp_gc = np.where(is_def, -lambda_opp * 0.45 * GOALS_CONCEDED_PER_2, 0) * p_plays * p_60_plus
+    
+    # Bonus Points (Vectorized approximation)
+    exp_neg_la = np.exp(-lambda_att)
+    p0_g = exp_neg_la
+    p1_g = lambda_att * exp_neg_la
+    p2_g = 1 - p0_g - p1_g
+    
+    exp_neg_lc = np.exp(-lambda_creat)
+    p0_a = exp_neg_lc
+    p1_a = lambda_creat * exp_neg_lc
+    p2_a = 1 - p0_a - p1_a
+    
+    pos_bonus_mult = merged['position'].map(BONUS_POINT_POSITION_MULTIPLIER).fillna(1.0)
+    
+    expected_bonus = (
+        (p1_g * p0_a * 0.5) +
+        (p0_g * p1_a * 0.3) +
+        (p1_g * p1_a * 2.0) +
+        (p2_g * p0_a * 2.5) +
+        (p2_g * (1-p0_a) * 3.0) +
+        (p1_g * p2_a * 2.2)
+    ) * pos_bonus_mult
+    xp_bonus = expected_bonus.clip(0, 3.0) * p_plays
+    
+    # CBIT
+    xp_cbit = 0.0
+    if 'cbit_bonus_expected' in merged.columns:
+        xp_cbit = pd.to_numeric(merged['cbit_bonus_expected']).fillna(0) * p_plays
+    
+    merged['xp_fixture'] = xp_appearance + xp_goals + xp_assists + xp_cs + xp_gc + xp_bonus + xp_cbit
+    merged['xp_goals'] = xp_goals
+    merged['xp_assists'] = xp_assists
+    merged['xp_cs'] = xp_cs
+    merged['xp_bonus'] = xp_bonus
+    
+    grouped = merged.groupby('id')[['xp_fixture', 'xp_goals', 'xp_assists', 'xp_cs', 'xp_bonus']].sum()
+    
+    df['expected_points_poisson'] = df['id'].map(grouped['xp_fixture']).fillna(0.0)
+    df['poisson_xp_goals'] = df['id'].map(grouped['xp_goals']).fillna(0)
+    df['poisson_xp_assists'] = df['id'].map(grouped['xp_assists']).fillna(0)
+    df['poisson_xp_cs'] = df['id'].map(grouped['xp_cs']).fillna(0)
+    df['poisson_xp_bonus'] = df['id'].map(grouped['xp_bonus']).fillna(0)
+    
+    return df

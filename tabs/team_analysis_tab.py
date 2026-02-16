@@ -374,7 +374,7 @@ def render_team_analysis_tab(processor, players_df: pd.DataFrame):
                             'EO%': '{:.1f}%'
                         }),
                         hide_index=True,
-                        use_container_width=True,
+                        width="stretch",
                         height=min(400, len(display_df) * 40 + 40)
                     )
                 else:
@@ -421,7 +421,7 @@ def render_team_analysis_tab(processor, players_df: pd.DataFrame):
                 xaxis=dict(title="Position", gridcolor='#f0f0f0'),
                 yaxis=dict(title="Total Points", gridcolor='#f0f0f0')
             )
-            st.plotly_chart(fig, use_container_width=True, key="team_point_bubble")
+            st.plotly_chart(fig, width="stretch", key="team_point_bubble")
         else:
             st.info("No point data available for this team")
             
@@ -465,7 +465,7 @@ def render_team_analysis_tab(processor, players_df: pd.DataFrame):
                         'Value': '{:.3f}'
                     }),
                     hide_index=True,
-                    use_container_width=True
+                    width="stretch"
                 )
         else:
             st.info("Not enough viable players to analyze stacks")

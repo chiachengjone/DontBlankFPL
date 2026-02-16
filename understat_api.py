@@ -54,6 +54,18 @@ TEAM_NAME_MAP: Dict[str, str] = {
     "Wolves": "Wolverhampton Wanderers",
 }
 
+# ── Manual Name Map (FPL -> Understat) ──
+# Corrects known discrepancies where fuzzy matching fails or is risky
+MANUAL_PLAYER_MAP: Dict[str, str] = {
+    "Darwin Núñez": "Darwin",
+    "Heung-Min Son": "Son",
+    "Diogo Jota": "Diogo J.",
+    "Gabriel Martinelli": "Martinelli",
+    "Bruno Guimarães": "Bruno Guimaraes",
+    "Matheus Cunha": "Matheus Cunha",
+    "Rayan Aït-Nouri": "Rayan Ait Nouri",
+}
+
 # ── Per-position FPL points per goal/assist ──
 GOAL_PTS = {"GKP": 6, "DEF": 6, "MID": 5, "FWD": 4}
 ASSIST_PTS = 3
@@ -401,8 +413,21 @@ def match_understat_to_fpl(
     for idx, row in result.iterrows():
         ustat_team = fpl_to_ustat.get(row.get("team_name", ""), "")
 
-        # Priority: full name, then last name, then web_name
-        urow = by_full.get((ustat_team, row["_fpl_full"]))
+        # 0. Manual Override
+        fpl_raw = ""
+        if "first_name" in result.columns:
+            fpl_raw = f"{row.get('first_name', '')} {row.get('second_name', '')}".strip()
+        else:
+            fpl_raw = str(row.get("web_name", ""))
+            
+        urow = None
+        if fpl_raw in MANUAL_PLAYER_MAP:
+            mapped = MANUAL_PLAYER_MAP[fpl_raw]
+            urow = by_full.get((ustat_team, _norm(mapped)))
+
+        # 1. Full Name Match
+        if urow is None:
+            urow = by_full.get((ustat_team, row["_fpl_full"]))
         if urow is None:
             candidate = by_last.get((ustat_team, row["_fpl_last"]))
             if candidate is not None:

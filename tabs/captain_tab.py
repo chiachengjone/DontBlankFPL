@@ -275,7 +275,7 @@ def render_captain_tab(processor, players_df: pd.DataFrame, fetcher):
         st.dataframe(
             style_df_with_injuries(display_df, players_df, format_dict=format_dict),
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
             height=400
         )
     
@@ -429,7 +429,7 @@ def render_captain_tab(processor, players_df: pd.DataFrame, fetcher):
                 margin=dict(l=80, r=80, t=30, b=30)
             )
             
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
             
             # Side by side metrics
             m1, m2 = st.columns(2)
@@ -567,6 +567,6 @@ def render_captain_tab(processor, players_df: pd.DataFrame, fetcher):
             bargap=0.3
         )
         
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
     else:
         st.info("Not enough data to generate comparison chart")

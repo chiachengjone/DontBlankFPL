@@ -27,7 +27,7 @@ def render_rival_tab(processor, players_df: pd.DataFrame):
     with c2:
         rival_id = st.number_input("Rival Team ID", min_value=_MIN_TEAM_ID, max_value=_MAX_TEAM_ID, value=2, key="rival_id")
     
-    if st.button("Compare Teams", type="primary", use_container_width=True):
+    if st.button("Compare Teams", type="primary", width="stretch"):
         if your_id == rival_id:
             st.warning("Enter different Team IDs")
             return
@@ -242,7 +242,7 @@ def render_unique_players_chart(result: dict, players_df: pd.DataFrame, selected
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
         margin=dict(l=40, r=40, t=40, b=40)
     )
-    st.plotly_chart(fig, use_container_width=True, key='rival_unique_players_chart')
+    st.plotly_chart(fig, width="stretch", key='rival_unique_players_chart')
 
 
 def render_unique_players_tables(result: dict, players_df: pd.DataFrame, selected_models: list):
@@ -256,7 +256,7 @@ def render_unique_players_tables(result: dict, players_df: pd.DataFrame, selecte
         st.markdown("**Your Unique Players**")
         if your_details:
             your_df = pd.DataFrame(your_details)[['Player', 'Pos', 'Team', 'Price', 'xP', 'Form', 'Pts', 'Own%', 'Threat']]
-            st.dataframe(style_df_with_injuries(your_df.sort_values('Threat', ascending=False)), hide_index=True, use_container_width=True)
+            st.dataframe(style_df_with_injuries(your_df.sort_values('Threat', ascending=False)), hide_index=True, width="stretch")
         else:
             st.info("No unique players")
     
@@ -264,6 +264,6 @@ def render_unique_players_tables(result: dict, players_df: pd.DataFrame, selecte
         st.markdown("**Rival's Unique Players**")
         if rival_details:
             rival_df = pd.DataFrame(rival_details)[['Player', 'Pos', 'Team', 'Price', 'xP', 'Form', 'Pts', 'Own%', 'Threat']]
-            st.dataframe(style_df_with_injuries(rival_df.sort_values('Threat', ascending=False)), hide_index=True, use_container_width=True)
+            st.dataframe(style_df_with_injuries(rival_df.sort_values('Threat', ascending=False)), hide_index=True, width="stretch")
         else:
             st.info("No unique players")
