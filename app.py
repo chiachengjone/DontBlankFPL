@@ -3,8 +3,11 @@ FPL Strategy Engine - Streamlit Application
 A high-performance dashboard for Fantasy Premier League 2025/26 season.
 """
 
+import logging
 import streamlit as st
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 # Limit float display globally
 pd.set_option('display.float_format', lambda x: f'{x:.2f}')
@@ -83,10 +86,15 @@ def main():
     if error:
         st.error(f"Failed to load FPL data: {error}")
         st.info("Check your internet connection and refresh.")
-        if st.button("Retry"):
-            st.cache_resource.clear()
-            st.rerun()
-        return
+        # Graceful degradation: show cached data if available
+        if '_last_good_players_df' in st.session_state:
+            st.warning("Showing last cached data (may be stale).")
+            players_df = st.session_state['_last_good_players_df']
+        else:
+            if st.button("Retry"):
+                st.cache_resource.clear()
+                st.rerun()
+            return
     
     if processor is None:
         st.error("Could not initialize data processor")
@@ -102,6 +110,8 @@ def main():
             players_df = processor.get_engineered_features_df(weeks_ahead=weeks_ahead)
             st.session_state[cache_key] = players_df
         st.session_state.players_df = players_df
+        # Store last-good copy for graceful degradation on next failure
+        st.session_state['_last_good_players_df'] = players_df
     except Exception as e:
         st.error(f"Error loading players: {e}")
         return
@@ -117,14 +127,15 @@ def main():
             st.session_state["ml_gws"] = 1
             cv_scores = predictor.cross_validate_predictions(n_splits=3)
             st.session_state["ml_cv_scores"] = cv_scores
-        except Exception:
-            pass  # Silently fall back — ML tab button still available
+        except (ImportError, ValueError, RuntimeError) as exc:
+            logger.debug("ML auto-init skipped: %s", exc)
+            # Silently fall back — ML tab button still available
 
     # Status bar + settings on same row
     try:
         gw = fetcher.get_current_gameweek()
         render_status_bar(f"GW {gw} LIVE | {len(players_df)} players | Updated just now")
-    except:
+    except Exception:
         render_status_bar(f"{len(players_df)} players loaded")
     
     # Settings row (compact) -- Team ID + Toggles
@@ -133,13 +144,13 @@ def main():
         team_id_input = st.number_input(
             "FPL Team ID",
             min_value=0,
-            max_value=99999999,
+            max_value=10_000_000,
             value=st.session_state.fpl_team_id,
             step=1,
             key="header_team_id",
             help="Enter your FPL Team ID (find it in the URL of your team page). Used by Squad Builder and Monte Carlo."
         )
-        st.session_state.fpl_team_id = team_id_input
+        st.session_state.fpl_team_id = int(team_id_input)
         # Understat warning only when offline
         ustat_active = st.session_state.get('_understat_active', None)
         if ustat_active is False:

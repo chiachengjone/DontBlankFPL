@@ -1,11 +1,18 @@
 """Rival Scout tab for FPL Strategy Engine."""
 
+import logging
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 
 from utils.helpers import safe_numeric, style_df_with_injuries, round_df
-from fpl_api import RivalScout
+from fpl_api import RivalScout, FPLAPIError
+
+logger = logging.getLogger(__name__)
+
+# Valid FPL team ID range
+_MIN_TEAM_ID = 1
+_MAX_TEAM_ID = 10_000_000
 
 
 def render_rival_tab(processor, players_df: pd.DataFrame):
@@ -16,9 +23,9 @@ def render_rival_tab(processor, players_df: pd.DataFrame):
     c1, c2 = st.columns(2)
     
     with c1:
-        your_id = st.number_input("Your Team ID", min_value=1, max_value=99999999, value=1, key="your_id")
+        your_id = st.number_input("Your Team ID", min_value=_MIN_TEAM_ID, max_value=_MAX_TEAM_ID, value=1, key="your_id")
     with c2:
-        rival_id = st.number_input("Rival Team ID", min_value=1, max_value=99999999, value=2, key="rival_id")
+        rival_id = st.number_input("Rival Team ID", min_value=_MIN_TEAM_ID, max_value=_MAX_TEAM_ID, value=2, key="rival_id")
     
     if st.button("Compare Teams", type="primary", use_container_width=True):
         if your_id == rival_id:
@@ -28,7 +35,7 @@ def render_rival_tab(processor, players_df: pd.DataFrame):
         with st.spinner("Analyzing..."):
             try:
                 scout = RivalScout(processor.fetcher, processor)
-                result = scout.compare_teams(your_id, rival_id)
+                result = scout.compare_teams(int(your_id), int(rival_id))
                 
                 if result['valid']:
                     # Use Global Model Selection

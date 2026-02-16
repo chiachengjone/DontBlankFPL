@@ -4,6 +4,7 @@ Implements the Knapsack Problem solver for 2025/26 rules.
 PuLP is lazy-loaded to avoid slow startup.
 """
 
+import logging
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional, Tuple
@@ -14,6 +15,8 @@ from config import (
     MAX_BUDGET, MAX_PLAYERS_PER_TEAM, SQUAD_SIZE, STARTING_XI,
     MAX_FREE_TRANSFERS, CAPTAIN_MULTIPLIER, POSITION_CONSTRAINTS,
 )
+
+logger = logging.getLogger(__name__)
 
 # Lazy PuLP import
 _pulp_loaded = False
@@ -314,9 +317,17 @@ class FPLOptimizer:
         
         # === EXTRACT RESULTS ===
         if LpStatus[prob.status] != 'Optimal':
+            status_str = LpStatus[prob.status]
+            # Build an actionable hint for common failure modes
+            hints = []
+            if status_str == 'Infeasible':
+                hints.append('Try relaxing constraints: increase budget, remove must-include, or lower min-games.')
+            elif status_str == 'Not Solved':
+                hints.append('Solver timed out. Reduce player pool or simplify constraints.')
+            logger.warning("Optimizer returned non-optimal status: %s", status_str)
             return OptimizationResult(
                 success=False,
-                status=LpStatus[prob.status],
+                status=status_str,
                 selected_players=[],
                 starting_xi=[],
                 bench=[],
@@ -327,7 +338,7 @@ class FPLOptimizer:
                 transfers_in=[],
                 transfer_cost=0,
                 budget_remaining=0,
-                details={'error': 'No optimal solution found'}
+                details={'error': f'No optimal solution found ({status_str})', 'hints': hints}
             )
         
         # Extract selected players

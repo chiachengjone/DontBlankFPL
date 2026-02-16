@@ -3,6 +3,7 @@ FPL API Module - Data fetching and processing for the 2025/26 FPL Strategy Engin
 Handles all interactions with the official FPL API and The Odds API.
 """
 
+import logging
 import requests
 import pandas as pd
 import numpy as np
@@ -16,9 +17,22 @@ from config import (
     CACHE_DURATION,
 )
 
+logger = logging.getLogger(__name__)
+
+# Maximum number of entries kept in the in-memory cache.
+# Each entry is keyed by endpoint/param combo; this prevents unbounded growth
+# when many unique player/team lookups are performed.
+_MAX_CACHE_ENTRIES: int = 500
+
 
 class FPLDataFetcher:
-    """Handles all FPL API data fetching operations."""
+    """Handles all FPL API data fetching operations with rate limiting and retry."""
+
+    # Rate limiting: minimum seconds between API calls
+    MIN_REQUEST_INTERVAL: float = 1.0
+    MAX_RETRIES: int = 3
+    RETRY_BACKOFF_BASE: float = 2.0  # exponential backoff: 2s, 4s, 8s
+    REQUEST_TIMEOUT: int = 15  # seconds
     
     def __init__(self, odds_api_key: Optional[str] = None):
         self.session = requests.Session()
@@ -27,19 +41,60 @@ class FPLDataFetcher:
             'Accept-Charset': 'utf-8'
         })
         self.odds_api_key = odds_api_key
-        self._cache = {}
-        self._cache_expiry = {}
+        self._cache: Dict[str, dict] = {}
+        self._cache_expiry: Dict[str, float] = {}
         self.cache_duration = CACHE_DURATION
-        
+        self._last_request_time: float = 0.0
+
+    # ── Rate limiting ─────────────────────────────────────────────────────────
+    def _rate_limit(self):
+        """Enforce minimum interval between API requests."""
+        elapsed = time.time() - self._last_request_time
+        if elapsed < self.MIN_REQUEST_INTERVAL:
+            time.sleep(self.MIN_REQUEST_INTERVAL - elapsed)
+        self._last_request_time = time.time()
+
+    def _request_with_retry(self, url: str, context: str = "") -> requests.Response:
+        """Make an HTTP GET with rate limiting and exponential-backoff retry."""
+        last_exc: Optional[Exception] = None
+        for attempt in range(self.MAX_RETRIES):
+            self._rate_limit()
+            try:
+                response = self.session.get(url, timeout=self.REQUEST_TIMEOUT)
+                if response.status_code == 429:  # Too Many Requests
+                    wait = self.RETRY_BACKOFF_BASE ** (attempt + 1)
+                    logger.warning("Rate limited by FPL API (429), retrying in %.1fs… (%s)", wait, context)
+                    time.sleep(wait)
+                    continue
+                response.raise_for_status()
+                response.encoding = 'utf-8'
+                return response
+            except requests.RequestException as exc:
+                last_exc = exc
+                if attempt < self.MAX_RETRIES - 1:
+                    wait = self.RETRY_BACKOFF_BASE ** (attempt + 1)
+                    logger.warning("Request failed (%s), retrying in %.1fs… [%s]", context, wait, exc)
+                    time.sleep(wait)
+        raise FPLAPIError(f"Failed after {self.MAX_RETRIES} retries ({context}): {last_exc}")
+
+    # ── Caching ───────────────────────────────────────────────────────────────
     def _get_cached(self, key: str) -> Optional[dict]:
         """Retrieve cached data if not expired."""
         if key in self._cache:
             if time.time() < self._cache_expiry.get(key, 0):
                 return self._cache[key]
+            # Expired – evict
+            self._cache.pop(key, None)
+            self._cache_expiry.pop(key, None)
         return None
     
     def _set_cache(self, key: str, data: dict):
-        """Cache data with expiration."""
+        """Cache data with expiration. Evicts oldest entries when cache is full."""
+        # Evict oldest entries if at capacity
+        if len(self._cache) >= _MAX_CACHE_ENTRIES:
+            oldest_key = min(self._cache_expiry, key=self._cache_expiry.get)
+            self._cache.pop(oldest_key, None)
+            self._cache_expiry.pop(oldest_key, None)
         self._cache[key] = data
         self._cache_expiry[key] = time.time() + self.cache_duration
     
@@ -51,108 +106,96 @@ class FPLDataFetcher:
         cached = self._get_cached('bootstrap')
         if cached:
             return cached
-            
-        try:
-            response = self.session.get(f"{FPL_BASE_URL}/bootstrap-static/")
-            response.raise_for_status()
-            response.encoding = 'utf-8'
-            data = response.json()
-            self._set_cache('bootstrap', data)
-            return data
-        except requests.RequestException as e:
-            raise FPLAPIError(f"Failed to fetch bootstrap data: {e}")
+
+        response = self._request_with_retry(
+            f"{FPL_BASE_URL}/bootstrap-static/", context="bootstrap-static"
+        )
+        data = response.json()
+        self._set_cache('bootstrap', data)
+        return data
     
     def get_player_summary(self, player_id: int) -> Dict:
         """
         Fetch detailed player history and fixtures.
         Returns past season data, current season history, and upcoming fixtures.
         """
-        cache_key = f'player_{player_id}'
+        player_id = int(player_id)
+        cache_key = f'element_{player_id}'
         cached = self._get_cached(cache_key)
         if cached:
             return cached
-            
-        try:
-            response = self.session.get(f"{FPL_BASE_URL}/element-summary/{player_id}/")
-            response.raise_for_status()
-            response.encoding = 'utf-8'
-            data = response.json()
-            self._set_cache(cache_key, data)
-            return data
-        except requests.RequestException as e:
-            raise FPLAPIError(f"Failed to fetch player {player_id} summary: {e}")
+
+        response = self._request_with_retry(
+            f"{FPL_BASE_URL}/element-summary/{player_id}/",
+            context=f"element-summary/{player_id}",
+        )
+        data = response.json()
+        self._set_cache(cache_key, data)
+        return data
     
     def get_team_picks(self, team_id: int, gameweek: int) -> Dict:
         """
         Fetch a user's squad for a specific gameweek.
         Returns picks, active chip, automatic substitutions, and entry history.
         """
-        cache_key = f'team_{team_id}_gw_{gameweek}'
+        team_id, gameweek = int(team_id), int(gameweek)
+        cache_key = f'picks_{team_id}_gw{gameweek}'
         cached = self._get_cached(cache_key)
         if cached:
             return cached
-            
-        try:
-            response = self.session.get(
-                f"{FPL_BASE_URL}/entry/{team_id}/event/{gameweek}/picks/"
-            )
-            response.raise_for_status()
-            response.encoding = 'utf-8'
-            data = response.json()
-            self._set_cache(cache_key, data)
-            return data
-        except requests.RequestException as e:
-            raise FPLAPIError(f"Failed to fetch team {team_id} GW{gameweek} picks: {e}")
+
+        response = self._request_with_retry(
+            f"{FPL_BASE_URL}/entry/{team_id}/event/{gameweek}/picks/",
+            context=f"entry/{team_id}/event/{gameweek}/picks",
+        )
+        data = response.json()
+        self._set_cache(cache_key, data)
+        return data
     
     def get_team_history(self, team_id: int) -> Dict:
         """Fetch complete history for a team."""
-        cache_key = f'team_history_{team_id}'
+        team_id = int(team_id)
+        cache_key = f'history_{team_id}'
         cached = self._get_cached(cache_key)
         if cached:
             return cached
-            
-        try:
-            response = self.session.get(f"{FPL_BASE_URL}/entry/{team_id}/history/")
-            response.raise_for_status()
-            response.encoding = 'utf-8'
-            data = response.json()
-            self._set_cache(cache_key, data)
-            return data
-        except requests.RequestException as e:
-            raise FPLAPIError(f"Failed to fetch team {team_id} history: {e}")
+
+        response = self._request_with_retry(
+            f"{FPL_BASE_URL}/entry/{team_id}/history/",
+            context=f"entry/{team_id}/history",
+        )
+        data = response.json()
+        self._set_cache(cache_key, data)
+        return data
     
     def get_fixtures(self) -> List[Dict]:
         """Fetch all fixtures for the season."""
         cached = self._get_cached('fixtures')
         if cached:
             return cached
-            
-        try:
-            response = self.session.get(f"{FPL_BASE_URL}/fixtures/")
-            response.raise_for_status()
-            response.encoding = 'utf-8'
-            data = response.json()
-            self._set_cache('fixtures', data)
-            return data
-        except requests.RequestException as e:
-            raise FPLAPIError(f"Failed to fetch fixtures: {e}")
+
+        response = self._request_with_retry(
+            f"{FPL_BASE_URL}/fixtures/", context="fixtures"
+        )
+        data = response.json()
+        self._set_cache('fixtures', data)
+        return data
             
     def get_event_live(self, gameweek: int) -> Dict:
         """Fetch all player points/stats for a specific gameweek."""
-        cache_key = f'live_{gameweek}'
+        gameweek = int(gameweek)
+        cache_key = f'live_gw{gameweek}'
         cached = self._get_cached(cache_key)
         if cached:
             return cached
-            
-        try:
-            response = self.session.get(f"{FPL_BASE_URL}/event/{gameweek}/live/")
-            response.raise_for_status()
-            response.encoding = 'utf-8'
-            data = response.json()
-            self._set_cache(cache_key, data)
-            return data
-        except requests.RequestException as e:
-            raise FPLAPIError(f"Failed to fetch live data for GW{gameweek}: {e}")
+
+        response = self._request_with_retry(
+            f"{FPL_BASE_URL}/event/{gameweek}/live/",
+            context=f"event/{gameweek}/live",
+        )
+        data = response.json()
+        self._set_cache(cache_key, data)
+        return data
     
     def get_current_gameweek(self) -> int:
         """Determine the current gameweek."""

@@ -265,10 +265,27 @@ def _fuzzy_match_score(name1: str, name2: str) -> float:
 # ---------------------------------------------------------------------------
 
 def _build_understat_df(raw: List[Dict]) -> pd.DataFrame:
+    """Build a sanitised DataFrame from raw Understat player dicts.
+
+    Validates the schema: every record must have ``player_name`` and
+    ``team_title``; numeric columns are coerced and clamped to sensible
+    ranges to prevent corrupted upstream data from poisoning predictions.
+    """
     if not raw:
         return pd.DataFrame()
 
-    df = pd.DataFrame(raw)
+    # --- Schema validation: drop records missing critical fields ---
+    _REQUIRED_FIELDS = {"player_name", "team_title"}
+    validated = [r for r in raw if _REQUIRED_FIELDS.issubset(r.keys()) and r["player_name"]]
+    if len(validated) < len(raw):
+        logger.warning(
+            "Understat schema check: dropped %d / %d records with missing player_name/team_title",
+            len(raw) - len(validated), len(raw),
+        )
+    if not validated:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(validated)
 
     num_cols = [
         "games", "time", "goals", "xG", "assists", "xA",
@@ -278,6 +295,11 @@ def _build_understat_df(raw: List[Dict]) -> pd.DataFrame:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
 
+    # --- Sanity clamp: no player plays negative minutes or scores -3 xG ---
+    for col in num_cols:
+        if col in df.columns:
+            df[col] = df[col].clip(lower=0.0)
+
     df["minutes_90"] = df["time"] / 90.0
     has_mins = df["minutes_90"] > 1.0  # at least ~90 total minutes
 
@@ -286,6 +308,13 @@ def _build_understat_df(raw: List[Dict]) -> pd.DataFrame:
         col = f"{m}_per90"
         df[col] = 0.0
         df.loc[has_mins, col] = df.loc[has_mins, m] / df.loc[has_mins, "minutes_90"]
+
+    # Clamp per-90 values to realistic upper bounds
+    _PER90_CAPS = {"xG_per90": 3.0, "xA_per90": 2.0, "npxG_per90": 3.0,
+                   "shots_per90": 10.0, "key_passes_per90": 8.0}
+    for col, cap in _PER90_CAPS.items():
+        if col in df.columns:
+            df[col] = df[col].clip(upper=cap)
 
     # Over/under-performance vs model
     df["goal_overperf"] = df["goals"] - df["xG"]
