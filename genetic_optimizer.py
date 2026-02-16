@@ -11,6 +11,11 @@ from copy import deepcopy
 import warnings
 warnings.filterwarnings('ignore')
 
+from config import (
+    MAX_BUDGET, CAPTAIN_MULTIPLIER,
+    GA_DIVERSITY_BONUS, GA_BUDGET_BONUS, GA_MIN_FITNESS,
+)
+
 
 @dataclass
 class GeneticConfig:
@@ -231,9 +236,9 @@ class GeneticOptimizer:
             player = self.player_lookup.get(pid, {})
             ep = player.get('expected_points', 2.0)
             
-            # Captain gets 1.25x multiplier
+            # Captain gets multiplier
             if pid == captain:
-                ep *= 1.25
+                ep *= CAPTAIN_MULTIPLIER
             
             total_ep += ep
         
@@ -243,14 +248,14 @@ class GeneticOptimizer:
             team = self.player_lookup.get(pid, {}).get('team', 0)
             team_counts[team] = team_counts.get(team, 0) + 1
         
-        diversity_bonus = len(team_counts) * 0.5  # More teams = more diverse
+        diversity_bonus = len(team_counts) * GA_DIVERSITY_BONUS
         
         # Bonus for budget efficiency
         total_cost = sum(self.player_lookup.get(pid, {}).get('now_cost', 5) for pid in squad)
-        remaining_budget = 100.0 - total_cost
-        budget_bonus = remaining_budget * 0.1  # Small bonus for keeping bank
+        remaining_budget = MAX_BUDGET - total_cost
+        budget_bonus = remaining_budget * GA_BUDGET_BONUS
         
-        fitness = total_ep + diversity_bonus + budget_bonus
+        fitness = max(total_ep + diversity_bonus + budget_bonus, GA_MIN_FITNESS)
         
         return fitness
     

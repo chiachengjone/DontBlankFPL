@@ -1,6 +1,6 @@
 """
 FPL API Module - Data fetching and processing for the 2025/26 FPL Strategy Engine.
-Handles all interactions with the official FPL API and The Odds API.
+Handles all interactions with the official FPL API.
 """
 
 import requests
@@ -9,7 +9,9 @@ import numpy as np
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 import time
+import logging
 
+<<<<<<< Updated upstream
 # FPL API Base URLs
 FPL_BASE_URL = "https://fantasy.premierleague.com/api"
 ODDS_API_BASE_URL = "https://api.the-odds-api.com/v4"
@@ -19,21 +21,69 @@ CBIT_BONUS_THRESHOLD = 10  # CBIT points needed for +2 bonus
 CBIT_BONUS_POINTS = 2
 MAX_FREE_TRANSFERS = 5  # New 2025/26 rollover cap
 CAPTAIN_MULTIPLIER = 1.25  # New 2025/26 captaincy boost
+=======
+from config import (
+    FPL_BASE_URL, CBIT_BONUS_THRESHOLD,
+    CBIT_BONUS_POINTS, MAX_FREE_TRANSFERS, CAPTAIN_MULTIPLIER,
+    CACHE_DURATION,
+)
+>>>>>>> Stashed changes
+
+logger = logging.getLogger(__name__)
 
 
 class FPLDataFetcher:
-    """Handles all FPL API data fetching operations."""
+    """Handles all FPL API data fetching operations with rate limiting and retry."""
     
-    def __init__(self, odds_api_key: Optional[str] = None):
+    # Rate limiting: minimum seconds between API calls
+    MIN_REQUEST_INTERVAL: float = 1.0
+    MAX_RETRIES: int = 3
+    RETRY_BACKOFF_BASE: float = 2.0  # exponential backoff: 2s, 4s, 8s
+    
+    def __init__(self):
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': 'FPL-Strategy-Engine/2.0',
             'Accept-Charset': 'utf-8'
         })
-        self.odds_api_key = odds_api_key
         self._cache = {}
         self._cache_expiry = {}
+<<<<<<< Updated upstream
         self.cache_duration = 300  # 5 minutes
+=======
+        self.cache_duration = CACHE_DURATION
+        self._last_request_time: float = 0.0
+        
+    def _rate_limit(self):
+        """Enforce minimum interval between API requests."""
+        elapsed = time.time() - self._last_request_time
+        if elapsed < self.MIN_REQUEST_INTERVAL:
+            time.sleep(self.MIN_REQUEST_INTERVAL - elapsed)
+        self._last_request_time = time.time()
+    
+    def _request_with_retry(self, url: str, context: str = "") -> requests.Response:
+        """Make an HTTP GET with rate limiting and exponential backoff retry."""
+        last_exc = None
+        for attempt in range(self.MAX_RETRIES):
+            self._rate_limit()
+            try:
+                response = self.session.get(url, timeout=15)
+                if response.status_code == 429:  # Too Many Requests
+                    wait = self.RETRY_BACKOFF_BASE ** (attempt + 1)
+                    logger.warning("Rate limited by FPL API (429), retrying in %.1fs... (%s)", wait, context)
+                    time.sleep(wait)
+                    continue
+                response.raise_for_status()
+                response.encoding = 'utf-8'
+                return response
+            except requests.RequestException as e:
+                last_exc = e
+                if attempt < self.MAX_RETRIES - 1:
+                    wait = self.RETRY_BACKOFF_BASE ** (attempt + 1)
+                    logger.warning("Request failed (%s), retrying in %.1fs... [%s]", context, wait, e)
+                    time.sleep(wait)
+        raise FPLAPIError(f"Failed after {self.MAX_RETRIES} retries ({context}): {last_exc}")
+>>>>>>> Stashed changes
         
     def _get_cached(self, key: str) -> Optional[dict]:
         """Retrieve cached data if not expired."""
@@ -57,13 +107,15 @@ class FPLDataFetcher:
             return cached
             
         try:
-            response = self.session.get(f"{FPL_BASE_URL}/bootstrap-static/")
-            response.raise_for_status()
-            response.encoding = 'utf-8'
+            response = self._request_with_retry(
+                f"{FPL_BASE_URL}/bootstrap-static/", context="bootstrap-static"
+            )
             data = response.json()
             self._set_cache('bootstrap', data)
             return data
-        except requests.RequestException as e:
+        except FPLAPIError:
+            raise
+        except Exception as e:
             raise FPLAPIError(f"Failed to fetch bootstrap data: {e}")
     
     def get_player_summary(self, player_id: int) -> Dict:
@@ -77,13 +129,16 @@ class FPLDataFetcher:
             return cached
             
         try:
-            response = self.session.get(f"{FPL_BASE_URL}/element-summary/{player_id}/")
-            response.raise_for_status()
-            response.encoding = 'utf-8'
+            response = self._request_with_retry(
+                f"{FPL_BASE_URL}/element-summary/{player_id}/",
+                context=f"player-{player_id}-summary"
+            )
             data = response.json()
             self._set_cache(cache_key, data)
             return data
-        except requests.RequestException as e:
+        except FPLAPIError:
+            raise
+        except Exception as e:
             raise FPLAPIError(f"Failed to fetch player {player_id} summary: {e}")
     
     def get_team_picks(self, team_id: int, gameweek: int) -> Dict:
@@ -97,15 +152,16 @@ class FPLDataFetcher:
             return cached
             
         try:
-            response = self.session.get(
-                f"{FPL_BASE_URL}/entry/{team_id}/event/{gameweek}/picks/"
+            response = self._request_with_retry(
+                f"{FPL_BASE_URL}/entry/{team_id}/event/{gameweek}/picks/",
+                context=f"team-{team_id}-gw{gameweek}-picks"
             )
-            response.raise_for_status()
-            response.encoding = 'utf-8'
             data = response.json()
             self._set_cache(cache_key, data)
             return data
-        except requests.RequestException as e:
+        except FPLAPIError:
+            raise
+        except Exception as e:
             raise FPLAPIError(f"Failed to fetch team {team_id} GW{gameweek} picks: {e}")
     
     def get_team_history(self, team_id: int) -> Dict:
@@ -116,13 +172,16 @@ class FPLDataFetcher:
             return cached
             
         try:
-            response = self.session.get(f"{FPL_BASE_URL}/entry/{team_id}/history/")
-            response.raise_for_status()
-            response.encoding = 'utf-8'
+            response = self._request_with_retry(
+                f"{FPL_BASE_URL}/entry/{team_id}/history/",
+                context=f"team-{team_id}-history"
+            )
             data = response.json()
             self._set_cache(cache_key, data)
             return data
-        except requests.RequestException as e:
+        except FPLAPIError:
+            raise
+        except Exception as e:
             raise FPLAPIError(f"Failed to fetch team {team_id} history: {e}")
     
     def get_fixtures(self) -> List[Dict]:
@@ -132,13 +191,15 @@ class FPLDataFetcher:
             return cached
             
         try:
-            response = self.session.get(f"{FPL_BASE_URL}/fixtures/")
-            response.raise_for_status()
-            response.encoding = 'utf-8'
+            response = self._request_with_retry(
+                f"{FPL_BASE_URL}/fixtures/", context="fixtures"
+            )
             data = response.json()
             self._set_cache('fixtures', data)
             return data
-        except requests.RequestException as e:
+        except FPLAPIError:
+            raise
+        except Exception as e:
             raise FPLAPIError(f"Failed to fetch fixtures: {e}")
             
     def get_event_live(self, gameweek: int) -> Dict:
@@ -149,13 +210,16 @@ class FPLDataFetcher:
             return cached
             
         try:
-            response = self.session.get(f"{FPL_BASE_URL}/event/{gameweek}/live/")
-            response.raise_for_status()
-            response.encoding = 'utf-8'
+            response = self._request_with_retry(
+                f"{FPL_BASE_URL}/event/{gameweek}/live/",
+                context=f"live-gw{gameweek}"
+            )
             data = response.json()
             self._set_cache(cache_key, data)
             return data
-        except requests.RequestException as e:
+        except FPLAPIError:
+            raise
+        except Exception as e:
             raise FPLAPIError(f"Failed to fetch live data for GW{gameweek}: {e}")
     
     def get_current_gameweek(self) -> int:
@@ -172,58 +236,11 @@ class FPLDataFetcher:
         return 1
 
 
-class OddsDataFetcher:
-    """Handles betting odds data for probability calculations."""
-    
-    def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key
-        self._dummy_data = self._generate_dummy_odds()
-    
-    def _generate_dummy_odds(self) -> Dict[str, Dict]:
-        """Generate dummy odds data as fallback."""
-        return {
-            'anytime_goalscorer': {
-                'Haaland': 1.50, 'Salah': 2.10, 'Watkins': 3.00,
-                'Isak': 2.80, 'Palmer': 2.50, 'Saka': 3.20,
-                'Son': 2.90, 'Gordon': 3.50, 'Solanke': 3.80,
-                'Darwin Núñez': 2.60
-            },
-            'clean_sheet': {
-                'Arsenal': 2.20, 'Man City': 2.00, 'Liverpool': 2.10,
-                'Chelsea': 2.80, 'Tottenham': 3.20, 'Newcastle': 2.50,
-                'Man Utd': 3.00, 'Aston Villa': 2.90, 'Brighton': 3.10,
-                'West Ham': 3.50, 'Fulham': 3.80, 'Brentford': 3.60,
-                'Crystal Palace': 3.40, 'Everton': 3.70, 'Bournemouth': 3.90,
-                'Wolves': 3.50, 'Nottm Forest': 3.30, 'Leicester': 4.00,
-                'Ipswich': 4.50, 'Southampton': 4.20
-            }
-        }
-    
-    def get_goalscorer_odds(self, player_name: str) -> float:
-        """Get anytime goalscorer odds for a player."""
-        if self.api_key:
-            # Would call actual API here
-            pass
-        return self._dummy_data['anytime_goalscorer'].get(player_name, 5.0)
-    
-    def get_clean_sheet_odds(self, team_name: str) -> float:
-        """Get clean sheet odds for a team."""
-        if self.api_key:
-            # Would call actual API here
-            pass
-        return self._dummy_data['clean_sheet'].get(team_name, 3.5)
-    
-    def odds_to_probability(self, decimal_odds: float) -> float:
-        """Convert decimal odds to implied probability."""
-        return 1.0 / decimal_odds if decimal_odds > 0 else 0.0
-
-
 class FPLDataProcessor:
     """Processes and engineers features from raw FPL data."""
     
-    def __init__(self, fetcher: FPLDataFetcher, odds_fetcher: Optional[OddsDataFetcher] = None):
+    def __init__(self, fetcher: FPLDataFetcher):
         self.fetcher = fetcher
-        self.odds_fetcher = odds_fetcher or OddsDataFetcher()
         self._bootstrap_data = None
         self._players_df = None
         self._teams_df = None
@@ -311,15 +328,6 @@ class FPLDataProcessor:
         """
         Calculate enhanced CBIT metrics (Clearances, Blocks, Interceptions, Tackles).
         2025/26 "DefCon" scoring: DEF threshold=10, others=12 for +2 bonus.
-        
-        New metrics:
-        - cbit_aa90: Average (estimated) actions per 90 minutes
-        - cbit_dtt: Distance to threshold (negative = below, positive = above)
-        - cbit_prob: Poisson probability of hitting CBIT threshold (0-1)
-        - cbit_hit_rate: Season % estimate of games hitting threshold
-        - cbit_floor: Defensive floor score = xCS × 4 + P(CBIT) × 2
-        - cbit_matchup: Opponent givingness factor (higher = more actions expected)
-        - cbit_score: Composite CBIT value metric for display
         """
         from scipy.stats import poisson
         df = df.copy()
@@ -332,69 +340,70 @@ class FPLDataProcessor:
         df['_games'] = (df['minutes'].fillna(0) / 90).clip(lower=0.1)
         
         # ── Estimate Average Actions per 90 (AA90) ──
-        # FPL API doesn't provide tackles/interceptions/clearances/blocks directly
-        # Use position-based baseline + clean sheet rate as defensive solidity proxy
-        cs_rate = (df['clean_sheets'].fillna(0) / df['_games']).clip(0, 1)
-        
+        # Check if we have real historical data first
+        if 'cbit_per_gw_history' in df.columns:
+            # Calculate decay-weighted AA90 from history if available
+            from config import CBIT_DECAY_HALFLIFE_GW
+            def _calc_historical_aa90(history):
+                if not isinstance(history, (list, np.ndarray)) or len(history) == 0:
+                    return None
+                n = len(history)
+                # Recency bias: newer games have higher weight
+                decay = np.exp(-np.log(2) / CBIT_DECAY_HALFLIFE_GW * np.arange(n)[::-1])
+                return float(np.dot(history, decay) / decay.sum())
+            
+            df['cbit_aa90_hist'] = df['cbit_per_gw_history'].apply(_calc_historical_aa90)
+            use_hist = df['cbit_aa90_hist'].notna()
+        else:
+            use_hist = pd.Series(False, index=df.index)
+
         # Base defensive action rates by position (empirical estimates)
         base_aa90 = {
-            'GKP': 4.0,   # GKs get fewer field actions but more saves
-            'DEF': 12.0,  # CBs average ~12 actions, WBs slightly less
-            'MID': 7.0,   # CDMs higher, CAMs lower
-            'FWD': 3.0,   # Minimal defensive work
+            'GKP': 4.0, 'DEF': 12.0, 'MID': 7.0, 'FWD': 3.0
         }
         df['_base_aa90'] = df['position'].map(base_aa90).fillna(5.0)
         
-        # Adjust by CS rate (good defenders do more defensive work in games they keep CS)
-        # Also adjust by minutes consistency (rotation = less reliable)
-        mins_consistency = (df['minutes'] / (df['_games'] * 90).clip(lower=1)).clip(0, 1)
-        
-        # For DEF: high CS rate correlates with solid defensive actions
-        # Scaling: 0.5 CS rate → +20% actions, 0.0 CS rate → -10%
+        # CS-based adjustment (solidity proxy)
+        cs_rate = (df['clean_sheets'].fillna(0) / df['_games']).clip(0, 1)
         cs_adjustment = np.where(
             df['position'].isin(['GKP', 'DEF']),
-            1.0 + (cs_rate - 0.3) * 0.5,  # 30% CS is baseline
-            1.0  # No adjustment for MID/FWD
+            1.0 + (cs_rate - 0.3) * 0.5,
+            1.0
         )
         
-        df['cbit_aa90'] = (df['_base_aa90'] * cs_adjustment * mins_consistency).round(1)
+        # Minutes consistency
+        mins_consistency = (df['minutes'] / (df['_games'] * 90).clip(lower=1)).clip(0, 1)
+        
+        # Final AA90: Prefer history, fallback to estimate
+        df['cbit_aa90_est'] = (df['_base_aa90'] * cs_adjustment * mins_consistency).round(1)
+        df['cbit_aa90'] = np.where(use_hist, df.get('cbit_aa90_hist', 0), df['cbit_aa90_est']).astype(float).round(1)
         
         # ── Distance to Threshold (DTT) ──
-        # Positive = exceeds threshold, Negative = below threshold
-        # Players near 0 are "high variance" CBIT assets
         df['cbit_dtt'] = (df['cbit_aa90'] - df['cbit_threshold']).round(1)
         
         # ── CBIT Probability (Poisson) ──
-        # P(actions >= threshold) = 1 - CDF(threshold - 1)
         def calc_cbit_prob(aa90, threshold):
-            if aa90 <= 0:
-                return 0.0
+            if aa90 <= 0: return 0.0
             return 1 - poisson.cdf(threshold - 1, aa90)
         
         df['cbit_prob'] = df.apply(
             lambda r: calc_cbit_prob(r['cbit_aa90'], r['cbit_threshold']), axis=1
         ).clip(0, 1).round(3)
         
-        # ── Hit Rate (Season %) ──
-        # Combination of probability and minutes consistency
+        # ── Hit Rate & Floor ──
         df['cbit_hit_rate'] = (df['cbit_prob'] * mins_consistency).round(2)
         
-        # ── Clean Sheet Probability (xCS) ──
-        # Prefer Poisson p_cs from fixture-based calculation, fallback to CS rate
         if 'poisson_p_cs' in df.columns:
             p_cs = pd.to_numeric(df['poisson_p_cs'], errors='coerce').fillna(cs_rate)
-            df['_xcs'] = p_cs.clip(0, 0.7)  # Cap at 70%
+            df['_xcs'] = p_cs.clip(0, 0.7)
         else:
-            df['_xcs'] = cs_rate.clip(0, 0.6)  # Cap at 60%
+            df['_xcs'] = cs_rate.clip(0, 0.6)
         
-        # ── Defensive Floor Score ──
-        # xP_floor = xCS × 4pts + P(CBIT) × 2pts
+        from config import CBIT_BONUS_POINTS
         cs_pts = df['position'].map({'GKP': 4, 'DEF': 4, 'MID': 1, 'FWD': 0}).fillna(0)
         df['cbit_floor'] = (df['_xcs'] * cs_pts + df['cbit_prob'] * CBIT_BONUS_POINTS).round(2)
         
-        # ── Opponent Givingness / Matchup Factor ──
-        # Teams with high xG create more defensive action opportunities
-        # High xG opponents = more shots to block/clear/tackle
+        # ── Matchup Adjustment ──
         if 'poisson_opp_xG_per90' in df.columns:
             opp_xg = pd.to_numeric(df['poisson_opp_xG_per90'], errors='coerce').fillna(1.35)
             league_avg_xg = opp_xg[opp_xg > 0].mean() or 1.35
@@ -402,28 +411,17 @@ class FPLDataProcessor:
         else:
             df['cbit_matchup'] = 1.0
         
-        # Adjust AA90 and probability by matchup
-        df['cbit_aa90_adj'] = (df['cbit_aa90'] * df['cbit_matchup']).round(1)
-        df['cbit_prob_adj'] = df.apply(
-            lambda r: calc_cbit_prob(r['cbit_aa90_adj'], r['cbit_threshold']), axis=1
-        ).clip(0, 1).round(3)
-        
-        # ── Composite CBIT Score (for display) ──
-        # Weighted: 40% prob, 30% floor, 20% consistency, 10% matchup bonus
+        # ── Composite CBIT Score ──
         df['cbit_score'] = (
-            df['cbit_prob'] * 0.4 * 10 +
+            df['cbit_prob'] * 4.0 +
             df['cbit_floor'] * 0.3 +
-            df['cbit_hit_rate'] * 0.2 * 10 +
-            (df['cbit_matchup'] - 1) * 0.1 * 5
+            df['cbit_hit_rate'] * 2.0 +
+            (df['cbit_matchup'] - 1) * 0.5
         ).round(2)
         
-        # ── Legacy compatibility ──
+        # Legacy/Compatibility
         df['cbit_propensity'] = df['cbit_prob']
         df['cbit_bonus_expected'] = (df['cbit_prob'] * CBIT_BONUS_POINTS).round(2)
-        df['cbit_safety_floor'] = df['cbit_floor']
-        
-        # Clean up temp columns
-        df.drop(columns=['_games', '_base_aa90', '_xcs'], inplace=True, errors='ignore')
         
         return df
     
@@ -1114,11 +1112,10 @@ class FPLAPIError(Exception):
 
 
 # Utility functions for external use
-def create_data_pipeline(odds_api_key: Optional[str] = None) -> Tuple[FPLDataFetcher, FPLDataProcessor]:
+def create_data_pipeline() -> Tuple[FPLDataFetcher, FPLDataProcessor]:
     """Create and return the full data pipeline."""
-    fetcher = FPLDataFetcher(odds_api_key)
-    odds_fetcher = OddsDataFetcher(odds_api_key)
-    processor = FPLDataProcessor(fetcher, odds_fetcher)
+    fetcher = FPLDataFetcher()
+    processor = FPLDataProcessor(fetcher)
     return fetcher, processor
 
 

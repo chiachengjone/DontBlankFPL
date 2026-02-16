@@ -5,8 +5,16 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 
+<<<<<<< Updated upstream
 from utils.helpers import safe_numeric, get_injury_status, style_df_with_injuries, round_df, normalize_name
 from components.charts import create_ep_ownership_scatter
+=======
+from utils.helpers import (
+    safe_numeric, get_injury_status, style_df_with_injuries, round_df, normalize_name,
+    calculate_consensus_ep, get_consensus_label, calculate_enhanced_captain_score
+)
+from components.charts import create_dynamic_player_scatter
+>>>>>>> Stashed changes
 from components.cards import render_player_detail_card
 from fpl_api import CBIT_BONUS_THRESHOLD, CBIT_BONUS_POINTS, MAX_FREE_TRANSFERS, CAPTAIN_MULTIPLIER
 
@@ -81,6 +89,18 @@ def render_strategy_tab(processor, players_df: pd.DataFrame):
     with f4:
         search_player = st.text_input("Search player", placeholder="Type name to highlight...", key="strat_search")
     
+    # ── Map/Exploration Controls ──
+    st.markdown('<p class="section-title">Player Exploration</p>', unsafe_allow_html=True)
+    c1, c2 = st.columns([1, 3])
+    with c1:
+        x_axis = st.selectbox(
+            "X-Axis Variable", 
+            ["Ownership %", "Form", "Price", "Total Points", "ICT Index", "Value (xP/£)"],
+            index=0,
+            key="strat_x_axis"
+        )
+        st.caption("Change the x-axis to explore different player metrics vs Model xP.")
+    
     # Use base player data for fast graph rendering
     df = players_df.copy()
     df['now_cost'] = safe_numeric(df['now_cost'], 5)
@@ -115,20 +135,29 @@ def render_strategy_tab(processor, players_df: pd.DataFrame):
             if len(matched) > 1:
                 st.caption(f"Other matches: {', '.join(matched['web_name'].tolist()[:10])}")
     
+<<<<<<< Updated upstream
     # Scatter plot
     if 'expected_points' in df.columns or 'ep_next' in df.columns:
         fig = create_ep_ownership_scatter(df, pos_filter, search_player=search_player)
+=======
+    # Dynamic Scatter plot
+    if 'consensus_ep' in df.columns or 'expected_points_poisson' in df.columns or 'ep_next' in df.columns:
+        fig = create_dynamic_player_scatter(
+            df, 
+            x_axis_col=x_axis,
+            position_filter=pos_filter, 
+            search_player=search_player, 
+            ep_label=con_label
+        )
+>>>>>>> Stashed changes
         if fig:
-            st.plotly_chart(fig, use_container_width=True, key='strategy_ep_ownership_scatter')
+            st.plotly_chart(fig, use_container_width=True, key='strategy_dynamic_scatter')
     else:
         st.info("Data loading...")
     
     # Quick stats
     st.markdown('<p class="section-title">Quick Stats</p>', unsafe_allow_html=True)
     render_quick_stats(df)
-    
-    # Form vs EP bubble chart
-    render_form_vs_ep_chart(df)
     
     # Captain planning
     render_captain_planning(players_df, processor)
@@ -172,6 +201,7 @@ def render_quick_stats(df: pd.DataFrame):
         st.metric("Avg Price", f"{avg_price:.1f}m")
 
 
+<<<<<<< Updated upstream
 def render_form_vs_ep_chart(df: pd.DataFrame):
     """Render Form vs EP bubble chart — size = price, color = position."""
     st.markdown('<p class="section-title">Form vs Expected Points</p>', unsafe_allow_html=True)
@@ -227,6 +257,8 @@ def render_form_vs_ep_chart(df: pd.DataFrame):
         margin=dict(l=50, r=30, t=30, b=50)
     )
     st.plotly_chart(fig, use_container_width=True, key='strategy_form_vs_ep')
+=======
+>>>>>>> Stashed changes
 
 
 def render_captain_planning(players_df: pd.DataFrame, processor):

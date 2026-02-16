@@ -146,6 +146,136 @@ def render_team_analysis_tab(processor, players_df: pd.DataFrame):
         
         st.markdown("---")
         
+<<<<<<< Updated upstream
+=======
+        # ── Team Attack/Defense Stats (Moved up) ──
+        st.markdown("### Team Statistics")
+        
+        # Calculate stats for ALL teams to determine ranks
+        all_team_stats = []
+        for tid in processor.teams_df['id'].unique():
+            t_players = players_df[players_df['team'] == tid]
+            t_attackers = t_players[t_players['position'].isin(['MID', 'FWD'])]
+            t_defenders = t_players[t_players['position'].isin(['GKP', 'DEF'])]
+            
+            all_team_stats.append({
+                'id': tid,
+                'goals': safe_numeric(t_attackers.get('goals_scored', 0)).sum(),
+                'assists': safe_numeric(t_attackers.get('assists', 0)).sum(),
+                'xg': safe_numeric(t_attackers.get('us_xG', t_attackers.get('expected_goals', 0))).sum(),
+                'xa': safe_numeric(t_attackers.get('us_xA', t_attackers.get('expected_assists', 0))).sum(),
+                'xg_diff': safe_numeric(t_attackers.get('goals_scored', 0)).sum() - safe_numeric(t_attackers.get('us_xG', t_attackers.get('expected_goals', 0))).sum(),
+                'threat': safe_numeric(t_attackers.get('threat', 0)).sum() + safe_numeric(t_attackers.get('creativity', 0)).sum(),
+                'cs': safe_numeric(t_defenders.get('clean_sheets', 0)).sum() / max(len(t_defenders), 1),
+                'saves': safe_numeric(t_defenders.get('saves', 0)).sum(),
+                'cbit': safe_numeric(t_defenders.get('cbit_score', 0)).mean(),
+                'gc': safe_numeric(t_defenders.get('goals_conceded', 0)).sum() / max(len(t_defenders), 1),
+                'xgc': safe_numeric(t_defenders.get('expected_goals_conceded', 0)).mean(),
+                'discipline': safe_numeric(t_players.get('yellow_cards', 0)).sum() + (safe_numeric(t_players.get('red_cards', 0)).sum() * 3)
+            })
+        
+        stats_df = pd.DataFrame(all_team_stats)
+        
+        # Helper to get rank string
+        def get_rank(tid, metric, ascending=False):
+            ranks = stats_df[metric].rank(method='min', ascending=ascending)
+            rank = int(ranks[stats_df['id'] == tid].iloc[0])
+            return f" <span style='font-size:0.75rem;color:#888;'>({rank}º)</span>"
+
+        stat_cols = st.columns(2)
+        
+        with stat_cols[0]:
+            st.markdown("**Attacking Output**")
+            attackers = team_players[team_players['position'].isin(['MID', 'FWD'])]
+            total_goals = safe_numeric(attackers.get('goals_scored', 0)).sum()
+            total_assists = safe_numeric(attackers.get('assists', 0)).sum()
+            total_xg = safe_numeric(attackers.get('us_xG', attackers.get('expected_goals', 0))).sum()
+            total_xa = safe_numeric(attackers.get('us_xA', attackers.get('expected_assists', 0))).sum()
+            
+            st.markdown(f'''
+            <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:0.5rem;">
+                <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;text-align:center;">
+                    <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">Goals</div>
+                    <div style="color:#22c55e;font-weight:600;font-family:'JetBrains Mono',monospace;">{int(total_goals)}{get_rank(team_id, 'goals')}</div>
+                </div>
+                <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;text-align:center;">
+                    <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">Assists</div>
+                    <div style="color:#3b82f6;font-weight:600;font-family:'JetBrains Mono',monospace;">{int(total_assists)}{get_rank(team_id, 'assists')}</div>
+                </div>
+                <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;text-align:center;">
+                    <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">xG</div>
+                    <div style="color:#22c55e;font-weight:600;font-family:'JetBrains Mono',monospace;">{total_xg:.2f}{get_rank(team_id, 'xg')}</div>
+                </div>
+                <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;text-align:center;">
+                    <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">xA</div>
+                    <div style="color:#3b82f6;font-weight:600;font-family:'JetBrains Mono',monospace;">{total_xa:.2f}{get_rank(team_id, 'xa')}</div>
+                </div>
+            </div>
+            ''', unsafe_allow_html=True)
+        
+        with stat_cols[1]:
+            st.markdown("**Defensive Output**")
+            defenders = team_players[team_players['position'].isin(['GKP', 'DEF'])]
+            total_cs = safe_numeric(defenders.get('clean_sheets', 0)).sum() / max(len(defenders), 1)
+            total_saves = safe_numeric(defenders.get('saves', 0)).sum()
+            avg_cbit = safe_numeric(defenders.get('cbit_score', 0)).mean()
+            goals_conceded = safe_numeric(defenders.get('goals_conceded', 0)).sum() / max(len(defenders), 1)
+            
+            st.markdown(f'''
+            <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:0.5rem;">
+                <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;text-align:center;">
+                    <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">Avg CS</div>
+                    <div style="color:#22c55e;font-weight:600;font-family:'JetBrains Mono',monospace;">{total_cs:.2f}{get_rank(team_id, 'cs')}</div>
+                </div>
+                <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;text-align:center;">
+                    <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">Def xGC</div>
+                    <div style="color:#f59e0b;font-weight:600;font-family:'JetBrains Mono',monospace;">{safe_numeric(defenders.get('expected_goals_conceded', 0)).mean():.2f}{get_rank(team_id, 'xgc', ascending=True)}</div>
+                </div>
+                <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;text-align:center;">
+                    <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">Avg CBIT</div>
+                    <div style="color:#3b82f6;font-weight:600;font-family:'JetBrains Mono',monospace;">{avg_cbit:.2f}{get_rank(team_id, 'cbit')}</div>
+                </div>
+                <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;text-align:center;">
+                    <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">Discipline</div>
+                    <div style="color:#ef4444;font-weight:600;font-family:'JetBrains Mono',monospace;">{int(safe_numeric(team_players.get('yellow_cards', 0)).sum() + safe_numeric(team_players.get('red_cards', 0)).sum()*3)}{get_rank(team_id, 'discipline', ascending=True)}</div>
+                </div>
+            </div>
+            ''', unsafe_allow_html=True)
+            
+        st.markdown("**Performance Indices**")
+        p_cols = st.columns(3)
+        with p_cols[0]:
+            xg_diff = total_goals - total_xg
+            st.markdown(f'''
+            <div style="background:#fff;border:1px solid rgba(0,0,0,0.1);padding:0.75rem;border-radius:8px;text-align:center;">
+                <div style="color:#86868b;font-size:0.75rem;text-transform:uppercase;font-weight:600;">Clinicality (Goals - xG)</div>
+                <div style="color:{'#22c55e' if xg_diff > 0 else '#ef4444'};font-size:1.2rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{xg_diff:+.2f}{get_rank(team_id, 'xg_diff')}</div>
+                <div style="font-size:0.7rem;color:#666;">Higher = clinical finishing</div>
+            </div>
+            ''', unsafe_allow_html=True)
+            
+        with p_cols[1]:
+            threat_idx = safe_numeric(attackers.get('threat', 0)).sum() + safe_numeric(attackers.get('creativity', 0)).sum()
+            st.markdown(f'''
+            <div style="background:#fff;border:1px solid rgba(0,0,0,0.1);padding:0.75rem;border-radius:8px;text-align:center;">
+                <div style="color:#86868b;font-size:0.75rem;text-transform:uppercase;font-weight:600;">Threat Index</div>
+                <div style="color:#3b82f6;font-size:1.2rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{int(threat_idx)}{get_rank(team_id, 'threat')}</div>
+                <div style="font-size:0.7rem;color:#666;">Aggregated attacking pressure</div>
+            </div>
+            ''', unsafe_allow_html=True)
+            
+        with p_cols[2]:
+            st.markdown(f'''
+            <div style="background:#fff;border:1px solid rgba(0,0,0,0.1);padding:0.75rem;border-radius:8px;text-align:center;">
+                <div style="color:#86868b;font-size:0.75rem;text-transform:uppercase;font-weight:600;">Defensive Solidity</div>
+                <div style="color:#8b5cf6;font-size:1.2rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{get_rank(team_id, 'xgc', ascending=True).replace(' (', '').replace('º)', '')}º</div>
+                <div style="font-size:0.7rem;color:#666;">League rank by xGC per 90</div>
+            </div>
+            ''', unsafe_allow_html=True)
+        
+        st.markdown("---")
+        
+>>>>>>> Stashed changes
         # ── Fixture Ticker ──
         st.markdown("### Next 8 Fixtures")
         

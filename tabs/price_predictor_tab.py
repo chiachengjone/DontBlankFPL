@@ -115,7 +115,7 @@ def render_price_predictor_tab(processor, players_df: pd.DataFrame):
     st.caption("Players with net transfers above threshold - buy before they rise!")
     
     if not rising.empty:
-        rise_df = rising.nlargest(15, 'net_transfers')[
+        rise_df = rising.nlargest(5, 'net_transfers')[
             ['web_name', 'team_name', 'position', 'now_cost', 'net_transfers', 
              'transfers_in_event', 'expected_points', 'selected_by_percent']
         ].copy()
@@ -131,7 +131,7 @@ def render_price_predictor_tab(processor, players_df: pd.DataFrame):
             }),
             hide_index=True,
             use_container_width=True,
-            height=400
+            height=230
         )
     else:
         st.info("No players currently on track to rise tonight")
@@ -143,7 +143,7 @@ def render_price_predictor_tab(processor, players_df: pd.DataFrame):
     st.caption("Players with heavy selling - consider avoiding or selling before they fall")
     
     if not falling.empty:
-        fall_df = falling.nsmallest(15, 'net_transfers')[
+        fall_df = falling.nsmallest(5, 'net_transfers')[
             ['web_name', 'team_name', 'position', 'now_cost', 'net_transfers',
              'transfers_out_event', 'expected_points', 'selected_by_percent']
         ].copy()
@@ -159,7 +159,7 @@ def render_price_predictor_tab(processor, players_df: pd.DataFrame):
             }),
             hide_index=True,
             use_container_width=True,
-            height=400
+            height=230
         )
     else:
         st.info("No players currently on track to fall tonight")

@@ -27,11 +27,160 @@ DEFAULT_WEEKS_AHEAD = 5
 DECAY_FACTOR = 0.95
 TRANSFER_HIT_COST = 4
 
+<<<<<<< Updated upstream
 # ── FDR Thresholds ──
 FDR_EASY = 2       # <= 2 is easy
 FDR_MEDIUM = 3     # 3 is medium
 FDR_HARD = 4       # >= 4 is tough
 FDR_COLOR_MAP = {
+=======
+GOAL_POINTS: Dict[str, int] = {"GKP": 10, "DEF": 6, "MID": 5, "FWD": 4}
+ASSIST_POINTS: int = 3
+CLEAN_SHEET_POINTS: Dict[str, int] = {"GKP": 4, "DEF": 4, "MID": 1, "FWD": 0}
+APPEARANCE_POINTS: Dict[int, int] = {60: 2, 1: 1}  # 60+ mins → 2pts, 1-59 → 1pt
+CBIT_THRESHOLDS: Dict[str, int] = {"GKP": 12, "DEF": 10, "MID": 12, "FWD": 12}
+GOALS_CONCEDED_PER_2_PENALTY: int = -1  # GKP/DEF lose 1pt per 2 goals conceded
+SAVES_PER_BONUS_POINT: int = 3  # 3 saves = 1pt (goalkeepers)
+BONUS_POINT_POSITION_MULTIPLIER: Dict[str, float] = {
+    "GKP": 1.5, "DEF": 1.3, "MID": 1.0, "FWD": 0.85,
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
+# HOME / AWAY MULTIPLIERS (based on historical EPL data)
+# ══════════════════════════════════════════════════════════════════════════════
+
+HOME_ADVANTAGE_ATTACK: float = 1.15   # ~15% more goals at home
+HOME_ADVANTAGE_DEFENSE: float = 0.90  # ~10% fewer goals conceded at home
+AWAY_MULTIPLIER_ATTACK: float = 0.87
+AWAY_MULTIPLIER_DEFENSE: float = 1.10
+
+# ══════════════════════════════════════════════════════════════════════════════
+# LEAGUE AVERAGES (updated each season)
+# ══════════════════════════════════════════════════════════════════════════════
+
+LEAGUE_AVG_XG_PER_MATCH: float = 1.35   # ~2.7 goals/game split between teams
+LEAGUE_AVG_XGA_PER_MATCH: float = 1.35
+
+# ══════════════════════════════════════════════════════════════════════════════
+# POISSON CALCULATION LIMITS
+# ══════════════════════════════════════════════════════════════════════════════
+
+MAX_K_GOALS: int = 5   # Player rarely scores 5+ in a match
+MAX_K_ASSISTS: int = 4
+CLEAN_SHEET_PROBABILITY_CAP: float = 0.60  # Even best teams rarely > 50%
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MODEL BLEND WEIGHTS
+# ══════════════════════════════════════════════════════════════════════════════
+
+MODEL_WEIGHTS: Dict[str, float] = {
+    'ml': 0.4,
+    'poisson': 0.4,
+    'fpl': 0.2,
+}
+ML_FALLBACK_RATIO: float = 0.9  # When no ML data, use poisson × this
+
+# ══════════════════════════════════════════════════════════════════════════════
+# OPTIMIZATION DEFAULTS
+# ══════════════════════════════════════════════════════════════════════════════
+
+DEFAULT_WEEKS_AHEAD: int = 5
+DECAY_FACTOR: float = 0.95
+TRANSFER_HIT_COST: int = 4
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MONTE CARLO DEFAULTS
+# ══════════════════════════════════════════════════════════════════════════════
+
+MC_DEFAULT_SIMULATIONS: int = 10_000
+
+# Monte Carlo variance estimation weights
+# estimated_std = ep * MC_STD_EP_WEIGHT + (MC_STD_FORM_BASELINE - form) * MC_STD_FORM_WEIGHT
+#                 + rotation_penalty
+MC_STD_EP_WEIGHT: float = 0.4       # Base volatility proportional to EP
+MC_STD_FORM_BASELINE: float = 5.0   # Form value treated as "average"
+MC_STD_FORM_WEIGHT: float = 0.3     # Poor form adds this per unit below baseline
+MC_STD_ROTATION_WEIGHT: float = 2.0 # Full-rotation player gets +2 std
+MC_STD_MIN: float = 0.5             # Floor on estimated std
+MC_EPSILON: float = 0.1             # Minimum EP/std for numerical safety
+
+# ML prediction uncertainty parameters
+ML_BASE_UNCERTAINTY: float = 0.5    # Minimum inherent prediction uncertainty
+ML_LOW_EP_UNCERTAINTY: float = 0.3  # Extra uncertainty for low-EP players
+ML_LOW_EP_THRESHOLD: float = 4.0    # EP below which extra uncertainty applies
+
+# Genetic optimizer scoring weights
+GA_DIVERSITY_BONUS: float = 0.5     # Points per unique team in squad
+GA_BUDGET_BONUS: float = 0.1        # Fraction of remaining budget added to fitness
+GA_MIN_FITNESS: float = -500.0      # Floor on fitness to prevent numerical issues
+
+# ══════════════════════════════════════════════════════════════════════════════
+# BENCH STRENGTH & RISK-AWARE OPTIMIZATION
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Weight given to bench xP in the optimizer objective (0 = ignore bench)
+BENCH_XP_WEIGHT: float = 0.15
+
+# Risk-mode multiplier: how much variance (std) to subtract from xP
+# risk_score = xP - RISK_AVERSION * std(xP)
+# Higher = more conservative; use 0 for pure xP maximisation
+RISK_AVERSION_DEFAULT: float = 0.0
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CORRELATION MODEL (BIVARIATE POISSON)
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Intra-team attack correlation coefficient (goals ↔ assists on same team)
+TEAM_ATTACK_CORRELATION: float = 0.20
+
+# ══════════════════════════════════════════════════════════════════════════════
+# INJURY RECOVERY CURVES (by keyword category)
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Each entry: (fixture_0_multiplier, fixture_1_mult, fixture_2_mult, fixture_3+_mult)
+INJURY_CURVES: Dict[str, tuple] = {
+    # Tactical knock / illness – fast recovery
+    "knock":     (0.60, 0.90, 1.00, 1.00),
+    "illness":   (0.50, 0.85, 1.00, 1.00),
+    # Muscle strain – moderate recovery
+    "hamstring":  (0.10, 0.40, 0.75, 0.95),
+    "groin":      (0.10, 0.40, 0.70, 0.90),
+    "calf":       (0.10, 0.45, 0.75, 0.95),
+    "muscle":     (0.15, 0.45, 0.75, 0.95),
+    "thigh":      (0.10, 0.40, 0.70, 0.90),
+    # Joint / ligament – slow recovery
+    "ankle":      (0.05, 0.20, 0.50, 0.80),
+    "knee":       (0.05, 0.15, 0.40, 0.70),
+    "foot":       (0.05, 0.25, 0.55, 0.80),
+    "back":       (0.10, 0.30, 0.60, 0.85),
+    "shoulder":   (0.10, 0.35, 0.65, 0.85),
+    # Severe / long-term – effectively unavailable for the horizon
+    "acl":        (0.00, 0.00, 0.00, 0.05),
+    "surgery":    (0.00, 0.00, 0.00, 0.05),
+    "months":     (0.00, 0.00, 0.00, 0.10),
+    "season":     (0.00, 0.00, 0.00, 0.00),
+    "indefinite": (0.00, 0.00, 0.00, 0.05),
+    # Default (unrecognised news text)
+    "default":    (0.40, 0.70, 0.90, 1.00),
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CBIT DECAY WEIGHTS (recency-biased estimation)
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Exponential decay half-life in gameweeks for CBIT estimation
+CBIT_DECAY_HALFLIFE_GW: int = 6
+
+# ══════════════════════════════════════════════════════════════════════════════
+# FDR (Fixture Difficulty Rating) THRESHOLDS
+# ══════════════════════════════════════════════════════════════════════════════
+
+FDR_EASY: int = 2       # <= 2 is easy
+FDR_MEDIUM: int = 3     # 3 is medium
+FDR_HARD: int = 4       # >= 4 is tough
+
+FDR_COLOR_MAP: Dict[int, str] = {
+>>>>>>> Stashed changes
     1: '#22c55e',
     2: '#77c45e',
     3: '#f59e0b',
@@ -82,10 +231,19 @@ POSITION_COLORS = {
     'FWD': '#ef4444',
 }
 
+<<<<<<< Updated upstream
 # ── API Config ──
 FPL_BASE_URL = "https://fantasy.premierleague.com/api"
 ODDS_API_BASE_URL = "https://api.the-odds-api.com/v4"
 CACHE_DURATION = 300  # 5 minutes
+=======
+# ══════════════════════════════════════════════════════════════════════════════
+# API CONFIG
+# ══════════════════════════════════════════════════════════════════════════════
+
+FPL_BASE_URL: str = "https://fantasy.premierleague.com/api"
+CACHE_DURATION: int = 300  # 5 minutes
+>>>>>>> Stashed changes
 
 
 def get_chart_layout(height=400, **overrides):

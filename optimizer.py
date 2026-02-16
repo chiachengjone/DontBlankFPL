@@ -10,6 +10,15 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
 
+<<<<<<< Updated upstream
+=======
+from config import (
+    MAX_BUDGET, MAX_PLAYERS_PER_TEAM, SQUAD_SIZE, STARTING_XI,
+    MAX_FREE_TRANSFERS, CAPTAIN_MULTIPLIER, POSITION_CONSTRAINTS,
+    BENCH_XP_WEIGHT, RISK_AVERSION_DEFAULT,
+)
+
+>>>>>>> Stashed changes
 # Lazy PuLP import
 _pulp_loaded = False
 
@@ -68,6 +77,8 @@ class OptimizationConstraints:
     must_include: List[int] = None
     must_exclude: List[int] = None
     min_games_in_window: int = 0  # Minimum games to play in window
+    bench_weight: float = BENCH_XP_WEIGHT  # Bench safety-net factor
+    risk_aversion: float = RISK_AVERSION_DEFAULT  # Variance penalty
     
 
 @dataclass
@@ -111,9 +122,13 @@ class FPLOptimizer:
         """Prepare and validate player data for optimization."""
         # Ensure required columns exist
         required_cols = ['id', 'web_name', 'position', 'team', 'now_cost']
-        for col in required_cols:
-            if col not in self.players_df.columns:
-                raise ValueError(f"Missing required column: {col}")
+        missing = [col for col in required_cols if col not in self.players_df.columns]
+        if missing:
+            raise ValueError(
+                f"Missing required column(s): {', '.join(missing)}. "
+                f"Available columns: {', '.join(self.players_df.columns[:10])}..."
+                f" Ensure FPL data loaded correctly before optimizing."
+            )
         
         # Fill missing expected points - ensure numeric
         if 'expected_points' not in self.players_df.columns:
@@ -220,46 +235,62 @@ class FPLOptimizer:
         weighted_eps = {
             pid: self._get_weighted_ep(pid) for pid in self.player_ids
         }
+
+        # --- Risk-aversion: subtract a variance penalty from each player's EP ---
+        # Heuristic std ~ 40% of EP when MC samples unavailable
+        variance_penalty = {}
+        for pid in self.player_ids:
+            std_est = self.player_lookup.get(pid, {}).get('mc_std', None)
+            if std_est is None or np.isnan(std_est):
+                std_est = weighted_eps[pid] * 0.40
+            variance_penalty[pid] = constraints.risk_aversion * float(std_est)
+
+        # risk-adjusted EP
+        adj_eps = {pid: weighted_eps[pid] - variance_penalty[pid] for pid in self.player_ids}
+
+        # Bench weight
+        bw = constraints.bench_weight
         
         if mode == OptimizationMode.MAX_POINTS:
-            # Maximize total expected points
-            # Starting XI get full points, captain gets 1.25x (2025/26 rule)
+            # Starting XI get full points, bench gets bench_weight fraction,
+            # captain gets extra (CAPTAIN_MULTIPLIER - 1) × ep
             prob += lpSum([
-                start_vars[pid] * weighted_eps[pid] + 
-                captain_vars[pid] * weighted_eps[pid] * (CAPTAIN_MULTIPLIER - 1)
+                start_vars[pid] * adj_eps[pid]
+                + (squad_vars[pid] - start_vars[pid]) * adj_eps[pid] * bw
+                + captain_vars[pid] * adj_eps[pid] * (CAPTAIN_MULTIPLIER - 1)
                 for pid in self.player_ids
             ]), "Total_Expected_Points"
             
         elif mode == OptimizationMode.DIFFERENTIAL:
-            # Maximize differential score
             diff_scores = {
                 pid: self.player_lookup.get(pid, {}).get('differential_score', 0)
                 for pid in self.player_ids
             }
             prob += lpSum([
                 start_vars[pid] * diff_scores[pid]
+                + (squad_vars[pid] - start_vars[pid]) * diff_scores[pid] * bw
                 for pid in self.player_ids
             ]), "Total_Differential_Score"
             
         elif mode == OptimizationMode.VALUE:
-            # Maximize value (points per cost)
             value_scores = {
-                pid: weighted_eps[pid] / max(self.player_lookup.get(pid, {}).get('now_cost', 4.5), 4.0)
+                pid: adj_eps[pid] / max(self.player_lookup.get(pid, {}).get('now_cost', 4.5), 4.0)
                 for pid in self.player_ids
             }
             prob += lpSum([
                 start_vars[pid] * value_scores[pid]
+                + (squad_vars[pid] - start_vars[pid]) * value_scores[pid] * bw
                 for pid in self.player_ids
             ]), "Total_Value_Score"
             
         else:  # BALANCED
-            # Balanced objective
             prob += lpSum([
                 start_vars[pid] * (
-                    weighted_eps[pid] * 0.6 +
+                    adj_eps[pid] * 0.6 +
                     self.player_lookup.get(pid, {}).get('differential_score', 0) * 0.2 +
                     (5 - self.player_lookup.get(pid, {}).get('blank_count', 0)) * 0.2
                 )
+                + (squad_vars[pid] - start_vars[pid]) * adj_eps[pid] * 0.6 * bw
                 for pid in self.player_ids
             ]), "Balanced_Score"
         
@@ -664,7 +695,9 @@ def quick_optimize(
     players_df: pd.DataFrame,
     budget: float = 100.0,
     weeks_ahead: int = 5,
-    mode: str = 'points'
+    mode: str = 'points',
+    bench_weight: float = BENCH_XP_WEIGHT,
+    risk_aversion: float = RISK_AVERSION_DEFAULT,
 ) -> OptimizationResult:
     """
     Quick optimization function for simple use cases.
@@ -674,6 +707,8 @@ def quick_optimize(
         budget: Available budget
         weeks_ahead: Optimization horizon
         mode: 'points', 'differential', 'value', or 'balanced'
+        bench_weight: How much to value bench xP (0-1)
+        risk_aversion: Variance penalty coefficient (0 = pure xP)
     """
     mode_map = {
         'points': OptimizationMode.MAX_POINTS,
@@ -683,7 +718,11 @@ def quick_optimize(
     }
     
     optimizer = FPLOptimizer(players_df, weeks_ahead)
-    constraints = OptimizationConstraints(budget=budget)
+    constraints = OptimizationConstraints(
+        budget=budget,
+        bench_weight=bench_weight,
+        risk_aversion=risk_aversion,
+    )
     
     return optimizer.optimize_squad(
         mode=mode_map.get(mode, OptimizationMode.MAX_POINTS),

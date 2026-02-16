@@ -88,7 +88,7 @@ def get_team_short_name(team_id: int, processor) -> str:
         if not team.empty:
             return team.iloc[0].get('short_name', team.iloc[0].get('name', 'UNK'))
         return 'UNK'
-    except:
+    except Exception:
         return 'UNK'
 
 
@@ -123,7 +123,7 @@ def get_player_fixtures(player_id: int, processor, weeks_ahead: int = 5) -> List
                 'kickoff': fix.get('kickoff_time', '')
             })
         return result
-    except:
+    except Exception:
         return []
 
 
@@ -449,3 +449,357 @@ def add_availability_columns(df: pd.DataFrame, players_df: pd.DataFrame = None) 
 
     return df
 
+<<<<<<< Updated upstream
+=======
+
+# ══════════════════════════════════════════════════════════════════════════════
+# EXPECTED POINTS (xP) COLUMN SEMANTICS - EXPLICIT DEFINITIONS
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# These column names have SPECIFIC meanings. Do NOT use them interchangeably:
+#
+# ┌─────────────────────────┬─────────────────────────────────────────────────────┐
+# │ Column Name             │ Description                                          │
+# ├─────────────────────────┼─────────────────────────────────────────────────────┤
+# │ consensus_ep            │ MODEL xP - Weighted blend (ML 40%, Poisson 40%,     │
+# │                         │ FPL 20%) based on active_models. THE PRIMARY xP.    │
+# │                         │ Use this for all UI displays labeled "Model xP".    │
+# ├─────────────────────────┼─────────────────────────────────────────────────────┤
+# │ avg_consensus_ep        │ MODEL xP / horizon - Per-GW average when horizon>1. │
+# ├─────────────────────────┼─────────────────────────────────────────────────────┤
+# │ expected_points_poisson │ POISSON xP - Single-model output from poisson_ep.py.│
+# │                         │ Statistical model using xG/xA and fixture data.     │
+# ├─────────────────────────┼─────────────────────────────────────────────────────┤
+# │ ml_pred                 │ ML xP - XGBoost ensemble prediction.               │
+# │                         │ Single-GW prediction, scale by horizon if needed.   │
+# ├─────────────────────────┼─────────────────────────────────────────────────────┤
+# │ ep_next / ep_next_num   │ FPL xP - FPL's official expected points estimate.   │
+# │                         │ Raw from API, single-GW only.                       │
+# ├─────────────────────────┼─────────────────────────────────────────────────────┤
+# │ expected_points         │ DEPRECATED - Legacy fallback column. Maps to        │
+# │                         │ expected_points_poisson in most contexts. Avoid.    │
+# └─────────────────────────┴─────────────────────────────────────────────────────┘
+#
+# USAGE RULES:
+# 1. For UI displays labeled "Model xP" → use consensus_ep
+# 2. For Poisson-specific charts → use expected_points_poisson  
+# 3. For ML-specific displays → use ml_pred
+# 4. For FPL official EP → use ep_next_num
+# 5. NEVER use expected_points or ep_next when consensus_ep is available
+#
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def calculate_consensus_ep(df: pd.DataFrame, active_models: List[str], horizon: int = 1) -> pd.DataFrame:
+    """
+    Calculate weighted Consensus EP based on globally selected models.
+    
+    Weights:
+    - ML: 40%
+    - Poisson: 40%
+    - FPL: 20%
+    
+    Weights are normalized based on which models are enabled.
+    
+    This function auto-loads ML predictions from st.session_state['ml_predictions']
+    if ml_pred is not already present in the DataFrame. This ensures consistent
+    Model xP values across ALL tabs without requiring each tab to manually load ML.
+    
+    Results are cached in session state per (active_models, horizon, len(df)) key
+    to avoid redundant recalculation across tabs.
+    """
+    # ── Session-state result cache ──
+    # Avoids re-running ML-loading and consensus arithmetic in every tab
+    try:
+        import streamlit as _st
+        _cache_key = f"_cep_{'_'.join(sorted(active_models))}_{horizon}_{len(df)}"
+        if _cache_key in _st.session_state:
+            cached = _st.session_state[_cache_key]
+            # Validate the cache is still aligned with the dataframe
+            if len(cached) == len(df) and 'consensus_ep' in cached.columns:
+                # Merge cached columns onto df
+                merge_cols = [c for c in ('consensus_ep', 'avg_consensus_ep', 'ml_pred', 'poisson_ep', 'ep_next_num')
+                              if c in cached.columns]
+                result = df.copy()
+                for col in merge_cols:
+                    result[col] = cached[col].values
+                return result
+    except Exception:
+        _cache_key = None
+
+    df = df.copy()
+    
+    # Model keys mapping (consistency with app.py/tabs)
+    model_col_map = {
+        'ml': 'ml_pred',
+        'poisson': 'poisson_ep',
+        'fpl': 'ep_next_num'
+    }
+    
+    # Use centralized weights from config
+    base_weights = MODEL_WEIGHTS
+    
+    # Filter for active models and get weights
+    # Normalize keys to lowercase for safety
+    active_keys = [m.lower() for m in active_models]
+    active_weights = {m: base_weights[m] for m in active_keys if m in base_weights}
+    
+    # Normalize weights
+    total_weight = sum(active_weights.values())
+    if total_weight == 0:
+        # Fallback to all if nothing valid selected
+        active_weights = base_weights
+        total_weight = sum(base_weights.values())
+    
+    normalized_weights = {m: w/total_weight for m, w in active_weights.items()}
+    
+    # ── Ensure baseline columns exist ──
+    
+    # Poisson EP: from calculate_poisson_ep_for_dataframe output
+    if 'poisson_ep' not in df.columns:
+        if 'expected_points_poisson' in df.columns:
+            df['poisson_ep'] = safe_numeric(df['expected_points_poisson'])
+        else:
+            df['poisson_ep'] = safe_numeric(df.get('ep_next_num', df.get('ep_next', 0)))
+            
+    if 'ep_next_num' not in df.columns:
+        df['ep_next_num'] = safe_numeric(df.get('ep_next', 0))
+    
+    # ML Predictions: auto-load from session state if not already in DataFrame
+    # This is the SINGLE source of truth for ML predictions, ensuring all tabs
+    # get the same values without duplicating ML-loading boilerplate.
+    if 'ml_pred' not in df.columns:
+        _ml_loaded = False
+        try:
+            import streamlit as _st
+            if 'ml_predictions' in _st.session_state and 'id' in df.columns:
+                ml_preds = _st.session_state['ml_predictions']
+                if ml_preds:
+                    df['ml_pred'] = df['id'].apply(
+                        lambda pid: ml_preds[pid].predicted_points if pid in ml_preds else 0.0
+                    ).round(2)
+                    _ml_loaded = True
+        except Exception:
+            pass
+        
+        if not _ml_loaded:
+            if 'ml_ep' in df.columns:
+                df['ml_pred'] = safe_numeric(df['ml_ep'])
+            else:
+                # True fallback: no ML data available at all
+                df['ml_pred'] = df['poisson_ep'] * ML_FALLBACK_RATIO
+    
+    # Calculation
+    consensus = pd.Series(0.0, index=df.index)
+    for model, weight in normalized_weights.items():
+        col = model_col_map[model]
+        if col in df.columns:
+            val = safe_numeric(df[col])
+            
+            # Smart Horizon Scaling
+            # If horizon > 1, we expect to return a Total sum for the window
+            if horizon > 1:
+                if model == 'fpl':
+                    # FPL ep_next is always single-GW raw, so scale it
+                    val = val * horizon
+                elif model == 'ml':
+                    # ML predictions are usually single-GW in players_df, so scale
+                    # Only scale if typical single-GW range (e.g. max < 15 for 1 GW)
+                    if val.max() < 15: 
+                        val = val * horizon
+                # Poisson is assumed already totaled (sum of GWs) by engine loop
+            
+            consensus += val * weight
+            
+    df['consensus_ep'] = consensus.round(2)
+    
+    # Calculate average if horizon > 1
+    if horizon > 1:
+        df['avg_consensus_ep'] = (df['consensus_ep'] / horizon).round(2)
+    else:
+        df['avg_consensus_ep'] = df['consensus_ep']
+    
+    # ── Write result to session-state cache ──
+    try:
+        if _cache_key is not None:
+            _st.session_state[_cache_key] = df[
+                [c for c in ('consensus_ep', 'avg_consensus_ep', 'ml_pred', 'poisson_ep', 'ep_next_num')
+                 if c in df.columns]
+            ].copy()
+    except Exception:
+        pass
+
+    return df
+
+
+def calculate_enhanced_captain_score(row: pd.Series, active_models: List[str]) -> float:
+    """
+    Calculate a sophisticated, position-aware captain score (0-10+).
+    Standardized for use in Captain tab and Dashboard.
+    
+    Weights: 60% Core Models, 30% Position Bonus, 10% Meta/Safety.
+    """
+    # 1. Core Models (60% weight)
+    model_count = len(active_models)
+    
+    # Map model keys to data columns
+    ml_val = safe_numeric(row.get('ml_pred', row.get('ml_ep', 0)))
+    poisson_val = safe_numeric(row.get('poisson_ep', row.get('expected_points_poisson', 0)))
+    fpl_val = safe_numeric(row.get('ep_next_num', row.get('ep_next', 0)))
+    
+    if model_count == 3:
+        # Global: ML 40%, Poisson 40%, FPL 20% -> scaled to 60% total
+        core = (ml_val * 0.24 + poisson_val * 0.24 + fpl_val * 0.12)
+    elif model_count == 2:
+        m_set = set([m.lower() for m in active_models])
+        if 'ml' in m_set and 'poisson' in m_set:
+            core = (ml_val * 0.30 + poisson_val * 0.30)
+        elif 'ml' in m_set and 'fpl' in m_set:
+            core = (ml_val * 0.40 + fpl_val * 0.20)
+        elif 'poisson' in m_set and 'fpl' in m_set:
+            core = (poisson_val * 0.40 + fpl_val * 0.20)
+        else:
+            core = (ml_val * 0.30 + poisson_val * 0.30) # Default
+    else:
+        # Only 1 model active
+        active = active_models[0].lower() if active_models else 'fpl'
+        val = ml_val if active == 'ml' else poisson_val if active == 'poisson' else fpl_val
+        core = val * 0.6
+    
+    # 2. Position-Specific Potential (30% weight)
+    if row.get('position') in ['GKP', 'DEF']:
+        p_cs = safe_numeric(row.get('poisson_p_cs', 0.2))
+        cbit_p = safe_numeric(row.get('cbit_prob', 0.3))
+        pos_bonus = (p_cs * 0.15 + cbit_p * 0.15) * 10
+    else:
+        threat = safe_numeric(row.get('threat_momentum', 0.5))
+        matchup = safe_numeric(row.get('matchup_quality', 1.0))
+        # Scaled to ~0-3 range
+        pos_bonus = float(np.clip(threat * 0.15 * 10 + (matchup / 2) * 0.15 * 10, 0, 3))
+        
+    # 3. Meta & Safety (10% weight)
+    # selected_by_percent can be a string or float from FPL API
+    eo = safe_numeric(row.get('selected_by_percent', 0)) / 100
+    form_norm = safe_numeric(row.get('form', 0)) / 15
+    meta = (eo * 0.05 + form_norm * 0.05) * 10
+    
+    # 4. Injury Risk Adjustment
+    chance = safe_numeric(row.get('chance_of_playing_next_round', 100)) / 100
+    
+    return float((core + pos_bonus + meta) * chance)
+
+
+def get_consensus_label(active_models: List[str], horizon: int = 1, is_avg: bool = False) -> str:
+    """Return dynamic label for Model xP based on number of active models."""
+    if not active_models:
+        return "Avg xP" if is_avg else "xP"
+        
+    if len(active_models) == 1:
+        model = active_models[0].lower()
+        label_map = {
+            'ml': 'ML xP',
+            'poisson': 'Poisson xP',
+            'fpl': 'FPL xP'
+        }
+        name = label_map.get(model, 'xP')
+        if is_avg:
+            return f"Avg {name}"
+        return f"{name} x{horizon}" if horizon > 1 else name
+    
+    if is_avg:
+        return "Avg Model xP"
+    return f"Model xP ({horizon}GW)" if horizon > 1 else "Model xP"
+
+
+def get_fixture_ease_map(fixtures_df: pd.DataFrame, current_gw: int, weeks_ahead: int = 1) -> Dict[int, float]:
+    """
+    Calculate team-level fixture ease scores for a specific horizon.
+    Returns: Dict mapping team_id to ease_score (0.0 to 1.0).
+    """
+    team_ids = set(fixtures_df['team_h']).union(set(fixtures_df['team_a']))
+    team_ease = {}
+    
+    decay_weights = [0.95 ** i for i in range(weeks_ahead)]
+    max_ease_denom = sum(5 * w for w in decay_weights)
+    
+    for tid in team_ids:
+        # Fixtures in window
+        team_fixtures = fixtures_df[
+            (fixtures_df['event'] >= current_gw) &
+            (fixtures_df['event'] < current_gw + weeks_ahead) &
+            ((fixtures_df['team_h'] == tid) | (fixtures_df['team_a'] == tid))
+        ].sort_values('event')
+        
+        fdrs = []
+        fixture_gws = set()
+        for _, fx in team_fixtures.iterrows():
+            fixture_gws.add(fx['event'])
+            if fx['team_h'] == tid:
+                fdrs.append(fx.get('team_h_difficulty', 3))
+            else:
+                fdrs.append(fx.get('team_a_difficulty', 3))
+        
+        # Fill blanks or missing fixtures with neutral 3.0
+        while len(fdrs) < weeks_ahead:
+            fdrs.append(3.0)
+        fdrs = fdrs[:weeks_ahead]
+        
+        # Weighted ease: (6-fdr) so higher is easier
+        weighted_ease = sum((6 - fdr) * w for fdr, w in zip(fdrs, decay_weights))
+        team_ease[tid] = weighted_ease / max_ease_denom if max_ease_denom > 0 else 0.5
+        
+    return team_ease
+
+
+def get_opponent_stats_map(players_df: pd.DataFrame, fixtures_df: pd.DataFrame, current_gw: int, weeks_ahead: int = 5) -> Dict[int, Dict[str, float]]:
+    """
+    Calculate average opponent stats (xG, xGC) for each team based on upcoming fixtures.
+    Useful for weighting player potential against specific team weaknesses.
+    """
+    # 1. Calculate base team stats from players_df (last N matches performance)
+    team_stats = {}
+    for tid in players_df['team'].unique():
+        t_players = players_df[players_df['team'] == tid]
+        
+        # Attack strength (xG)
+        t_attackers = t_players[t_players['position'].isin(['MID', 'FWD'])]
+        avg_xg = safe_numeric(t_attackers.get('us_xG', t_attackers.get('expected_goals', 0))).mean()
+        
+        # Defense weakness (xGC)
+        t_defenders = t_players[t_players['position'].isin(['GKP', 'DEF'])]
+        avg_xgc = safe_numeric(t_defenders.get('expected_goals_conceded', 0)).mean()
+        
+        team_stats[tid] = {
+            'xg': avg_xg,
+            'xgc': avg_xgc
+        }
+    
+    # 2. Map these to upcoming opponents
+    opp_stats_map = {}
+    team_ids = players_df['team'].unique()
+    
+    for tid in team_ids:
+        team_fixtures = fixtures_df[
+            (fixtures_df['event'] >= current_gw) &
+            (fixtures_df['event'] < current_gw + weeks_ahead) &
+            ((fixtures_df['team_h'] == tid) | (fixtures_df['team_a'] == tid))
+        ]
+        
+        opp_xg_list = []
+        opp_xgc_list = []
+        
+        for _, fx in team_fixtures.iterrows():
+            opp_id = fx['team_a'] if fx['team_h'] == tid else fx['team_h']
+            stats = team_stats.get(opp_id, {'xg': 1.3, 'xgc': 1.3}) # Fallback to neutral
+            opp_xg_list.append(stats['xg'])
+            opp_xgc_list.append(stats['xgc'])
+            
+        # Refined Averaging (v2): Divide by weeks_ahead (horizon) to reflect 
+        # higher cumulative threat in DGWs and zero threat in Blanks.
+        opp_stats_map[tid] = {
+            'avg_opp_xg': sum(opp_xg_list) / weeks_ahead if weeks_ahead > 0 else 1.3,
+            'avg_opp_xgc': sum(opp_xgc_list) / weeks_ahead if weeks_ahead > 0 else 1.3
+        }
+        
+    return opp_stats_map
+>>>>>>> Stashed changes

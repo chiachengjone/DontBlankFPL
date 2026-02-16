@@ -11,6 +11,7 @@ pd.set_option('display.float_format', lambda x: f'{x:.2f}')
 
 # Import from local modules
 from fpl_api import create_data_pipeline
+from config import CACHE_DURATION
 from components.styles import apply_theme, render_header, render_status_bar, render_tab_header
 from tabs.dashboard import render_dashboard_tab
 from tabs.strategy import render_strategy_tab
@@ -56,7 +57,15 @@ for key, default in _SESSION_DEFAULTS.items():
         st.session_state[key] = default
 
 
-@st.cache_resource(ttl=300, show_spinner=False)
+def _clear_stale_session_cache():
+    """Remove stale engineered-DF and consensus-EP caches from session state."""
+    stale_prefixes = ('_engineered_df_', '_cep_')
+    stale_keys = [k for k in st.session_state if isinstance(k, str) and k.startswith(stale_prefixes)]
+    for k in stale_keys:
+        del st.session_state[k]
+
+
+@st.cache_resource(ttl=CACHE_DURATION, show_spinner=False)
 def load_fpl_data():
     """Load FPL data with caching. Only fetches from API once per 5 minutes."""
     try:
@@ -83,6 +92,7 @@ def main():
         st.error(f"Failed to load FPL data: {error}")
         st.info("Check your internet connection and refresh.")
         if st.button("Retry"):
+            _clear_stale_session_cache()
             st.cache_resource.clear()
             st.rerun()
         return
@@ -118,7 +128,7 @@ def main():
     try:
         gw = fetcher.get_current_gameweek()
         render_status_bar(f"GW {gw} LIVE | {len(players_df)} players | Updated just now")
-    except:
+    except Exception:
         render_status_bar(f"{len(players_df)} players loaded")
     
     # Settings row (compact) -- Team ID + Toggles
@@ -133,11 +143,23 @@ def main():
             key="header_team_id",
             help="Enter your FPL Team ID (find it in the URL of your team page). Used by Squad Builder and Monte Carlo."
         )
-        st.session_state.fpl_team_id = team_id_input
+        if team_id_input != 0 and team_id_input < 1:
+            st.error("Team ID must be a positive number.")
+            team_id_input = 0
+        st.session_state.fpl_team_id = int(team_id_input)
         # Understat warning only when offline
         ustat_active = st.session_state.get('_understat_active', None)
         if ustat_active is False:
             st.warning("Understat offline - using FPL fallback")
+        # Surface partial-coverage warnings (teams using FDR proxy)
+        ustat_status = st.session_state.get('_understat_status', {})
+        fdr_teams = ustat_status.get('fdr_fallback_teams', [])
+        if fdr_teams:
+            st.warning(
+                f"**Understat data missing for {len(fdr_teams)} team(s):** "
+                f"{', '.join(fdr_teams)}. "
+                f"Poisson engine uses FDR proxy (lower precision) for these opponents."
+            )
     with set_col2:
         new_poisson = st.toggle(
             "Poisson xP",

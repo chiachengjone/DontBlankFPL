@@ -126,6 +126,12 @@ def fetch_understat_league_data(season: int = UNDERSTAT_SEASON) -> Tuple[List[Di
 
     html = resp.text
 
+    # Guard: reject abnormally large responses (> 10 MB)
+    MAX_HTML_SIZE = 10 * 1024 * 1024  # 10 MB
+    if len(html) > MAX_HTML_SIZE:
+        logger.warning("Understat HTML response too large (%d bytes), skipping", len(html))
+        return [], {}
+
     # Extract playersData
     players_raw: List[Dict] = []
     pmatch = re.search(
@@ -134,7 +140,12 @@ def fetch_understat_league_data(season: int = UNDERSTAT_SEASON) -> Tuple[List[Di
     if pmatch:
         try:
             decoded = pmatch.group(1).encode("utf-8").decode("unicode_escape")
-            players_raw = json.loads(decoded)
+            parsed = json.loads(decoded)
+            # Validate: must be a list of dicts
+            if isinstance(parsed, list) and all(isinstance(p, dict) for p in parsed[:5]):
+                players_raw = parsed
+            else:
+                logger.warning("Understat playersData has unexpected structure (expected list of dicts)")
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             logger.warning("Understat players JSON parse error: %s", exc)
     else:
@@ -148,7 +159,12 @@ def fetch_understat_league_data(season: int = UNDERSTAT_SEASON) -> Tuple[List[Di
     if tmatch:
         try:
             decoded = tmatch.group(1).encode("utf-8").decode("unicode_escape")
-            teams_raw = json.loads(decoded)
+            parsed = json.loads(decoded)
+            # Validate: must be a dict
+            if isinstance(parsed, dict):
+                teams_raw = parsed
+            else:
+                logger.warning("Understat teamsData has unexpected structure (expected dict)")
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             logger.warning("Understat teams JSON parse error: %s", exc)
 
