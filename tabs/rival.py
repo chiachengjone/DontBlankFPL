@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 # Valid FPL team ID range
 _MIN_TEAM_ID = 1
-_MAX_TEAM_ID = 10_000_000
+_MAX_TEAM_ID = 99_999_999
 
 
 def render_rival_tab(processor, players_df: pd.DataFrame):

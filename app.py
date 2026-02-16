@@ -144,7 +144,7 @@ def main():
         team_id_input = st.number_input(
             "FPL Team ID",
             min_value=0,
-            max_value=10_000_000,
+            max_value=99_999_999,
             value=st.session_state.fpl_team_id,
             step=1,
             key="header_team_id",
