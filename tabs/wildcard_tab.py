@@ -198,15 +198,35 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
         "Planning Horizon (GWs)",
         min_value=1,
         max_value=10,
-        value=4,
+        value=st.session_state.get('wc_last_horizon', 4),
         key="wc_horizon",
         help="Optimize squad for total points over this many gameweeks"
     )
     
     st.markdown("---")
     
-    # ── Generate Button ──
-    if st.button("Generate Wildcard Squad", type="primary", width="stretch"):
+    # ── Reactive Generation Logic ──
+    # We want to re-run if any input changes OR if the button is clicked.
+    
+    # 1. Collect current inputs
+    current_params = {
+        'formation': formation,
+        'strategy': strategy,
+        'budget': budget,
+        'horizon': horizon
+    }
+    
+    # 2. Check if inputs changed
+    last_params = st.session_state.get('wc_last_params', {})
+    inputs_changed = current_params != last_params
+    
+    # 3. Handle Generation
+    # Triggers: Button click OR Inputs changed (Reactive) OR No squad exists yet
+    should_run = st.button("Regenerate Squad", type="secondary", width="stretch") or inputs_changed or 'wc_generated_squad' not in st.session_state
+    
+    if should_run:
+        # If it's an auto-run due to value change, use a lightweight spinner (or none if fast enough)
+        # But WC gen can take 1-2s, so spinner is good.
         with st.spinner(f"Optimizing squad for next {horizon} GWs..."):
             squad = generate_wildcard_squad(players_df, formation, strategy, budget, horizon)
             
@@ -214,6 +234,12 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
                 st.error("Could not generate a valid squad. Try adjusting budget.")
             else:
                 st.session_state['wc_generated_squad'] = squad
+                # Update state tracking
+                st.session_state['wc_last_params'] = current_params
+                st.session_state['wc_last_horizon'] = horizon  # Persist for slider
+                
+                # If this was a reactive run (not button), we might want to rerun to ensure display updates immediately
+                # But treating it as a standard flow usually works in Streamlit.
     
     # ── Display Results ──
     if 'wc_generated_squad' in st.session_state:
