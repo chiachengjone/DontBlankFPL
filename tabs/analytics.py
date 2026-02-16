@@ -68,7 +68,7 @@ def render_analytics_tab(processor, players_df: pd.DataFrame):
         sort_options = [con_ep_label]
         if current_horizon > 1 and len(active_models) > 1:
             sort_options.append(f'Avg {con_ep_label}')
-        sort_options.extend([ep_label, fpl_ep_label, ml_ep_label, 'Total Points', 'Threat Momentum', 'xNP', 'CBIT', 'Price', 'Own%'])
+        sort_options.extend([ep_label, fpl_ep_label, ml_ep_label, 'Total Points', 'Threat Momentum', 'CBIT', 'Price', 'Own%'])
         
         sort_col = st.selectbox(
             "Sort By",
@@ -224,17 +224,17 @@ def render_analytics_tab(processor, players_df: pd.DataFrame):
         rank_df['total_points_display'] = ""
 
     # Apply search filter to the ranked subset
-    df = rank_df
+    filtered_df = rank_df
     if search:
         query = normalize_name(search.lower().strip())
         # Ensure normalized names exist for filtering
-        if 'first_normalized' not in df.columns:
-            df['first_normalized'] = df['first_name'].apply(lambda x: normalize_name(str(x).lower()))
-            df['second_normalized'] = df['second_name'].apply(lambda x: normalize_name(str(x).lower()))
+        if 'first_normalized' not in filtered_df.columns:
+            filtered_df['first_normalized'] = filtered_df['first_name'].apply(lambda x: normalize_name(str(x).lower()))
+            filtered_df['second_normalized'] = filtered_df['second_name'].apply(lambda x: normalize_name(str(x).lower()))
             
-        df = df[
-            (df['first_normalized'].str.startswith(query, na=False)) |
-            (df['second_normalized'].str.startswith(query, na=False))
+        filtered_df = filtered_df[
+            (filtered_df['first_normalized'].str.startswith(query, na=False)) |
+            (filtered_df['second_normalized'].str.startswith(query, na=False))
         ]
     
     sort_map = {
@@ -245,45 +245,44 @@ def render_analytics_tab(processor, players_df: pd.DataFrame):
         ml_ep_label: 'ml_pred',
         'Total Points': 'total_points',
         'Threat Momentum': 'threat_momentum',
-        'xNP': 'differential_gain',
         'Price': 'now_cost',
         'Own%': 'selected_by_percent',
         'CBIT': 'cbit_score'
     }
     sort_by = sort_map.get(sort_col, 'consensus_ep')
-    if sort_by in df.columns:
-        df[sort_by] = safe_numeric(df[sort_by])
+    if sort_by in filtered_df.columns:
+        filtered_df[sort_by] = safe_numeric(filtered_df[sort_by])
         # ascending=df[sort_by].name == 'now_cost' doesn't work well in lambda, just check
         asc = (sort_col == 'Price')
-        df = df.sort_values(sort_by, ascending=asc)
+        filtered_df = filtered_df.sort_values(sort_by, ascending=asc)
     elif sort_by == 'consensus_ep': # Fallback
-        df = df.sort_values('expected_points', ascending=False)
+        filtered_df = filtered_df.sort_values('expected_points', ascending=False)
     
     # Display player table
-    render_player_table(df, horizon=horizon)
+    render_player_table(filtered_df, horizon=horizon)
     
     # Points distribution (Main view, not in expander)
-    render_points_distribution(players_df, con_ep_label)
+    render_points_distribution(df, con_ep_label)
     
     # Value by position
     with st.expander("Value Analysis", expanded=False):
-        render_value_by_position(players_df, con_ep_label)
+        render_value_by_position(df, con_ep_label)
     
     # CBIT analysis chart
     with st.expander("CBIT Analysis", expanded=False):
-        render_cbit_analysis(players_df)
+        render_cbit_analysis(df)
     
     # Advanced Metrics (Threat Momentum, EPPM, Matchup Quality)
     with st.expander("Advanced Metrics", expanded=False):
-        render_advanced_metrics(players_df, con_ep_label)
+        render_advanced_metrics(df, con_ep_label)
     
     # Set & Forget finder
     with st.expander("Set & Forget Picks", expanded=False):
-        render_set_and_forget(players_df, con_ep_label)
+        render_set_and_forget(df, con_ep_label)
     
     # Expected vs Actual
     with st.expander("Expected vs Actual", expanded=False):
-        render_expected_vs_actual(players_df, con_ep_label)
+        render_expected_vs_actual(df, con_ep_label)
     
     # Ownership Trends (always at the bottom, outside expander)
-    render_ownership_trends(players_df)
+    render_ownership_trends(df)

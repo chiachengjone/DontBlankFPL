@@ -47,13 +47,13 @@ def render_player_table(df: pd.DataFrame, horizon: int = 1):
     if horizon > 1:
         base_cols.append(ac_col)
 
-    base_cols.extend([tp_col, 'xnp', 'threat_momentum'])
+    base_cols.extend([tp_col, 'threat_momentum'])
     if 'cbit_score' in df.columns and df['position'].isin(['DEF', 'GKP']).any():
         base_cols.append('cbit_score')
 
     display_cols = [c for c in base_cols if c in df.columns]
 
-    numeric_cols = ['now_cost', 'selected_by_percent', 'xnp', 'threat_momentum', 'cbit_score']
+    numeric_cols = ['now_cost', 'selected_by_percent', 'threat_momentum', 'cbit_score']
     if ep_col == 'expected_points': numeric_cols.append('expected_points')
     if fpl_col == 'ep_next': numeric_cols.append('ep_next')
     if ml_col == 'ml_pred': numeric_cols.append('ml_pred')
@@ -87,7 +87,7 @@ def render_player_table(df: pd.DataFrame, horizon: int = 1):
         con_col: con_ep_label,
         ac_col: f"Avg {con_ep_label}" if horizon > 1 else "Avg EP",
         tp_col: 'Total Points',
-        'xnp': 'xNP', 'threat_momentum': 'Threat Momentum', 'cbit_score': 'CBIT',
+        'threat_momentum': 'Threat Momentum', 'cbit_score': 'CBIT',
     }
 
     display_df = df[display_cols].copy()
@@ -265,7 +265,8 @@ def render_cbit_analysis(players_df: pd.DataFrame):
     with st.expander("Metrics & Formulas"):
         st.markdown('''
         <div style="background:#fff;border:1px solid rgba(0,0,0,0.06);padding:0.75rem;border-radius:8px;font-size:0.85rem;color:#1d1d1f;">
-            <strong>CBIT (Clearances, Blocks, Interceptions, Tackles) Formula:</strong> <code>Score = (P(CBIT) × 4 + Floor × 0.3 + Starts% × 1.5 + MatchupBonus)</code> | P(CBIT): Poisson prob of 10+ actions (DEF).
+            <strong>CBIT (Clearances, Blocks, Interceptions, Tackles) Formula:</strong> <code>Score = (P(CBIT) × 4 + Floor × 0.3 + Starts% × 1.5 + Matchup)</code><br>
+            <strong>DTT (Distance to Threshold):</strong> <code>DTT = AA90 - Threshold</code>. Positive values indicate a high likelihood of reaching bonus thresholds.
         </div>
         ''', unsafe_allow_html=True)
 
@@ -304,15 +305,15 @@ def render_cbit_analysis(players_df: pd.DataFrame):
 
         if not df.empty:
             df['score_rank'] = df['cbit_score'].rank(ascending=False, method='min').astype(int)
-            df['aa90_rank'] = df['cbit_aa90'].rank(ascending=False, method='min').astype(int)
+            df['dtt_rank'] = df['cbit_dtt'].rank(ascending=False, method='min').astype(int)
             df['prob_rank'] = df['cbit_prob'].rank(ascending=False, method='min').astype(int)
 
             df['score_display'] = df.apply(lambda r: format_with_rank(f"{r['cbit_score']:.2f}", r['score_rank']), axis=1)
-            df['aa90_display'] = df.apply(lambda r: format_with_rank(f"{r['cbit_aa90']:.2f}", r['aa90_rank']), axis=1)
+            df['dtt_display'] = df.apply(lambda r: format_with_rank(f"{r['cbit_dtt']:.1f}", r['dtt_rank']), axis=1)
             df['prob_display'] = df.apply(lambda r: format_with_rank(f"{r['cbit_prob']:.0%}", r['prob_rank']), axis=1)
 
             team_col = 'team_name' if 'team_name' in df.columns else 'team'
-            display_df = df[['web_name', team_col, 'now_cost', 'aa90_display', 'prob_display', 'cbit_floor', 'cbit_dtt', 'cbit_matchup', 'score_display', 'minutes']].copy()
+            display_df = df[['web_name', team_col, 'now_cost', 'cbit_aa90', 'prob_display', 'cbit_floor', 'dtt_display', 'cbit_matchup', 'score_display', 'minutes']].copy()
             display_df.columns = ['Player', 'Team', 'Price', 'AA90', 'P(CBIT)', 'Floor', 'DTT', 'Matchup', 'Score', 'minutes']
 
             c_sort_mapping = {"Score": "cbit_score", "AA90": "cbit_aa90", "P(CBIT)": "cbit_prob", "Price": "now_cost"}
@@ -322,7 +323,6 @@ def render_cbit_analysis(players_df: pd.DataFrame):
 
             display_df['Price'] = display_df['Price'].apply(lambda x: f"£{x:.1f}m")
             display_df['Floor'] = display_df['Floor'].apply(lambda x: f"{x:.1f}")
-            display_df['DTT'] = display_df['DTT'].apply(lambda x: f"{x:+.1f}")
             display_df = display_df.drop(columns=['minutes'])
 
             st.dataframe(style_df_with_injuries(display_df, players_df), hide_index=True, use_container_width=True, height=400, key='cbit_table_final')
@@ -509,24 +509,48 @@ def render_advanced_metrics(players_df: pd.DataFrame, con_ep_label: str):
         eng_table = eng_table[(eng_table['now_cost'] <= d_max_price) & (eng_table['minutes'] >= d_min_mins)]
 
         if not eng_table.empty:
+            # Calculate Ranks for bracket display
+            eng_table['xnp_rank'] = eng_table['differential_gain'].rank(ascending=False, method='min').astype(int)
+            eng_table['score_rank'] = eng_table[eng_sort].rank(ascending=False, method='min').astype(int)
+
+            # Format with rank
+            eng_table['xnp_display'] = eng_table.apply(lambda r: format_with_rank(f"{r['differential_gain']:.2f}", r['xnp_rank']), axis=1)
+            eng_table['score_display'] = eng_table.apply(lambda r: format_with_rank(f"{r[eng_sort]:.2f}", r['score_rank']), axis=1)
+
             eng_display_cols = ['web_name', 'team_name', 'position', 'now_cost', 'consensus_ep',
-                                'differential_gain', 'diff_roi', 'eo_top10k', 'matchup_quality', 'selected_by_percent', eng_sort]
-            eng_display_cols = [c for c in eng_display_cols if c in eng_table.columns]
+                                'xnp_display', 'diff_roi', 'eo_top10k', 'matchup_quality', 'selected_by_percent', 'score_display']
+            
+            # Filter cols not in eng_table (though we just created them)
+            # eng_display_cols = [c for c in eng_display_cols if c in eng_table.columns]
+            
             display_eng = eng_table[eng_display_cols].copy()
             eng_rename = {
                 'web_name': 'Player', 'team_name': 'Team', 'position': 'Pos',
-                'now_cost': 'Price', 'consensus_ep': con_ep_label, 'differential_gain': 'xNP',
+                'now_cost': 'Price', 'consensus_ep': con_ep_label, 
+                'xnp_display': 'xNP',
                 'diff_roi': 'ROI/m', 'eo_top10k': 'EO10k%', 'matchup_quality': 'Matchup',
-                'selected_by_percent': 'Own%', 'engineered_diff': 'Score',
+                'selected_by_percent': 'Own%', 'score_display': 'Score',
             }
             display_eng = display_eng.rename(columns=eng_rename)
 
-            d_sort_map = {"Score": "Score", "xNP": "xNP", "ROI/m": "ROI/m", "Price": "Price"}
+            # Sorting needs to happen on the underlying numeric values, but we are displaying strings.
+            # Using a hidden sorter column is tricky with st.dataframe(style_df...).
+            # Instead, we sort the DataFrame BEFORE renaming/formatting if we want initial sort order,
+            # BUT st.dataframe sorting is client-side for simple tables.
+            # However, for the initial view:
+            
+            d_sort_map = {"Score": eng_sort, "xNP": "differential_gain", "ROI/m": "diff_roi", "Price": "now_cost"}
             d_asc = (d_sort == "Price")
-            display_eng = display_eng.sort_values(d_sort_map.get(d_sort, "Score"), ascending=d_asc)
+            
+            # Sort the source table first to get the indices right, then slice the display table?
+            # Actually, let's just sort display_eng based on the mapped column from eng_table
+            # We can re-attach the numeric sort columns temporarily or just sort display_eng by index if we sort eng_table first.
+            
+            sorted_indices = eng_table.sort_values(d_sort_map.get(d_sort, eng_sort), ascending=d_asc).index
+            display_eng = display_eng.loc[sorted_indices]
 
-            for c in ['Price', 'xP', 'xNP', 'ROI/m', 'EO10k%', 'Own%', 'Score']:
-                if c in display_eng.columns:
+            for c in ['Price', 'ROI/m', 'EO10k%', 'Own%']:
+                if c in display_eng.columns and pd.api.types.is_numeric_dtype(display_eng[c]):
                     display_eng[c] = display_eng[c].round(2)
 
             st.dataframe(style_df_with_injuries(display_eng), hide_index=True, use_container_width=True, height=400)
@@ -574,7 +598,7 @@ def render_expected_vs_actual(players_df: pd.DataFrame, con_ep_label: str):
     df['minutes'] = safe_numeric(df.get('minutes', pd.Series([0] * len(df))))
     df = df[df['minutes'] > 500]
 
-    df['games_played'] = df['minutes'] / 90
+    df['games_played'] = (df['minutes'] / 90).clip(lower=0.1)
 
     GOAL_PTS = {'GKP': 6, 'DEF': 6, 'MID': 5, 'FWD': 4}
     CS_PTS = {'GKP': 4, 'DEF': 4, 'MID': 1, 'FWD': 0}
@@ -625,7 +649,47 @@ def render_expected_vs_actual(players_df: pd.DataFrame, con_ep_label: str):
         df['xpts_bonus']
     ).round(1)
 
-    df['diff'] = (df['total_points'] - df['expected_total']).round(1)
+    # ── Comprehensive Delta Calculation ──
+    # 1. Defensive Delta (Lucky CS): (Actual CS - Expected CS) * 4
+    df['delta_def'] = (df['clean_sheets'] - (df['games_played'] * df['_p_cs'])).clip(lower=None) * df['position'].map(CS_PTS).fillna(0)
+    
+    # 2. Conceded Delta (Prevention): (Expected GC - Actual GC) * 0.5
+    # Positive means they conceded LESS than expected (good prevention/luck)
+    # We estimate expected GC roughly from xGA if available, else derive from CS probability
+    if 'poisson_opp_xGA_per90' in df.columns:
+        df['expected_gc'] = pd.to_numeric(df['poisson_opp_xGA_per90'], errors='coerce').fillna(1.35) * df['games_played']
+    else:
+        # Crude approximation: (1 - P_CS) * 1.5 goals/game * games
+        df['expected_gc'] = (1 - df['_p_cs']) * 1.5 * df['games_played']
+        
+    df['delta_gc'] = (df['expected_gc'] - df['goals_conceded']) * 0.5
+    
+    # 3. Attacking Delta (Finishing/Assist efficiency): (Actual GI - Expected GI) * Avg Pts (4.5)
+    df['actual_gi'] = safe_numeric(df.get('goals_scored', 0)) + safe_numeric(df.get('assists', 0))
+    df['expected_gi'] = df[xg_col] + df[xa_col]
+    df['delta_att'] = (df['actual_gi'] - df['expected_gi']) * 4.5
+    
+    # 4. Composite Delta
+    # For DEF/GKP: 40% Def, 30% GC, 30% Att
+    # For MID/FWD: 10% Def, 10% GC, 80% Att
+    
+    def calculate_composite_delta(row):
+        pos = row['position']
+        d_def = row.get('delta_def', 0)
+        d_gc = row.get('delta_gc', 0)
+        d_att = row.get('delta_att', 0)
+        
+        raw_diff = row['total_points'] - row['expected_total']
+        
+        if pos in ['GKP', 'DEF']:
+            # Defenders: Blend raw diff with specific defensive overperformance
+            return (raw_diff * 0.4) + (d_def * 0.3) + (d_gc * 0.3)
+        else:
+            # Attackers: Mostly raw diff (which is heavily attacking based) + specific attacking efficiency
+            return (raw_diff * 0.7) + (d_att * 0.3)
+
+    df['composite_delta'] = df.apply(calculate_composite_delta, axis=1).round(2)
+    df['diff'] = df['composite_delta']
 
     ef1, ef2, ef3 = st.columns([1, 1, 2])
     with ef1:
@@ -662,7 +726,8 @@ def render_expected_vs_actual(players_df: pd.DataFrame, con_ep_label: str):
                 marker=dict(size=8, color=color, opacity=0.75,
                             line=dict(width=1, color='rgba(0,0,0,0.08)')),
                 text=pos_df['web_name'],
-                hovertemplate='<b>%{text}</b><br>Stats xP: %{x:.0f}<br>Actual: %{y:.0f}<extra></extra>'
+                hovertemplate='<b>%{text}</b><br>Stats xP: %{x:.0f}<br>Actual: %{y:.0f}<br>Delta: %{customdata:.2f}<extra></extra>',
+                customdata=pos_df['composite_delta']
             ))
 
         if eva_search and eva_search.strip():
@@ -678,7 +743,8 @@ def render_expected_vs_actual(players_df: pd.DataFrame, con_ep_label: str):
                                 line=dict(width=2, color='#ef4444')),
                     text=matched['web_name'], textposition='top center',
                     textfont=dict(color='#ffffff', size=11),
-                    hovertemplate='<b>%{text}</b><br>Stats xP: %{x:.0f}<br>Actual: %{y:.0f}<extra></extra>'
+                    hovertemplate='<b>%{text}</b><br>Stats xP: %{x:.0f}<br>Actual: %{y:.0f}<br>Delta: %{customdata:.2f}<extra></extra>',
+                    customdata=matched['composite_delta']
                 ))
 
         fig.update_layout(
