@@ -71,6 +71,7 @@ class MonteCarloEngine:
         self.n_simulations = n_simulations
         self.rng = np.random.default_rng(random_seed)
         self._prepare_distributions()
+        self._precalculate_team_factors()
     
     def _prepare_distributions(self):
         """Prepare probability distributions for each player."""
@@ -112,7 +113,20 @@ class MonteCarloEngine:
         ).clip(lower=0.5)
         
         # Optimize for O(1) lookup: dict of dicts keyed by id
-        self.distributions = df[['id', 'ep_next', 'estimated_std', 'form', 'minutes']].set_index('id').to_dict('index')
+        self.distributions = df[['id', 'team', 'ep_next', 'estimated_std', 'form', 'minutes']].set_index('id').to_dict('index')
+
+    def _precalculate_team_factors(self):
+        """
+        Pre-calculate correlation factors for each team.
+        Models team-level performance variance (e.g., if City scores 5, all City players benefit).
+        """
+        teams = self.players_df['team'].unique()
+        # Factor ~ Normal(1.0, 0.15) - 68% of games are within +/- 15% of exp. performance
+        self.team_factors = {}
+        for team_id in teams:
+            factors = self.rng.normal(1.0, 0.15, size=self.n_simulations)
+            # Clip to avoid extreme outliers (0.5x to 1.5x)
+            self.team_factors[team_id] = factors.clip(0.5, 1.5)
     
     def _simulate_player_gamma(self, player_id: int, ep: float, std: float) -> np.ndarray:
         """
@@ -251,6 +265,14 @@ class MonteCarloEngine:
             samples = self._simulate_player_poisson_bonus(player_id, ep, std)
         else:  # mixed (default)
             samples = self._simulate_player_mixed(player_id, ep, std, form)
+        
+        # Apply Team Correlation
+        if 'team' in player_data:
+            team_id = player_data['team']
+            if team_id in self.team_factors:
+                # Apply team performance multiplier
+                # This ensures teammates are correlated
+                samples = samples * self.team_factors[team_id]
         
         # Scale for multiple gameweeks
         if n_gameweeks > 1:

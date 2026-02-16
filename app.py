@@ -216,55 +216,55 @@ def main():
     
     with tab0:
         render_tab_header("Dashboard", "At-a-glance overview of your gameweek — key metrics, top picks and alerts")
-        render_dashboard_tab(processor, players_df)
+        render_dashboard_tab(processor, players_df.copy())
     
     with tab1:
         render_tab_header("Strategy", "Explore the player landscape, fixture difficulty and ownership trends")
-        render_strategy_tab(processor, players_df)
+        render_strategy_tab(processor, players_df.copy())
     
     with tab2:
         render_tab_header("Squad Builder", "Optimise transfers and build your best XV within budget")
-        render_optimization_tab(processor, players_df, fetcher)
+        render_optimization_tab(processor, players_df.copy(), fetcher)
     
     with tab3:
         render_tab_header("Analytics", "Deep-dive into player data, differentials and value metrics")
-        render_analytics_tab(processor, players_df)
+        render_analytics_tab(processor, players_df.copy())
     
     with tab4:
         render_tab_header("Captain", "Compare captain candidates using Poisson, ML and FPL estimates")
-        render_captain_tab(processor, players_df, fetcher)
+        render_captain_tab(processor, players_df.copy(), fetcher)
     
     with tab5:
         render_tab_header("Teams", "Team-level analysis — defensive stats, xG and fixture runs")
-        render_team_analysis_tab(processor, players_df)
+        render_team_analysis_tab(processor, players_df.copy())
     
     with tab6:
         render_tab_header("Prices", "Track price changes, net transfers and rise/fall predictions")
-        render_price_predictor_tab(processor, players_df)
+        render_price_predictor_tab(processor, players_df.copy())
     
     with tab7:
         render_tab_header("Wildcard", "Plan your wildcard squad with full-season optimisation")
-        render_wildcard_tab(processor, players_df)
+        render_wildcard_tab(processor, players_df.copy())
     
     with tab8:
         render_tab_header("History", "Review past gameweek scores and season trajectory")
-        render_history_tab(processor, players_df, fetcher)
+        render_history_tab(processor, players_df.copy(), fetcher)
     
     with tab9:
         render_tab_header("Rival Scout", "Compare squads head-to-head and spot tactical differences")
-        render_rival_tab(processor, players_df)
+        render_rival_tab(processor, players_df.copy())
     
     with tab10:
         render_tab_header("ML Predictions", "Ensemble machine learning forecasts with confidence intervals")
-        render_ml_tab(processor, players_df)
+        render_ml_tab(processor, players_df.copy())
     
     with tab11:
         render_tab_header("Monte Carlo", "Stochastic simulations for risk analysis and upside potential")
-        render_monte_carlo_tab(processor, players_df)
+        render_monte_carlo_tab(processor, players_df.copy())
     
     with tab12:
         render_tab_header("Genetic Optimizer", "Evolutionary algorithm for exploring diverse squad solutions")
-        render_genetic_tab(processor, players_df)
+        render_genetic_tab(processor, players_df.copy())
 
 
 if __name__ == "__main__":

@@ -753,8 +753,24 @@ def calculate_poisson_ep_for_dataframe(
             real_fixture_count / total_fixtures * 100,
         )
     
-    # ── Vectorized Calculation (Pandas) ──
-    # Expand fixtures to player-rows
+    # -------------------------------------------------------------------------
+    # VECTORIZED CALCULATION ENGINE
+    # -------------------------------------------------------------------------
+    # Unlike the legacy iterative approach (O(N*M)), this implementation uses
+    # Pandas vectorization (O(1) overhead + optimized C loops) to process
+    # all players and fixtures simultaneously.
+    #
+    # Core Strategy:
+    # 1. Expand the DataFrame: Replicate player rows for each of their fixtures.
+    #    (e.g., if Player A has 3 games, they get 3 rows in the expanded DF)
+    # 2. Vectorized Merge: Join fixture difficulty data (xGA) onto these rows.
+    # 3. Batch Calculation: Compute Poisson probabilities for the entire column at once.
+    # 4. Aggregation: Group by player_id and sum the Expected Points.
+    # -------------------------------------------------------------------------
+
+    # 1. Prepare Fixtures
+    # Flatten the list-of-lists of fixtures into a long-format DataFrame
+    # Each row becomes: (player_id, opponent_team_id, location, gw)
     fixture_rows = []
     for team_id, fixtures in team_fixture_list.items():
         for fx in fixtures:
@@ -828,9 +844,20 @@ def calculate_poisson_ep_for_dataframe(
     opp_factor = merged['opp_xGA_per90'] / avg_xga if avg_xga > 0 else 1.0
     
     mins_factor = (mins_per_game / 90.0).clip(0, 1)
+    
+    # Lambda = Expected Goals for this specific match
+    # Formula: Base xG * Opponent Strength Factor * Venue Factor * Minutes Scale
     lambda_att = xg_per90 * opp_factor * venue_mult_att * mins_factor
     
+    # Expected Points from Goals:
+    # We use a Poisson realization: E[Points] = E[Goals] * Points_Per_Goal
     xp_goals = lambda_att * pos_map_goals * p_plays
+    
+    # Attack Bonus Points Approximation:
+    # A player who scores is highly likely to get bonus points.
+    # We approximate this as: 15% chance of 3 bonus, 10% chance of 2 bonus per goal.
+    # Simplified to: 0.5 bonus points per expected goal.
+    xp_bonus_att = lambda_att * 0.5 * p_plays
     
     # Creative Lambda (Assists)
     if 'us_xA_per90' in merged.columns:
