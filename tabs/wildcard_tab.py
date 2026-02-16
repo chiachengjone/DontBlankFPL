@@ -13,130 +13,114 @@ def generate_wildcard_squad(
     df: pd.DataFrame,
     formation: str,
     strategy: str,
-    budget: float = 100.0
+    budget: float = 100.0,
+    horizon: int = 4
 ) -> pd.DataFrame:
     """
-    Generate optimal 15-man wildcard squad using greedy algorithm.
-    
-    FPL Requirements:
-    - 15 players total
-    - 2 GKP, 5 DEF, 5 MID, 3 FWD
-    - Max 3 players per team
-    - Budget constraint (default 100m)
-    
-    Returns DataFrame of selected players.
+    Generate optimal 15-man wildcard squad using a robust greedy algorithm.
+    Ensures 15 players are ALWAYS returned if technically possible.
     """
     # Parse formation for starting XI
     parts = formation.split('-')
-    starting_req = {
-        'GKP': 1,
-        'DEF': int(parts[0]),
-        'MID': int(parts[1]),
-        'FWD': int(parts[2])
-    }
-    
-    # Full squad requirements (FPL rules)
+    starting_req = {'GKP': 1, 'DEF': int(parts[0]), 'MID': int(parts[1]), 'FWD': int(parts[2])}
     squad_req = {'GKP': 2, 'DEF': 5, 'MID': 5, 'FWD': 3}
     
-    # Use Model xP (Consensus) - consensus_ep is the single source of truth
+    # Standardize data
     active_models = st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])
-    players = calculate_consensus_ep(df.copy(), active_models)
+    players = calculate_consensus_ep(df.copy(), active_models, horizon=horizon)
     players['now_cost'] = safe_numeric(players['now_cost'], 5)
     players['form'] = safe_numeric(players.get('form', pd.Series([0]*len(players))))
     players['selected_by_percent'] = safe_numeric(players['selected_by_percent'])
-    players['eppm'] = safe_numeric(players['consensus_ep']) / players['now_cost'].clip(lower=4)
+    players['eppm'] = safe_numeric(players['consensus_ep']) / players['now_cost'].clip(lower=4.0)
     players['minutes'] = safe_numeric(players.get('minutes', pd.Series([0]*len(players))))
     
-    # Filter to players with minutes (avoid non-starters)
-    players = players[players['minutes'] > 90].copy()
-    
-    # Sort players based on strategy - use consensus_ep (Model xP)
+    # Strategy Scoring
     if strategy == 'Max Points':
-        players = players.sort_values('consensus_ep', ascending=False)
+        players['score'] = players['consensus_ep']
     elif strategy == 'Value':
-        players = players.sort_values('eppm', ascending=False)
+        players['score'] = players['eppm']
     elif strategy == 'Differential':
-        # Low ownership + good EP
-        players['diff_score'] = safe_numeric(players['consensus_ep']) * (1 - players['selected_by_percent'] / 100)
-        players = players.sort_values('diff_score', ascending=False)
-    else:  # Balanced
-        players['balanced_score'] = safe_numeric(players['consensus_ep']) * 0.6 + players['eppm'] * 2 + players['form'] * 0.2
-        players = players.sort_values('balanced_score', ascending=False)
-    
-    # Greedy selection
+        players['score'] = safe_numeric(players['consensus_ep']) * (1 - players['selected_by_percent'] / 100)
+    else: # Balanced
+        players['score'] = safe_numeric(players['consensus_ep']) * 0.6 + players['eppm'] * 2 + players['form'] * 0.2
+
+    # Sort by score primarily
+    players = players.sort_values('score', ascending=False)
+
     selected = []
     selected_ids = set()
     team_counts = {}
-    pos_counts = {'GKP': 0, 'DEF': 0, 'MID': 0, 'FWD': 0}
     remaining_budget = budget
+
+    # Minimum prices for reserve calculation
+    MIN_PRICE = {'GKP': 4.0, 'DEF': 4.0, 'MID': 4.4, 'FWD': 4.5}
     
-    # First pass: Fill starting XI positions with best players
-    for pos in ['FWD', 'MID', 'DEF', 'GKP']:  # Fill attacking positions first
-        target = starting_req[pos]
-        pos_players = players[players['position'] == pos].copy()
+    # ── Iterative Selection ──
+    # Build list of 15 slots we need to fill
+    slots_to_fill = []
+    # Fill starters first (to prioritize best players in starting XI)
+    for pos in ['FWD', 'MID', 'DEF', 'GKP']:
+        for _ in range(starting_req[pos]):
+            slots_to_fill.append(pos)
+    # Then fill bench slots
+    for pos in ['DEF', 'MID', 'FWD', 'GKP']:
+        for _ in range(squad_req[pos] - starting_req[pos]):
+            slots_to_fill.append(pos)
+
+    for i, pos in enumerate(slots_to_fill):
+        # Calculate budget reserve needed for REMAINING slots (i+1 to 14)
+        remaining_slots = slots_to_fill[i+1:]
+        reserve_needed = sum(MIN_PRICE[p] for p in remaining_slots)
         
-        for _, p in pos_players.iterrows():
-            if pos_counts[pos] >= target:
-                break
-            
-            pid = p['id']
-            team = p['team']
-            cost = p['now_cost']
-            
-            # Check constraints
-            if pid in selected_ids:
-                continue
-            if team_counts.get(team, 0) >= MAX_PLAYERS_PER_TEAM:
-                continue
-            if cost > remaining_budget:
-                continue
-            
-            # Add player
-            selected.append(p)
-            selected_ids.add(pid)
-            team_counts[team] = team_counts.get(team, 0) + 1
-            pos_counts[pos] += 1
-            remaining_budget -= cost
-    
-    # Second pass: Fill bench positions
-    for pos in ['DEF', 'MID', 'FWD', 'GKP']:  # Order for bench importance
-        target = squad_req[pos]
-        pos_players = players[players['position'] == pos].copy()
+        # Filter valid candidates
+        max_allowed_price = remaining_budget - reserve_needed
         
-        for _, p in pos_players.iterrows():
-            if pos_counts[pos] >= target:
-                break
+        valid_players = players[
+            (players['position'] == pos) & 
+            (~players['id'].isin(selected_ids)) &
+            (players['now_cost'] <= max_allowed_price)
+        ].copy()
+        
+        # Filter by team limit (max 3)
+        valid_players = valid_players[valid_players['team'].apply(lambda t: team_counts.get(t, 0) < MAX_PLAYERS_PER_TEAM)]
+
+        if valid_players.empty:
+            # FALLBACK: If no players fit the "smart" budget/team constraint, 
+            # pick the absolute cheapest available valid player for this position.
+            fallback_players = players[
+                (players['position'] == pos) & 
+                (~players['id'].isin(selected_ids))
+            ].copy()
+            fallback_players = fallback_players[fallback_players['team'].apply(lambda t: team_counts.get(t, 0) < MAX_PLAYERS_PER_TEAM)]
+            fallback_players = fallback_players.sort_values('now_cost', ascending=True)
             
-            pid = p['id']
-            team = p['team']
-            cost = p['now_cost']
-            
-            # Check constraints
-            if pid in selected_ids:
-                continue
-            if team_counts.get(team, 0) >= MAX_PLAYERS_PER_TEAM:
-                continue
-            if cost > remaining_budget:
+            if fallback_players.empty:
+                # Should be impossible with FPL data
                 continue
             
-            # Add player
-            selected.append(p)
-            selected_ids.add(pid)
-            team_counts[team] = team_counts.get(team, 0) + 1
-            pos_counts[pos] += 1
-            remaining_budget -= cost
-    
-    if not selected:
+            p = fallback_players.iloc[0]
+        else:
+            # Pick the best scoring player available within budget reserve constraint
+            p = valid_players.iloc[0]
+            
+        # Add player
+        selected.append(p)
+        selected_ids.add(p['id'])
+        team_counts[p['team']] = team_counts.get(p['team'], 0) + 1
+        remaining_budget -= p['now_cost']
+
+    if len(selected) < 15:
         return pd.DataFrame()
-    
+
     result = pd.DataFrame(selected)
     
-    # Mark starting XI
+    # Strictly re-mark starting XI based on formation (top-scoring in each pos)
     result['is_starter'] = False
     for pos in ['GKP', 'DEF', 'MID', 'FWD']:
         pos_mask = result['position'] == pos
-        pos_players = result[pos_mask].head(starting_req[pos]).index
-        result.loc[pos_players, 'is_starter'] = True
+        # We sort by consensus_ep to ensure we actually start the best ones in the final display
+        pos_indices = result[pos_mask].sort_values('consensus_ep', ascending=False).index[:starting_req[pos]]
+        result.loc[pos_indices, 'is_starter'] = True
     
     return result
 
@@ -199,6 +183,7 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
             help="Balanced: xP + Value mix | Max Points: Highest xP | Value: Best xP/m | Differential: Low ownership"
         )
     
+    
     with set_cols[2]:
         budget = st.number_input(
             "Budget (£m)",
@@ -208,13 +193,22 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
             step=0.5,
             key="wc_budget"
         )
+        
+    horizon = st.slider(
+        "Planning Horizon (GWs)",
+        min_value=1,
+        max_value=10,
+        value=4,
+        key="wc_horizon",
+        help="Optimize squad for total points over this many gameweeks"
+    )
     
     st.markdown("---")
     
     # ── Generate Button ──
     if st.button("Generate Wildcard Squad", type="primary", use_container_width=True):
-        with st.spinner("Optimizing squad..."):
-            squad = generate_wildcard_squad(players_df, formation, strategy, budget)
+        with st.spinner(f"Optimizing squad for next {horizon} GWs..."):
+            squad = generate_wildcard_squad(players_df, formation, strategy, budget, horizon)
             
             if squad.empty:
                 st.error("Could not generate a valid squad. Try adjusting budget.")
@@ -231,6 +225,7 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
         total_cost = squad['now_cost'].sum()
         total_ep = safe_numeric(squad['consensus_ep']).sum()
         starting_ep = safe_numeric(squad[squad['is_starter']]['consensus_ep']).sum()
+        avg_ep_per_gw = total_ep / max(1, horizon)
         avg_ownership = squad['selected_by_percent'].mean()
         
         sum_cols = st.columns(4)
@@ -256,8 +251,9 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
         with sum_cols[2]:
             st.markdown(f'''
             <div style="background:#ffffff;border:1px solid rgba(0,0,0,0.04);border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:1rem;text-align:center;">
-                <div style="color:#86868b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Starting XI xP</div>
+                <div style="color:#86868b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Starter xP ({horizon}GW)</div>
                 <div style="color:#22c55e;font-size:1.5rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{starting_ep:.1f}</div>
+                <div style="color:#86868b;font-size:0.7rem;">{starting_ep/horizon:.1f} / GW</div>
             </div>
             ''', unsafe_allow_html=True)
         
@@ -285,7 +281,7 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
             # Format display
             display_df = pos_players[['web_name', 'team_name', 'now_cost', 'consensus_ep', 
                                       'form', 'selected_by_percent', 'is_starter']].copy()
-            con_label = get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl']))
+            con_label = get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl']), horizon)
             display_df.columns = ['Player', 'Team', 'Price', con_label, 'Form', 'EO%', 'Starting']
             display_df['Starting'] = display_df['Starting'].apply(lambda x: 'Starting' if x else 'Bench')
             
@@ -329,7 +325,7 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
         with st.expander("View Full Squad Table"):
             full_df = squad[['web_name', 'team_name', 'position', 'now_cost', 
                             'consensus_ep', 'form', 'selected_by_percent', 'is_starter']].copy()
-            con_label = get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl']))
+            con_label = get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl']), horizon)
             full_df.columns = ['Player', 'Team', 'Pos', 'Price', con_label, 'Form', 'EO%', 'Starter']
             full_df = full_df.sort_values(['Starter', 'Pos'], ascending=[False, True])
             full_df['Starter'] = full_df['Starter'].apply(lambda x: 'Yes' if x else 'Bench')
