@@ -802,4 +802,7 @@ def get_opponent_stats_map(players_df: pd.DataFrame, fixtures_df: pd.DataFrame, 
         }
         
     return opp_stats_map
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes

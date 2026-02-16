@@ -14,6 +14,9 @@ from utils.helpers import (
     calculate_consensus_ep, get_consensus_label, calculate_enhanced_captain_score
 )
 from components.charts import create_dynamic_player_scatter
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
 from components.cards import render_player_detail_card
 from fpl_api import CBIT_BONUS_THRESHOLD, CBIT_BONUS_POINTS, MAX_FREE_TRANSFERS, CAPTAIN_MULTIPLIER
@@ -136,10 +139,13 @@ def render_strategy_tab(processor, players_df: pd.DataFrame):
                 st.caption(f"Other matches: {', '.join(matched['web_name'].tolist()[:10])}")
     
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
     # Scatter plot
     if 'expected_points' in df.columns or 'ep_next' in df.columns:
         fig = create_ep_ownership_scatter(df, pos_filter, search_player=search_player)
 =======
+=======
+>>>>>>> Stashed changes
     # Dynamic Scatter plot
     if 'consensus_ep' in df.columns or 'expected_points_poisson' in df.columns or 'ep_next' in df.columns:
         fig = create_dynamic_player_scatter(
@@ -149,6 +155,9 @@ def render_strategy_tab(processor, players_df: pd.DataFrame):
             search_player=search_player, 
             ep_label=con_label
         )
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
         if fig:
             st.plotly_chart(fig, use_container_width=True, key='strategy_dynamic_scatter')
@@ -201,6 +210,7 @@ def render_quick_stats(df: pd.DataFrame):
         st.metric("Avg Price", f"{avg_price:.1f}m")
 
 
+<<<<<<< Updated upstream
 <<<<<<< Updated upstream
 def render_form_vs_ep_chart(df: pd.DataFrame):
     """Render Form vs EP bubble chart — size = price, color = position."""
@@ -257,6 +267,8 @@ def render_form_vs_ep_chart(df: pd.DataFrame):
         margin=dict(l=50, r=30, t=30, b=50)
     )
     st.plotly_chart(fig, use_container_width=True, key='strategy_form_vs_ep')
+=======
+>>>>>>> Stashed changes
 =======
 >>>>>>> Stashed changes
 

@@ -11,13 +11,19 @@ import pandas as pd
 import numpy as np
 
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
 from utils.helpers import safe_numeric, round_df, style_df_with_injuries
 =======
+=======
+>>>>>>> Stashed changes
 from utils.helpers import (
     safe_numeric, round_df, style_df_with_injuries, 
     calculate_consensus_ep, get_consensus_label,
     get_fixture_ease_map, get_opponent_stats_map
 )
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
 from optimizer import MAX_PLAYERS_PER_TEAM, MAX_BUDGET
 from config import (
@@ -77,6 +83,7 @@ def generate_wildcard_squad(
         'MID': int(parts[1]),
         'FWD': int(parts[2])
     }
+<<<<<<< Updated upstream
 <<<<<<< Updated upstream
     
     # Full squad requirements (FPL rules)
@@ -154,6 +161,50 @@ def generate_wildcard_squad(
         players['selected_by_percent'] = safe_numeric(players['selected_by_percent'])
         players['obj'] = players['detailed_score'] * (1 - players['selected_by_percent'] / 100)
     else:  # Balanced
+=======
+
+    # ── 1. Prepare candidate pool ──
+    active_models = st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])
+    players = calculate_consensus_ep(df, active_models, horizon=horizon)
+    players['now_cost'] = safe_numeric(players['now_cost'], 5)
+    players['minutes'] = safe_numeric(players.get('minutes', pd.Series([0]*len(players))))
+
+    # Relaxed reliability filter: elite assets exempt
+    xp_threshold = players['consensus_ep'].quantile(0.90)
+    players = players[
+        (players['minutes'] > 200) | (players['consensus_ep'] >= xp_threshold)
+    ].copy()
+
+    # Fixture ease & opponent stats
+    ease_map = get_fixture_ease_map(fixtures_df, current_gw, weeks_ahead=horizon)
+    players['ease'] = players['team'].map(ease_map).fillna(0.5)
+    opp_stats = get_opponent_stats_map(players, fixtures_df, current_gw, weeks_ahead=horizon)
+    players['opp_xg'] = players['team'].map(lambda tid: opp_stats.get(tid, {}).get('avg_opp_xg', 1.3))
+    players['opp_xgc'] = players['team'].map(lambda tid: opp_stats.get(tid, {}).get('avg_opp_xgc', 1.3))
+
+    # ── 2. Build per-player objective score ──
+    def _player_score(row):
+        ep = row['consensus_ep']
+        ease = row['ease']
+        if row['position'] in ['GKP', 'DEF']:
+            opp_score = max(3.0 - row['opp_xg'], 0.1) / 3.0
+        else:
+            opp_score = row['opp_xgc'] / 2.5
+        return ep * 0.85 + (ease * 10) * 0.10 + (opp_score * 10) * 0.05
+
+    players['detailed_score'] = players.apply(_player_score, axis=1)
+    players['eppm'] = players['detailed_score'] / players['now_cost'].clip(lower=4)
+
+    # Strategy-specific objective value
+    if strategy == 'Max Points':
+        players['obj'] = players['detailed_score']
+    elif strategy == 'Value':
+        players['obj'] = players['eppm']
+    elif strategy == 'Differential':
+        players['selected_by_percent'] = safe_numeric(players['selected_by_percent'])
+        players['obj'] = players['detailed_score'] * (1 - players['selected_by_percent'] / 100)
+    else:  # Balanced
+>>>>>>> Stashed changes
         players['obj'] = players['detailed_score'] * 0.80 + (players['eppm'] * 5) * 0.20
 
     # Optional variance penalty (from Monte Carlo std if available)
@@ -239,6 +290,9 @@ def _greedy_fallback(players: pd.DataFrame, starting_req: dict, budget: float) -
     players = players.sort_values('obj', ascending=False)
 
     selected, selected_ids, team_counts = [], set(), {}
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
     pos_counts = {'GKP': 0, 'DEF': 0, 'MID': 0, 'FWD': 0}
     remaining = budget
@@ -305,16 +359,22 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
         - Must stay within budget (default £100m)
         
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
         **Squad Quality Metrics**
         - Total EP: Combined expected points for the squad
         - Total Value: Squad's EPPM efficiency
         - Ownership Mix: Balance of template vs differential
 =======
+=======
+>>>>>>> Stashed changes
         **Advanced Selection Logic**
         - **Horizon-Aware**: Considers fixtures and points over your chosen window.
         - **Defensive Solidity**: Defenders and GKPs are scored higher when facing teams with low **Avg Opponent xG**.
         - **Attacking Threat**: Midfielders and Forwards are prioritized when facing teams with high **Avg Opponent xGC** (leaky defenses).
         - **Fixture Ease**: Directly weights the difficulty of upcoming opponents.
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
         """)
     
@@ -394,8 +454,14 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
         # Summary stats
         total_cost = squad['now_cost'].sum()
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
         total_ep = squad['expected_points'].sum()
         starting_ep = squad[squad['is_starter']]['expected_points'].sum()
+=======
+        starting_df = squad[squad['is_starter']]
+        total_ep = safe_numeric(starting_df['consensus_ep']).sum()
+        avg_ep_per_match = total_ep / max(wc_horizon, 1)
+>>>>>>> Stashed changes
 =======
         starting_df = squad[squad['is_starter']]
         total_ep = safe_numeric(starting_df['consensus_ep']).sum()
@@ -435,8 +501,13 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
             st.markdown(f'''
             <div style="background:#ffffff;border:1px solid rgba(0,0,0,0.04);border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:1rem;text-align:center;">
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
                 <div style="color:#86868b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">Starting XI EP</div>
                 <div style="color:#22c55e;font-size:1.5rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{starting_ep:.1f}</div>
+=======
+                <div style="color:#86868b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">League Diff</div>
+                <div style="color:{diff_color};font-size:1.5rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{diff_prefix}{league_diff:.1f}</div>
+>>>>>>> Stashed changes
 =======
                 <div style="color:#86868b;font-size:0.72rem;font-weight:500;text-transform:uppercase;">League Diff</div>
                 <div style="color:{diff_color};font-size:1.5rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{diff_prefix}{league_diff:.1f}</div>
@@ -466,12 +537,15 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
             st.markdown(f"**{pos_names[pos]}**")
             
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
             # Format display
             display_df = pos_players[['web_name', 'team_name', 'now_cost', 'expected_points', 
                                       'form', 'selected_by_percent', 'is_starter']].copy()
             display_df.columns = ['Player', 'Team', 'Price', 'EP', 'Form', 'EO%', 'Starting']
             display_df['Starting'] = display_df['Starting'].apply(lambda x: 'Starting' if x else 'Bench')
 =======
+=======
+>>>>>>> Stashed changes
             # Format display (Expanded with Ease and Opponent Stats)
             display_df = pos_players[['web_name', 'team_name', 'now_cost', 'consensus_ep', 
                                       'ease', 'opp_xg', 'opp_xgc', 'is_starter']].copy()
@@ -483,20 +557,29 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
             
             display_df.columns = ['Player', 'Team', 'Price', xp_col_name, 'Ease', 'Opp xG', 'Opp xGC', 'Status']
             display_df['Status'] = display_df['Status'].apply(lambda x: 'Starting' if x else 'Bench')
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
             
             st.dataframe(
                 style_df_with_injuries(display_df, players_df, format_dict={
                     'Price': '£{:.1f}m',
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
                     'EP': '{:.2f}',
                     'Form': '{:.1f}',
                     'EO%': '{:.1f}%'
 =======
+=======
+>>>>>>> Stashed changes
                     con_label: '{:.2f}',
                     'Ease': '{:.1f}',
                     'Opp xG': '{:.2f}',
                     'Opp xGC': '{:.2f}'
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
                 }),
                 hide_index=True,
@@ -532,9 +615,12 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
         with st.expander("View Full Squad Detailed Stats"):
             full_df = squad[['web_name', 'team_name', 'position', 'now_cost', 
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
                             'expected_points', 'form', 'selected_by_percent', 'is_starter']].copy()
             full_df.columns = ['Player', 'Team', 'Pos', 'Price', 'EP', 'Form', 'EO%', 'Starter']
 =======
+=======
+>>>>>>> Stashed changes
                             'consensus_ep', 'ease', 'opp_xg', 'opp_xgc', 'is_starter']].copy()
             con_label = get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl']))
             xp_col_name = con_label.replace("Avg", "Total")
@@ -542,6 +628,9 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
             full_df['ease'] = (full_df['ease'] * 4 + 1).round(1)
             
             full_df.columns = ['Player', 'Team', 'Pos', 'Price', xp_col_name, 'Ease', 'Opp xG', 'Opp xGC', 'Starter']
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
             full_df = full_df.sort_values(['Starter', 'Pos'], ascending=[False, True])
             full_df['Starter'] = full_df['Starter'].apply(lambda x: 'Yes' if x else 'Bench')
@@ -550,14 +639,20 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
                 style_df_with_injuries(full_df, players_df, format_dict={
                     'Price': '£{:.1f}m',
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
                     'EP': '{:.2f}',
                     'Form': '{:.1f}',
                     'EO%': '{:.1f}%'
 =======
+=======
+>>>>>>> Stashed changes
                     con_label: '{:.2f}',
                     'Ease': '{:.1f}',
                     'Opp xG': '{:.2f}',
                     'Opp xGC': '{:.2f}'
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
                 }),
                 hide_index=True,

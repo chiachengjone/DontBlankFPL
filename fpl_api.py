@@ -31,6 +31,8 @@ from config import (
 
 logger = logging.getLogger(__name__)
 
+logger = logging.getLogger(__name__)
+
 
 class FPLDataFetcher:
     """Handles all FPL API data fetching operations with rate limiting and retry."""
@@ -83,6 +85,9 @@ class FPLDataFetcher:
                     logger.warning("Request failed (%s), retrying in %.1fs... [%s]", context, wait, e)
                     time.sleep(wait)
         raise FPLAPIError(f"Failed after {self.MAX_RETRIES} retries ({context}): {last_exc}")
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
         
     def _get_cached(self, key: str) -> Optional[dict]:

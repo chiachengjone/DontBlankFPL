@@ -174,6 +174,7 @@ def analyze_transfers(processor, players_df, fetcher, team_id, weeks_ahead, free
         st.warning(f"Could not fetch team data for ID {team_id}: {str(e)}. Showing general recommendations.")
     
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
     # Prepare EP metrics - Horizon-Aware Re-calculation
     try:
         from poisson_ep import calculate_poisson_ep_for_dataframe
@@ -199,6 +200,9 @@ def analyze_transfers(processor, players_df, fetcher, team_id, weeks_ahead, free
     # Force Blended EP as primary optimization target (70% Average Poisson, 30% FPL)
     featured_df['blended_ep'] = (featured_df['poisson_ep'] * 0.7 + featured_df['fpl_ep'] * 0.3).round(2)
     ep_col = 'blended_ep'
+=======
+    ep_col = 'avg_consensus_ep'
+>>>>>>> Stashed changes
 =======
     ep_col = 'avg_consensus_ep'
 >>>>>>> Stashed changes
@@ -372,9 +376,12 @@ def render_transfer_recommendations(current_squad_df, available_df, ep_col):
         st.markdown("**Recommended OUT** (lowest score in your squad)", unsafe_allow_html=True)
         out_candidates = current_squad_df.nsmallest(5, 'transfer_score')
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
         out_display = out_candidates[['web_name', 'team_name', 'position', 'now_cost', 'poisson_ep', 'fpl_ep', 'blended_ep', 'form', 'transfer_score']].copy()
         out_display.columns = ['Player', 'Team', 'Pos', 'Price', 'Poisson', 'FPL', 'Blend', 'Form', 'Score']
 =======
+=======
+>>>>>>> Stashed changes
         
         # Standardize for Avg display
         out_display = out_candidates[['web_name', 'team_name', 'position', 'now_cost', 'value_score', 'fixture_ease_scaled', 'avg_consensus_ep', 'form', 'transfer_score']].copy()
@@ -383,6 +390,9 @@ def render_transfer_recommendations(current_squad_df, available_df, ep_col):
             get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl']), is_avg=True), 
             'Form', 'Score'
         ]
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
         st.dataframe(style_df_with_injuries(out_display), hide_index=True, use_container_width=True)
         
@@ -534,7 +544,11 @@ def render_ai_transfer_plan(current_squad_df, available_df, ep_col, free_transfe
                 st.markdown(f'''<div class="rule-card">
                     <div style="color:#ef4444;font-weight:600;">OUT: {t['out_name']}</div>
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
                     <div class="rule-label">{t['out_team']} | {t['out_pos']} | {t['out_price']:.1f}m | Blend {t['out_ep']:.2f}</div>
+=======
+                    <div class="rule-label">{t['out_team']} | {t['out_pos']} | {t['out_price']:.1f}m | {get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl']), is_avg=True)} {t['out_avg_ep']:.2f}</div>
+>>>>>>> Stashed changes
 =======
                     <div class="rule-label">{t['out_team']} | {t['out_pos']} | {t['out_price']:.1f}m | {get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl']), is_avg=True)} {t['out_avg_ep']:.2f}</div>
 >>>>>>> Stashed changes
@@ -545,7 +559,11 @@ def render_ai_transfer_plan(current_squad_df, available_df, ep_col, free_transfe
                 st.markdown(f'''<div class="rule-card">
                     <div style="color:#22c55e;font-weight:600;">IN: {t['in_name']}</div>
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
                     <div class="rule-label">{t['in_team']} | {t['in_pos']} | {t['in_price']:.1f}m | Blend {t['in_ep']:.2f}</div>
+=======
+                    <div class="rule-label">{t['in_team']} | {t['in_pos']} | {t['in_price']:.1f}m | {get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl']), is_avg=True)} {t['in_avg_ep']:.2f}</div>
+>>>>>>> Stashed changes
 =======
                     <div class="rule-label">{t['in_team']} | {t['in_pos']} | {t['in_price']:.1f}m | {get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl']), is_avg=True)} {t['in_avg_ep']:.2f}</div>
 >>>>>>> Stashed changes
@@ -593,15 +611,21 @@ def render_position_recommendations(available_df, ep_col):
         if not pos_df.empty:
             st.markdown(f"**{pos} Recommendations**")
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
             display_df = pos_df[['web_name', 'team_name', 'now_cost', 'poisson_ep', 'fpl_ep', 'blended_ep', 'form', 'selected_by_percent', 'transfer_score']].copy()
             display_df.columns = ['Player', 'Team', 'Price', 'Poisson', 'FPL', 'Blend', 'Form', 'Owned%', 'Score']
 =======
+=======
+>>>>>>> Stashed changes
             display_df = pos_df[['web_name', 'team_name', 'now_cost', 'value_score', 'fixture_ease_scaled', 'avg_consensus_ep', 'form', 'selected_by_percent', 'transfer_score']].copy()
             display_df.columns = [
                 'Player', 'Team', 'Price', 'Value', 'Ease', 
                 get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl']), is_avg=True), 
                 'Form', 'Owned%', 'Score'
             ]
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
             st.dataframe(style_df_with_injuries(display_df), hide_index=True, use_container_width=True)
 
@@ -611,15 +635,21 @@ def render_top_picks(available_df, ep_col):
     st.markdown('<p class="section-title">Top 10 Overall Picks</p>', unsafe_allow_html=True)
     top_10 = available_df.nlargest(10, 'transfer_score')
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
     top_display = top_10[['web_name', 'team_name', 'position', 'now_cost', 'poisson_ep', 'fpl_ep', 'blended_ep', 'form', 'selected_by_percent', 'transfer_score']].copy()
     top_display.columns = ['Player', 'Team', 'Pos', 'Price', 'Poisson', 'FPL', 'Blend', 'Form', 'Owned%', 'Score']
 =======
+=======
+>>>>>>> Stashed changes
     top_display = top_10[['web_name', 'team_name', 'position', 'now_cost', 'value_score', 'fixture_ease_scaled', 'avg_consensus_ep', 'form', 'selected_by_percent', 'transfer_score']].copy()
     top_display.columns = [
         'Player', 'Team', 'Pos', 'Price', 'Value', 'Ease', 
         get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl']), is_avg=True), 
         'Form', 'Owned%', 'Score'
     ]
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
     st.dataframe(style_df_with_injuries(top_display), hide_index=True, use_container_width=True)
 

@@ -9,6 +9,7 @@ from utils.helpers import safe_numeric
 
 
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
 # Position color mapping
 POSITION_COLORS = {
     'GKP': '#3b82f6',
@@ -19,6 +20,9 @@ POSITION_COLORS = {
 
 
 def create_ep_ownership_scatter(
+=======
+def create_dynamic_player_scatter(
+>>>>>>> Stashed changes
 =======
 def create_dynamic_player_scatter(
 >>>>>>> Stashed changes
@@ -47,10 +51,13 @@ def create_dynamic_player_scatter(
     }
     
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
     # Use expected_points (advanced EP) if available, else ep_next
     if 'expected_points' in df.columns and df['expected_points'].notna().any():
         df['ep'] = safe_numeric(df['expected_points'])
 =======
+=======
+>>>>>>> Stashed changes
     actual_x_col = col_map.get(x_axis_col, x_axis_col)
     
     # Ensure columns exist and are numeric
@@ -158,7 +165,11 @@ def create_dynamic_player_scatter(
                     legendgroup=pos,
                     showlegend=False,
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
                     hovertemplate='<b>%{customdata}</b><br>Ownership: %{x:.1f}%<br>EP: %{y:.1f}<extra></extra>',
+=======
+                    hovertemplate=f'<b>%{{customdata}}</b><br>{x_axis_col}: %{{x:.1f}}<br>xP: %{{y:.1f}}<extra></extra>',
+>>>>>>> Stashed changes
 =======
                     hovertemplate=f'<b>%{{customdata}}</b><br>{x_axis_col}: %{{x:.1f}}<br>xP: %{{y:.1f}}<extra></extra>',
 >>>>>>> Stashed changes
@@ -203,9 +214,12 @@ def create_dynamic_player_scatter(
         plot_bgcolor='#ffffff',
         font=dict(family='Inter, sans-serif', color='#86868b', size=11),
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
         xaxis_title='Ownership %',
         yaxis_title='Expected Points',
 =======
+=======
+>>>>>>> Stashed changes
         xaxis_title=x_axis_col,
         yaxis_title=ep_label,
 >>>>>>> Stashed changes
