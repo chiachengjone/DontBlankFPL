@@ -401,13 +401,11 @@ def render_team_analysis_tab(processor, players_df: pd.DataFrame):
                 size='total_points',
                 color='position',
                 hover_name='web_name',
-                text='web_name',
                 category_orders={"position": ["GKP", "DEF", "MID", "FWD"]},
                 color_discrete_map={'GKP': '#3b82f6', 'DEF': '#22c55e', 'MID': '#f59e0b', 'FWD': '#ef4444'}
             )
             
             fig.update_traces(
-                textposition='top center',
                 marker=dict(opacity=0.7, line=dict(width=1, color='White')),
                 hovertemplate='<b>%{hovertext}</b><br>Points: %{y}<extra></extra>'
             )

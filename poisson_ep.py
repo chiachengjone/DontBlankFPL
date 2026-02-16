@@ -17,31 +17,28 @@ import numpy as np
 import pandas as pd
 from scipy.stats import poisson, binom
 
+from config import (
+    GOAL_POINTS as GOAL_PTS,
+    ASSIST_POINTS as ASSIST_PTS,
+    CLEAN_SHEET_POINTS as CS_PTS,
+    APPEARANCE_POINTS,
+    CBIT_THRESHOLDS as CBIT_THRESHOLD,
+    CBIT_BONUS_POINTS as CBIT_BONUS,
+    GOALS_CONCEDED_PER_2_PENALTY as GOALS_CONCEDED_PER_2,
+    SAVES_PER_BONUS_POINT as SAVE_PTS,
+    HOME_ADVANTAGE_ATTACK,
+    HOME_ADVANTAGE_DEFENSE,
+    AWAY_MULTIPLIER_ATTACK,
+    AWAY_MULTIPLIER_DEFENSE,
+    LEAGUE_AVG_XG_PER_MATCH,
+    LEAGUE_AVG_XGA_PER_MATCH,
+    MAX_K_GOALS,
+    MAX_K_ASSISTS,
+    CLEAN_SHEET_PROBABILITY_CAP,
+    BONUS_POINT_POSITION_MULTIPLIER,
+)
+
 logger = logging.getLogger(__name__)
-
-# ── FPL 2025/26 Scoring Rules ──
-GOAL_PTS = {"GKP": 10, "DEF": 6, "MID": 5, "FWD": 4}
-ASSIST_PTS = 3
-CS_PTS = {"GKP": 4, "DEF": 4, "MID": 1, "FWD": 0}
-APPEARANCE_PTS = {60: 2, 1: 1}  # 60+ mins = 2pts, 1-59 = 1pt
-CBIT_THRESHOLD = {"GKP": 12, "DEF": 10, "MID": 12, "FWD": 12}
-CBIT_BONUS = 2
-GOALS_CONCEDED_PER_2 = -1  # GKP/DEF lose 1pt per 2 goals conceded
-SAVE_PTS = 3  # 3 saves = 1pt (for goalkeepers)
-
-# Home/Away multipliers (based on historical EPL data)
-HOME_ADVANTAGE_ATTACK = 1.15  # ~15% more goals at home
-HOME_ADVANTAGE_DEFENSE = 0.90  # ~10% fewer goals conceded at home
-AWAY_MULTIPLIER_ATTACK = 0.87
-AWAY_MULTIPLIER_DEFENSE = 1.10
-
-# League average benchmarks (updated each season)
-LEAGUE_AVG_XG_PER_MATCH = 1.35  # ~2.7 goals per game split between teams
-LEAGUE_AVG_XGA_PER_MATCH = 1.35
-
-# Maximum k for Poisson calculations (player rarely scores 5+ in a match)
-MAX_K_GOALS = 5
-MAX_K_ASSISTS = 4
 
 
 class PoissonEPEngine:
@@ -188,7 +185,7 @@ class PoissonEPEngine:
         # P(0 goals) = e^(-λ)
         p_cs = poisson.pmf(0, max(lambda_opponent, 0.01))
         
-        return min(p_cs, 0.6)  # Cap at 60% - even best teams rarely > 50%
+        return min(p_cs, CLEAN_SHEET_PROBABILITY_CAP)  # Cap CS probability
     
     def calculate_goals_conceded_penalty(
         self,
@@ -319,7 +316,7 @@ class PoissonEPEngine:
         # 2+ goals + assist(s): ~3.0 avg bonus (max)
         
         # Position adjustments (forwards need more for bonus)
-        pos_mult = {"GKP": 1.5, "DEF": 1.3, "MID": 1.0, "FWD": 0.85}.get(position, 1.0)
+        pos_mult = BONUS_POINT_POSITION_MULTIPLIER.get(position, 1.0)
         
         expected_bonus = (
             # Single goal scenarios

@@ -92,10 +92,15 @@ def main():
         st.error("Could not initialize data processor")
         return
     
-    # Get players data
+    # Get players data (cached per weeks_ahead to avoid re-running Poisson on every rerun)
     try:
-        # Use engineered features DataFrame (includes EPPM, threat momentum, matchup quality, etc.)
-        players_df = processor.get_engineered_features_df(weeks_ahead=st.session_state.pref_weeks_ahead)
+        weeks_ahead = st.session_state.pref_weeks_ahead
+        cache_key = f"_engineered_df_{weeks_ahead}"
+        if cache_key in st.session_state:
+            players_df = st.session_state[cache_key]
+        else:
+            players_df = processor.get_engineered_features_df(weeks_ahead=weeks_ahead)
+            st.session_state[cache_key] = players_df
         st.session_state.players_df = players_df
     except Exception as e:
         st.error(f"Error loading players: {e}")
@@ -165,6 +170,10 @@ def main():
             st.session_state.active_models = new_active
             # Also update legacy toggle for any old dependencies
             st.session_state.use_poisson_xp = 'poisson' in new_active
+            # Clear consensus EP caches so they recalculate with new model selection
+            for key in list(st.session_state.keys()):
+                if key.startswith('_cep_'):
+                    del st.session_state[key]
             st.rerun()
     with set_col3:
         st.session_state.injury_highlight = st.toggle(

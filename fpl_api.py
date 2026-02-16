@@ -10,15 +10,11 @@ from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 import time
 
-# FPL API Base URLs
-FPL_BASE_URL = "https://fantasy.premierleague.com/api"
-ODDS_API_BASE_URL = "https://api.the-odds-api.com/v4"
-
-# 2025/26 Season Constants
-CBIT_BONUS_THRESHOLD = 10  # CBIT points needed for +2 bonus
-CBIT_BONUS_POINTS = 2
-MAX_FREE_TRANSFERS = 5  # New 2025/26 rollover cap
-CAPTAIN_MULTIPLIER = 1.25  # New 2025/26 captaincy boost
+from config import (
+    FPL_BASE_URL, ODDS_API_BASE_URL, CBIT_BONUS_THRESHOLD,
+    CBIT_BONUS_POINTS, MAX_FREE_TRANSFERS, CAPTAIN_MULTIPLIER,
+    CACHE_DURATION,
+)
 
 
 class FPLDataFetcher:
@@ -33,7 +29,7 @@ class FPLDataFetcher:
         self.odds_api_key = odds_api_key
         self._cache = {}
         self._cache_expiry = {}
-        self.cache_duration = 300  # 5 minutes
+        self.cache_duration = CACHE_DURATION
         
     def _get_cached(self, key: str) -> Optional[dict]:
         """Retrieve cached data if not expired."""

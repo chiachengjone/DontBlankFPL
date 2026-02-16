@@ -5,16 +5,8 @@ import numpy as np
 import plotly.graph_objects as go
 from typing import List, Optional
 
+from config import POSITION_COLORS
 from utils.helpers import safe_numeric
-
-
-# Position color mapping
-POSITION_COLORS = {
-    'GKP': '#3b82f6',
-    'DEF': '#22c55e',
-    'MID': '#f59e0b',
-    'FWD': '#ef4444'
-}
 
 
 def create_ep_ownership_scatter(

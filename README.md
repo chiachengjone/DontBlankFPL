@@ -41,12 +41,37 @@ A high-performance Streamlit application for Fantasy Premier League strategy opt
 
 #### Analytics Tab
 - Searchable player database with engineered features
-- **Differential Finder Index**: $\text{Differential Score} = \frac{EP}{EO\%} \times \text{Fixture Ease}$
+- **Differential Finder Index**: $\text{Differential Score} = \frac{xP}{EO\%} \times \text{Fixture Ease}$
 - **Ownership tier filtering**: Template (>=25%), Popular (>=10%), Enabler (>=5%), Differential (<5%)
 - **Availability indicators**: Injury/suspension flags and rotation risk badges
 - CBIT Propensity Scores for defenders
-- Price sensitivity (xG/£) analysis
+- xP per million (xP/m) value analysis with ROI rankings
+- Threat Momentum scatter (xG/xA trend vs matchup quality)
+- Expected vs Actual performance analysis with comprehensive xPts model
+- Set & Forget score (consistency + reliability + output)
+- Ownership trends — most transferred in/out
 - Interactive Plotly visualizations
+
+#### Captain Tab
+- Enhanced captain score (0-10+) blending Core Models, Position Bonus, Meta/Safety
+- Multi-model comparison (Model xP, Poisson xP, ML xP, FPL xP, CBIT Score)
+- Captain vs Vice-Captain pick with fixture context
+
+#### Team Analysis Tab
+- Breakdown by individual FPL team
+- Fixture ticker with FDR colour-coding
+
+#### Price Predictor Tab
+- Transfer momentum for price rise/fall prediction
+- Net transfer tracking, price-change history
+
+#### Wildcard Tab
+- Squad planner for wildcard or free-hit chips
+- Budget-constrained selection across all positions
+
+#### History Tab
+- Past gameweek points, rank, and transfers
+- Season trajectory visualization
 
 #### Rival Scout Tab
 - Direct comparison of two Team IDs
@@ -105,29 +130,37 @@ best_individual = optimizer.evolve()
 
 ```
 DontBlankFPL/
-├── app.py                    # Streamlit main application
-├── config.py                 # Centralized constants & thresholds
-├── fpl_api.py                # FPL API integration & data processing
+├── app.py                    # Streamlit main application & data bootstrap
+├── config.py                 # ALL constants, thresholds & season rules
+├── fpl_api.py                # FPL API integration & feature engineering
 ├── optimizer.py              # PuLP ILP optimization engine
-├── ml_predictor.py           # ML prediction ensemble
+├── poisson_ep.py             # Poisson expected-points engine (xG/xA → xP)
+├── ml_predictor.py           # ML ensemble (XGBoost + RF + GBM)
 ├── monte_carlo.py            # Monte Carlo simulation engine
 ├── genetic_optimizer.py      # Genetic algorithm optimizer
+├── understat_api.py          # Understat xG/xA scraper
 ├── requirements.txt          # Python dependencies
 ├── components/
 │   ├── cards.py              # UI card components
-│   ├── charts.py             # Plotly visualizations
+│   ├── charts.py             # Plotly chart builders
 │   └── styles.py             # CSS styling
 ├── tabs/
-│   ├── dashboard.py          # Dashboard overview tab
-│   ├── strategy.py           # Strategy tab (includes fixture difficulty)
-│   ├── optimization.py       # Squad builder tab + multi-week planner
-│   ├── analytics.py          # Analytics tab + ownership tiers
-│   ├── rival.py              # Rival scout tab
+│   ├── dashboard.py          # Dashboard overview
+│   ├── strategy.py           # Strategy + fixture difficulty
+│   ├── optimization.py       # Squad builder + multi-week planner
+│   ├── analytics.py          # Analytics orchestrator
+│   ├── analytics_helpers.py  # Analytics sub-renderers (tables, charts)
+│   ├── captain_tab.py        # Captain picker
+│   ├── team_analysis_tab.py  # Per-team analysis
+│   ├── price_predictor_tab.py# Price change predictor
+│   ├── wildcard_tab.py       # Wildcard / Free Hit planner
+│   ├── history_tab.py        # Past gameweek history
+│   ├── rival.py              # Rival scout (Jaccard overlap)
 │   ├── ml_tab.py             # ML predictions tab
 │   ├── montecarlo_tab.py     # Monte Carlo tab
 │   └── genetic_tab.py        # Genetic optimizer tab
 └── utils/
-    └── helpers.py            # Shared utilities (availability, tiers)
+    └── helpers.py            # Shared utilities, consensus xP, availability
 ```
 
 ##  Installation
@@ -167,11 +200,19 @@ The app will open in your browser at `http://localhost:8501`
 
 ##  Mathematical Models
 
-### Expected Points Calculation
+### Consensus xP (Model xP)
+
+Every tab shares a single **Consensus xP** score — a weighted blend of three models:
+
+$$\text{Model xP} = 0.4 \cdot \text{ML xP} + 0.4 \cdot \text{Poisson xP} + 0.2 \cdot \text{FPL xP}$$
+
+Weights are defined in `config.MODEL_WEIGHTS` and automatically re-normalised when a model is toggled off via the sidebar.
+
+### Multi-Gameweek xP
 
 The engine calculates weighted expected points over N gameweeks:
 
-$$EP_{total} = \sum_{i=1}^{N} EP_{base} \times \text{Decay}^{i-1} \times \text{FDR}_{multiplier}$$
+$$xP_{total} = \sum_{i=1}^{N} xP_{base} \times \text{Decay}^{i-1} \times \text{FDR}_{multiplier}$$
 
 Where:
 - Decay factor = 0.95 (configurable)
@@ -181,7 +222,7 @@ Where:
 
 The PuLP solver maximizes:
 
-$$\max \sum_{p \in P} \left( x_p \cdot EP_p + c_p \cdot EP_p \cdot (1.25 - 1) \right)$$
+$$\max \sum_{p \in P} \left( x_p \cdot xP_p + c_p \cdot xP_p \cdot (1.25 - 1) \right)$$
 
 Subject to constraints:
 - Budget: $\sum x_p \cdot \text{price}_p \leq 100$
@@ -191,9 +232,9 @@ Subject to constraints:
 
 ### Differential Score
 
-$$\text{Differential} = \frac{EP}{EO\%} \times \text{Fixture Ease} \times 100$$
+$$\text{Differential} = \frac{xP}{EO\%} \times \text{Fixture Ease} \times 100$$
 
-Flags players with EP > 3.0 and ownership < 5%.
+Flags players with xP > 3.0 and ownership < 5%.
 
 ### CBIT Propensity (DefCon Engine)
 
@@ -224,16 +265,24 @@ Set via environment variable: `ODDS_API_KEY`
 
 ### Customization Points
 
-In `config.py`:
-- `CAPTAIN_MULTIPLIER`: Default 1.25 (2025/26 rule)
-- `MAX_FREE_TRANSFERS`: Default 5 (2025/26 rule)
-- `CBIT_BONUS_THRESHOLD`: Default 10
-- `CBIT_BONUS_POINTS`: Default 2
-- `OWNERSHIP_TEMPLATE_THRESHOLD`: Default 25% (template picks)
-- `OWNERSHIP_POPULAR_THRESHOLD`: Default 10% (popular picks)
-- `OWNERSHIP_DIFFERENTIAL_THRESHOLD`: Default 5% (differentials)
-- `ROTATION_SAFE_MINUTES_PCT`: Default 0.80 (low rotation risk)
-- `ROTATION_MODERATE_PCT`: Default 0.60 (moderate rotation risk)
+In `config.py` (14 constant categories, all typed):
+
+| Constant | Default | Description |
+|----------|---------|-------------|
+| `CAPTAIN_MULTIPLIER` | 1.25 | 2025/26 captain boost |
+| `MAX_FREE_TRANSFERS` | 5 | 2025/26 FT cap |
+| `CBIT_BONUS_THRESHOLD` | 10 | CBIT actions for +2 bonus |
+| `MODEL_WEIGHTS` | ML 0.4, Poisson 0.4, FPL 0.2 | Consensus xP blend |
+| `ML_FALLBACK_RATIO` | 0.9 | Fallback when ML unavailable |
+| `GOAL_POINTS` | GKP 10, DEF 6, MID 5, FWD 4 | Scoring by position |
+| `CLEAN_SHEET_POINTS` | GKP 4, DEF 4, MID 1, FWD 0 | CS scoring |
+| `HOME_ADVANTAGE_ATTACK` | 1.10 | Home attack multiplier |
+| `LEAGUE_AVG_XG_PER_MATCH` | 1.35 | League average xG/match |
+| `MAX_K_GOALS` | 8 | Poisson upper bound |
+| `CLEAN_SHEET_PROBABILITY_CAP` | 0.65 | Max CS probability |
+| `MC_DEFAULT_SIMULATIONS` | 10000 | Monte Carlo sim count |
+| `CACHE_DURATION` | 300 | API cache TTL (seconds) |
+| `POSITION_COLORS` | dict | Chart colour palette |
 
 ##  Usage Tips
 

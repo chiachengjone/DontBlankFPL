@@ -9,9 +9,10 @@ from utils.helpers import (
     safe_numeric, style_df_with_injuries, round_df,
     calculate_consensus_ep, get_consensus_label
 )
-from optimizer import MAX_PLAYERS_PER_TEAM
-from config import TRANSFER_HIT_COST
-from fpl_api import MAX_FREE_TRANSFERS
+from config import (
+    MAX_PLAYERS_PER_TEAM, MAX_FREE_TRANSFERS, TRANSFER_HIT_COST,
+    POSITION_COLORS,
+)
 
 
 def render_optimization_tab(processor, players_df: pd.DataFrame, fetcher):
@@ -246,7 +247,6 @@ def render_budget_breakdown(current_squad_df, ep_col):
     
     pos_spend = current_squad_df.groupby('position')['now_cost'].sum().to_dict()
     pos_order = ['GKP', 'DEF', 'MID', 'FWD']
-    pos_colors = {'GKP': '#3b82f6', 'DEF': '#22c55e', 'MID': '#f59e0b', 'FWD': '#ef4444'}
     
     bud1, bud2 = st.columns([1, 2])
     
@@ -255,7 +255,7 @@ def render_budget_breakdown(current_squad_df, ep_col):
         fig_pie = go.Figure(data=[go.Pie(
             labels=[p for p in pos_order if p in pos_spend],
             values=[pos_spend.get(p, 0) for p in pos_order if p in pos_spend],
-            marker_colors=[pos_colors[p] for p in pos_order if p in pos_spend],
+            marker_colors=[POSITION_COLORS[p] for p in pos_order if p in pos_spend],
             hole=0.4,
             textinfo='label+percent',
             textfont=dict(color='#fff')

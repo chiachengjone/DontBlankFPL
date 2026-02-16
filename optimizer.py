@@ -10,6 +10,11 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
 
+from config import (
+    MAX_BUDGET, MAX_PLAYERS_PER_TEAM, SQUAD_SIZE, STARTING_XI,
+    MAX_FREE_TRANSFERS, CAPTAIN_MULTIPLIER, POSITION_CONSTRAINTS,
+)
+
 # Lazy PuLP import
 _pulp_loaded = False
 
@@ -31,22 +36,6 @@ def _ensure_pulp():
         PULP_CBC_CMD = _PULP_CBC_CMD
         value = _value
         _pulp_loaded = True
-
-# 2025/26 Season Constants
-MAX_BUDGET = 100.0
-MAX_PLAYERS_PER_TEAM = 3
-SQUAD_SIZE = 15
-STARTING_XI = 11
-MAX_FREE_TRANSFERS = 5  # New rollover cap
-CAPTAIN_MULTIPLIER = 1.25  # New captain boost
-
-# Position constraints
-POSITION_CONSTRAINTS = {
-    'GKP': {'min': 2, 'max': 2, 'min_start': 1, 'max_start': 1},
-    'DEF': {'min': 5, 'max': 5, 'min_start': 3, 'max_start': 5},
-    'MID': {'min': 5, 'max': 5, 'min_start': 2, 'max_start': 5},
-    'FWD': {'min': 3, 'max': 3, 'min_start': 1, 'max_start': 3}
-}
 
 
 class OptimizationMode(Enum):

@@ -3,7 +3,7 @@
 import pandas as pd
 import numpy as np
 import unicodedata
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from config import (
     OWNERSHIP_TEMPLATE_THRESHOLD,
@@ -12,6 +12,11 @@ from config import (
     ROTATION_SAFE_MINUTES_PCT,
     ROTATION_MODERATE_PCT,
     UNAVAILABLE_STATUSES,
+    FDR_COLOR_MAP,
+    MODEL_WEIGHTS,
+    ML_FALLBACK_RATIO,
+    PRICE_RISE_NET_TRANSFERS,
+    PRICE_FALL_NET_TRANSFERS,
 )
 
 
@@ -60,15 +65,26 @@ def search_players(df: pd.DataFrame, query: str, limit: int = 10) -> pd.DataFram
     return matches.head(limit)
 
 
-def safe_numeric(series, default=0):
-    """Safely convert series or scalar to numeric, handling NaN values."""
+def safe_numeric(
+    series: Union[pd.Series, pd.Index, np.ndarray, Any],
+    default: float = 0,
+) -> Union[pd.Series, float]:
+    """Safely convert *series* or a scalar to numeric, replacing NaN with *default*.
+
+    Args:
+        series: Any pandas Series / Index / numpy array, or a scalar value.
+        default: Replacement for non-numeric / NaN entries.
+
+    Returns:
+        ``pd.Series`` when the input is array-like; a plain ``float`` for scalars.
+    """
     try:
         if isinstance(series, (pd.Series, pd.Index, np.ndarray)):
             return pd.to_numeric(series, errors='coerce').fillna(default)
         # Scalar case
         val = pd.to_numeric(series, errors='coerce')
         return val if pd.notnull(val) else default
-    except:
+    except Exception:
         return default
 
 
@@ -127,8 +143,8 @@ def get_player_fixtures(player_id: int, processor, weeks_ahead: int = 5) -> List
         return []
 
 
-def _safe_int(value, default=100):
-    """Safely convert value to int, handling NaN/None."""
+def _safe_int(value: Any, default: int = 100) -> int:
+    """Safely convert *value* to ``int``, returning *default* for NaN / None."""
     if value is None:
         return default
     try:
@@ -172,10 +188,10 @@ def get_price_change_info(player_row) -> Dict:
     net_transfers = transfers_in - transfers_out
     
     # Simple price rise/fall prediction based on net transfers
-    if net_transfers > 50000:
+    if net_transfers > PRICE_RISE_NET_TRANSFERS:
         prediction = 'likely_rise'
         pred_color = '#22c55e'
-    elif net_transfers < -50000:
+    elif net_transfers < PRICE_FALL_NET_TRANSFERS:
         prediction = 'likely_fall'
         pred_color = '#ef4444'
     else:
@@ -193,18 +209,12 @@ def get_price_change_info(player_row) -> Dict:
     }
 
 
-# FDR color mapping
-FDR_COLORS = {
-    1: '#22c55e',  # Green - easy
-    2: '#77c45e',  # Light green
-    3: '#f59e0b',  # Yellow - medium
-    4: '#ef6b4e',  # Orange
-    5: '#ef4444'   # Red - hard
-}
+# FDR color mapping (alias for backwards compatibility)
+FDR_COLORS = FDR_COLOR_MAP
 
 
 def get_fdr_color(fdr: int) -> str:
-    """Get color for fixture difficulty rating."""
+    """Return hex colour string for the given FDR value (1-5)."""
     return FDR_COLORS.get(fdr, '#888')
 
 
@@ -386,8 +396,8 @@ def get_ownership_tier(ownership_pct: float) -> Dict:
         return {'tier': 'Differential', 'color': '#a855f7', 'desc': 'Low owned, high ceiling/risk'}
 
 
-def classify_ownership_column(df: pd.DataFrame, col='selected_by_percent') -> pd.Series:
-    """Add ownership tier column to a DataFrame."""
+def classify_ownership_column(df: pd.DataFrame, col: str = 'selected_by_percent') -> pd.Series:
+    """Return a Series of ownership tier labels (Template / Popular / Enabler / Differential)."""
     own = safe_numeric(df.get(col, pd.Series([0] * len(df))))
     return own.apply(lambda x: get_ownership_tier(x)['tier'])
 
@@ -502,7 +512,29 @@ def calculate_consensus_ep(df: pd.DataFrame, active_models: List[str], horizon: 
     This function auto-loads ML predictions from st.session_state['ml_predictions']
     if ml_pred is not already present in the DataFrame. This ensures consistent
     Model xP values across ALL tabs without requiring each tab to manually load ML.
+    
+    Results are cached in session state per (active_models, horizon, len(df)) key
+    to avoid redundant recalculation across tabs.
     """
+    # ── Session-state result cache ──
+    # Avoids re-running ML-loading and consensus arithmetic in every tab
+    try:
+        import streamlit as _st
+        _cache_key = f"_cep_{'_'.join(sorted(active_models))}_{horizon}_{len(df)}"
+        if _cache_key in _st.session_state:
+            cached = _st.session_state[_cache_key]
+            # Validate the cache is still aligned with the dataframe
+            if len(cached) == len(df) and 'consensus_ep' in cached.columns:
+                # Merge cached columns onto df
+                merge_cols = [c for c in ('consensus_ep', 'avg_consensus_ep', 'ml_pred', 'poisson_ep', 'ep_next_num')
+                              if c in cached.columns]
+                result = df.copy()
+                for col in merge_cols:
+                    result[col] = cached[col].values
+                return result
+    except Exception:
+        _cache_key = None
+
     df = df.copy()
     
     # Model keys mapping (consistency with app.py/tabs)
@@ -512,12 +544,8 @@ def calculate_consensus_ep(df: pd.DataFrame, active_models: List[str], horizon: 
         'fpl': 'ep_next_num'
     }
     
-    # Base weights
-    base_weights = {
-        'ml': 0.4,
-        'poisson': 0.4,
-        'fpl': 0.2
-    }
+    # Use centralized weights from config
+    base_weights = MODEL_WEIGHTS
     
     # Filter for active models and get weights
     # Normalize keys to lowercase for safety
@@ -567,7 +595,7 @@ def calculate_consensus_ep(df: pd.DataFrame, active_models: List[str], horizon: 
                 df['ml_pred'] = safe_numeric(df['ml_ep'])
             else:
                 # True fallback: no ML data available at all
-                df['ml_pred'] = df['poisson_ep'] * 0.9
+                df['ml_pred'] = df['poisson_ep'] * ML_FALLBACK_RATIO
     
     # Calculation
     consensus = pd.Series(0.0, index=df.index)
@@ -598,7 +626,17 @@ def calculate_consensus_ep(df: pd.DataFrame, active_models: List[str], horizon: 
         df['avg_consensus_ep'] = (df['consensus_ep'] / horizon).round(2)
     else:
         df['avg_consensus_ep'] = df['consensus_ep']
-        
+    
+    # ── Write result to session-state cache ──
+    try:
+        if _cache_key is not None:
+            _st.session_state[_cache_key] = df[
+                [c for c in ('consensus_ep', 'avg_consensus_ep', 'ml_pred', 'poisson_ep', 'ep_next_num')
+                 if c in df.columns]
+            ].copy()
+    except Exception:
+        pass
+
     return df
 
 

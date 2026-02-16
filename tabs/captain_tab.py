@@ -192,7 +192,7 @@ def render_captain_tab(processor, players_df: pd.DataFrame, fetcher):
             # Prepare Stat Grid items based on enabled models
             stat_grid_items = []
             if enable_poisson:
-                stat_grid_items.append(f'<div><div style="color:#86868b;font-size:0.65rem;text-transform:uppercase;">Poisson EP</div><div style="color:#3b82f6;font-weight:600;font-family:\'JetBrains Mono\',monospace;">{ep_poisson:.2f}</div></div>')
+                stat_grid_items.append(f'<div><div style="color:#86868b;font-size:0.65rem;text-transform:uppercase;">Poisson xP</div><div style="color:#3b82f6;font-weight:600;font-family:\'JetBrains Mono\',monospace;">{ep_poisson:.2f}</div></div>')
             if enable_fpl:
                 stat_grid_items.append(f'<div><div style="color:#86868b;font-size:0.65rem;text-transform:uppercase;">FPL xP</div><div style="color:#22c55e;font-weight:600;font-family:\'JetBrains Mono\',monospace;">{fpl_ep:.2f}</div></div>')
             if enable_ml:
@@ -255,8 +255,8 @@ def render_captain_tab(processor, players_df: pd.DataFrame, fetcher):
         
         if enable_poisson:
             cols_to_keep.append('poisson_ep')
-            col_names.append('Poisson EP')
-            format_dict['Poisson EP'] = '{:.2f}'
+            col_names.append('Poisson xP')
+            format_dict['Poisson xP'] = '{:.2f}'
         if enable_fpl:
             cols_to_keep.append('ep_next_num')
             col_names.append('FPL EP')
@@ -438,7 +438,7 @@ def render_captain_tab(processor, players_df: pd.DataFrame, fetcher):
                 items = []
                 if enable_poisson:
                     win = "✓" if p1_data['poisson_ep'] >= p2_data['poisson_ep'] else ""
-                    items.append(f'<div style="display:flex;justify-content:space-between;"><span>Poisson EP:</span><span style="color:#1d1d1f;">{p1_data["poisson_ep"]:.2f} {win}</span></div>')
+                    items.append(f'<div style="display:flex;justify-content:space-between;"><span>Poisson xP:</span><span style="color:#1d1d1f;">{p1_data["poisson_ep"]:.2f} {win}</span></div>')
                 if enable_fpl:
                     win = "✓" if p1_data['ep_next_num'] >= p2_data['ep_next_num'] else ""
                     items.append(f'<div style="display:flex;justify-content:space-between;"><span>FPL xP:</span><span style="color:#1d1d1f;">{p1_data["ep_next_num"]:.2f} {win}</span></div>')
@@ -463,7 +463,7 @@ def render_captain_tab(processor, players_df: pd.DataFrame, fetcher):
                 items = []
                 if enable_poisson:
                     win = "✓" if p2_data['poisson_ep'] >= p1_data['poisson_ep'] else ""
-                    items.append(f'<div style="display:flex;justify-content:space-between;"><span>Poisson EP:</span><span style="color:#1d1d1f;">{p2_data["poisson_ep"]:.2f} {win}</span></div>')
+                    items.append(f'<div style="display:flex;justify-content:space-between;"><span>Poisson xP:</span><span style="color:#1d1d1f;">{p2_data["poisson_ep"]:.2f} {win}</span></div>')
                 if enable_fpl:
                     win = "✓" if p2_data['ep_next_num'] >= p1_data['ep_next_num'] else ""
                     items.append(f'<div style="display:flex;justify-content:space-between;"><span>FPL xP:</span><span style="color:#1d1d1f;">{p2_data["ep_next_num"]:.2f} {win}</span></div>')

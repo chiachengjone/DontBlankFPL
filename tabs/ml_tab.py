@@ -24,7 +24,7 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
         - **ML xP**: Model's predicted points for the player
         - **FPL xP**: Official FPL expected points estimate
         - **vs FPL**: Difference between ML and FPL predictions
-        - **Poisson EP**: Statistical model using xG/xA data
+        - **Poisson xP**: Statistical model using xG/xA data
         - **Certainty %**: Model confidence (higher = more reliable)
         
         **Understanding Certainty**
@@ -51,7 +51,7 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
     current_horizon = st.session_state.get('pref_weeks_ahead', 1)
     ml_label = f"ML xP x{current_horizon}" if current_horizon > 1 else "ML xP"
     fpl_label = f"FPL xP x{current_horizon}" if current_horizon > 1 else "FPL xP"
-    poisson_label = f"Poisson EP ({current_horizon}GW)" if current_horizon > 1 else "Poisson EP"
+    poisson_label = f"Poisson xP ({current_horizon}GW)" if current_horizon > 1 else "Poisson xP"
     
     ctrl1, ctrl2, ctrl3 = st.columns([1, 1, 1])
     
@@ -183,7 +183,7 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
                 "Avg ML": round(ml_pred_total / horizon, 2) if horizon > 1 else round(ml_pred_total, 2),
                 "Range": f"{scaled_ci_low:.2f}-{scaled_ci_high:.2f}",
                 "FPL xP": round(fpl_ep, 2),
-                "Poisson EP": round(poisson_ep, 2),
+                "Poisson xP": round(poisson_ep, 2),
                 "vs FPL": round(ml_pred_total - fpl_ep, 2),
                 "vs Poisson": round(ml_pred_total - poisson_ep, 2),
                 "Certainty": round(certainty_horizon, 0),
@@ -194,7 +194,7 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
                 # Raw sorting keys matching dynamic labels
                 f"ML xP x{horizon}" if horizon > 1 else "ML xP": ml_pred_total,
                 f"FPL xP x{horizon}" if horizon > 1 else "FPL xP": fpl_ep,
-                "Poisson EP": poisson_ep, # Match Analytics tab internal ID
+                "Poisson xP": poisson_ep, # Match Analytics tab internal ID
                 poisson_label: poisson_ep,
             })
 
@@ -234,7 +234,7 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
                               f"{p['vs FPL']:+.2f}", delta_color=delta_color)
                 with col3:
                     delta_color = "normal" if p["vs Poisson"] >= 0 else "inverse"
-                    st.metric("vs Poisson", f"{p['Poisson EP']:.2f} pts", 
+                    st.metric("vs Poisson", f"{p['Poisson xP']:.2f} pts", 
                               f"{p['vs Poisson']:+.2f}", delta_color=delta_color)
                 with col4:
                     st.metric("Prediction Range", p["Range"])
@@ -381,7 +381,7 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
         st.markdown(f"### ML Predictions (next {gws} GW{'s' if gws > 1 else ''}) — {len(pred_df)} found")
         
         # Prepare display dataframe
-        poisson_label = f"Poisson EP ({horizon}GW)" if horizon > 1 else "Poisson EP"
+        poisson_label = f"Poisson xP ({horizon}GW)" if horizon > 1 else "Poisson xP"
         
         display_cols = ["Player", "Pos", "Team", "Price", "Minutes", ml_label]
         if horizon > 1:
