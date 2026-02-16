@@ -100,71 +100,42 @@ def fetch_understat_league_data(season: int = UNDERSTAT_SEASON) -> Tuple[List[Di
 
     # ── Primary: AJAX JSON endpoint (fast, reliable) ──
     ajax_url = f"https://understat.com/getLeagueData/EPL/{season}"
-    try:
-        resp = requests.post(
-            ajax_url,
-            data={},
-            timeout=20,
-            headers={
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
-                "X-Requested-With": "XMLHttpRequest",
-                "Referer": f"https://understat.com/league/EPL/{season}",
-            },
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        players_raw = data.get("players", [])
-        teams_raw = data.get("teams", {})
-        if players_raw:
-            logger.info(
-                "Understat AJAX: %d players, %d teams fetched",
-                len(players_raw), len(teams_raw),
+    
+    # Retry logic for robustness
+    for attempt in range(3):
+        try:
+            resp = requests.post(
+                ajax_url,
+                data={},
+                timeout=20,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+                    "X-Requested-With": "XMLHttpRequest",
+                    "Referer": f"https://understat.com/league/EPL/{season}",
+                },
             )
-            return players_raw, teams_raw
-        logger.warning("Understat AJAX returned empty players list")
-    except (requests.RequestException, json.JSONDecodeError, ValueError) as exc:
-        logger.warning("Understat AJAX fetch failed: %s — trying HTML fallback", exc)
+            resp.raise_for_status()
+            data = resp.json()
+            players_raw = data.get("players", [])
+            teams_raw = data.get("teams", {})
+            
+            if players_raw:
+                logger.info(
+                    "Understat AJAX: %d players, %d teams fetched (attempt %d)",
+                    len(players_raw), len(teams_raw), attempt + 1
+                )
+                return players_raw, teams_raw
+            
+            logger.warning("Understat AJAX returned empty players list (attempt %d)", attempt + 1)
+            
+        except (requests.RequestException, json.JSONDecodeError, ValueError) as exc:
+            wait_time = 2 * (attempt + 1)
+            logger.warning("Understat AJAX fetch failed: %s (attempt %d) - Retrying in %ds", exc, attempt + 1, wait_time)
+            import time
+            time.sleep(wait_time)
 
-    # ── Fallback: HTML scraping (legacy, kept for resilience) ──
-    html_url = f"https://understat.com/league/EPL/{season}"
-    try:
-        resp = requests.get(html_url, timeout=20, headers={
-            "User-Agent": "Mozilla/5.0 FPL-Strategy-Engine"
-        })
-        resp.raise_for_status()
-    except requests.RequestException as exc:
-        logger.warning("Understat HTML fetch also failed: %s", exc)
-        return [], {}
-
-    html = resp.text
-
-    # Extract playersData
-    players_raw: List[Dict] = []
-    pmatch = re.search(
-        r"var\s+playersData\s*=\s*JSON\.parse\('(.+?)'\)", html
-    )
-    if pmatch:
-        try:
-            decoded = pmatch.group(1).encode("utf-8").decode("unicode_escape")
-            players_raw = json.loads(decoded)
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            logger.warning("Understat players JSON parse error: %s", exc)
-    else:
-        logger.warning("Could not locate playersData in Understat page")
-
-    # Extract teamsData
-    teams_raw: Dict = {}
-    tmatch = re.search(
-        r"var\s+teamsData\s*=\s*JSON\.parse\('(.+?)'\)", html
-    )
-    if tmatch:
-        try:
-            decoded = tmatch.group(1).encode("utf-8").decode("unicode_escape")
-            teams_raw = json.loads(decoded)
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            logger.warning("Understat teams JSON parse error: %s", exc)
-
-    return players_raw, teams_raw
+    logger.error("❌ Understat AJAX failed after 3 attempts.")
+    return [], {}
 
 
 def fetch_understat_league_players(season: int = UNDERSTAT_SEASON) -> List[Dict]:
@@ -385,6 +356,7 @@ def match_understat_to_fpl(
     merge_map = {
         "us_games": "games", "us_goals": "goals", "us_assists": "assists",
         "us_xG": "xG", "us_xA": "xA", "us_npxG": "npxG",
+        "us_npg": "npg", # Added to calculate penalties
         "us_xGChain": "xGChain", "us_xGBuildup": "xGBuildup",
         "us_xG_per90": "xG_per90", "us_xA_per90": "xA_per90",
         "us_npxG_per90": "npxG_per90",

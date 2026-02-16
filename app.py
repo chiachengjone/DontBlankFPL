@@ -25,6 +25,7 @@ from tabs.montecarlo_tab import render_monte_carlo_tab
 from tabs.genetic_tab import render_genetic_tab
 from tabs.captain_tab import render_captain_tab
 from tabs.team_analysis_tab import render_team_analysis_tab
+
 from tabs.price_predictor_tab import render_price_predictor_tab
 from tabs.history_tab import render_history_tab
 from tabs.wildcard_tab import render_wildcard_tab
@@ -237,7 +238,7 @@ def main():
     with tab5:
         render_tab_header("Teams", "Team-level analysis — defensive stats, xG and fixture runs")
         render_team_analysis_tab(processor, players_df.copy())
-    
+
     with tab6:
         render_tab_header("Prices", "Track price changes, net transfers and rise/fall predictions")
         render_price_predictor_tab(processor, players_df.copy())
@@ -265,6 +266,8 @@ def main():
     with tab12:
         render_tab_header("Genetic Optimizer", "Evolutionary algorithm for exploring diverse squad solutions")
         render_genetic_tab(processor, players_df.copy())
+    
+
 
 
 if __name__ == "__main__":

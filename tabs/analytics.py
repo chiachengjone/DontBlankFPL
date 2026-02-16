@@ -6,6 +6,7 @@ All sub-render helpers live in ``analytics_helpers.py``.
 
 import streamlit as st
 import pandas as pd
+import plotly.express as px
 
 from config import POSITION_COLORS
 from utils.helpers import (
@@ -284,5 +285,142 @@ def render_analytics_tab(processor, players_df: pd.DataFrame):
     with st.expander("Expected vs Actual", expanded=False):
         render_expected_vs_actual(df, con_ep_label)
     
+    with st.expander("Player Role Analysis (xG vs xA)", expanded=False):
+        st.caption("Detailed breakdown of Goal Threat vs Creativity.")
+        
+        # 1. Filters Setup
+        rf1, rf2, rf3, rf4 = st.columns([1, 1, 1, 1])
+        with rf1:
+            role_team = st.multiselect("Team", sorted(df['team_name'].unique()), key="role_team")
+        with rf2:
+            # We can't know roles until we classify, but we can pre-define the known roles
+            role_options = ["Double Threat", "Goal Threat", "Creative Hub", "Rotation/Low"]
+            role_filter = st.multiselect("Role", role_options, key="role_select")
+        with rf3:
+            role_sort = st.selectbox("Sort By", ["xG", "xA", "xP", "Price"], key="role_sort")
+        with rf4:
+            role_search = st.text_input("Search", key="role_search")
+            
+        rf5, rf6 = st.columns([1, 1])
+        with rf5:
+            role_min_mins = st.slider("Min Minutes", 0, 3000, 500, 100, key="role_mins")
+        with rf6:
+            role_max_price = st.slider("Max Price", 4.0, 15.0, 15.0, 0.5, key="role_price")
+
+            
+        # 2. Data Preparation
+        # Use Understat data if available
+        xg_col = 'us_xG_per90' if 'us_xG_per90' in df.columns else 'expected_goals_per_90'
+        xa_col = 'us_xA_per90' if 'us_xA_per90' in df.columns else 'expected_assists_per_90'
+        
+        role_df = df[
+            (df['minutes'] >= role_min_mins) & 
+            (df['now_cost'] <= role_max_price) &
+            (df['position'].isin(['DEF', 'MID', 'FWD']))
+        ].copy()
+        
+        if role_team:
+            role_df = role_df[role_df['team_name'].isin(role_team)]
+        
+        if role_search:
+            query = normalize_name(role_search.lower().strip())
+            role_df = role_df[role_df['web_name'].apply(lambda x: normalize_name(str(x).lower())).str.contains(query, na=False)]
+
+        role_df[xg_col] = safe_numeric(role_df[xg_col])
+        role_df[xa_col] = safe_numeric(role_df[xa_col])
+        role_df['consensus_ep'] = safe_numeric(role_df['consensus_ep'])
+        
+        if not role_df.empty:
+            avg_xg = role_df[xg_col].mean()
+            avg_xa = role_df[xa_col].mean()
+            
+            def classify_threat(row):
+                high_g = row[xg_col] > avg_xg * 1.2
+                high_a = row[xa_col] > avg_xa * 1.2
+                if high_g and high_a: return "Double Threat"
+                if high_g: return "Goal Threat"
+                if high_a: return "Creative Hub"
+                return "Rotation/Low"
+            
+            role_df['Role'] = role_df.apply(classify_threat, axis=1)
+            
+            # Apply Role Filter
+            if role_filter:
+                role_df = role_df[role_df['Role'].isin(role_filter)]
+
+            # Calculate Ranks for xG and xA (within filtered set)
+            if not role_df.empty:
+                role_df['xg_rank'] = role_df[xg_col].rank(ascending=False, method='min').astype(int)
+                role_df['xa_rank'] = role_df[xa_col].rank(ascending=False, method='min').astype(int)
+                
+                # Format Columns
+                role_df['xg_display'] = role_df.apply(lambda r: format_with_rank(f"{r[xg_col]:.2f}", r['xg_rank']), axis=1)
+                role_df['xa_display'] = role_df.apply(lambda r: format_with_rank(f"{r[xa_col]:.2f}", r['xa_rank']), axis=1)
+                role_df['ep_display'] = role_df['consensus_ep'].apply(lambda x: f"{x:.2f}")
+
+                # 3. Table (Appears First)
+                st.markdown("#### Role Breakdown")
+                
+                sort_map = {"xG": xg_col, "xA": xa_col, "xP": "consensus_ep", "Price": "now_cost"}
+                sort_col = sort_map.get(role_sort, xg_col)
+                asc = (role_sort == "Price")
+                
+                role_disp = role_df[['web_name', 'team_name', 'position', 'Role', 'xg_display', 'xa_display', 'ep_display', 'now_cost']].copy()
+                role_disp.columns = ['Player', 'Team', 'Pos', 'Role', 'xG/90', 'xA/90', con_ep_label, 'Price']
+                
+                # Sort the source to determine order
+                sorted_idx = role_df.sort_values(sort_col, ascending=asc).index
+                role_disp = role_disp.loc[sorted_idx]
+                
+                st.dataframe(
+                    style_df_with_injuries(role_disp, players_df),
+                    hide_index=True,
+                    use_container_width=True,
+                    height=400
+                )
+
+                # 4. Scatter Plot (Appears Below)
+                st.markdown("#### Visualization")
+                fig = px.scatter(
+                    role_df,
+                    x=xa_col,
+                    y=xg_col,
+                    color='Role',
+                    hover_name='web_name',
+                    hover_data=['team_name', 'position', 'now_cost'],
+                    labels={xg_col: "xG per 90", xa_col: "xA per 90"},
+                    color_discrete_map={
+                        "Double Threat": "#f59e0b",  # Amber/Orange
+                        "Goal Threat": "#ef4444",    # Red
+                        "Creative Hub": "#06b6d4",   # Cyan
+                        "Rotation/Low": "#9ca3af"    # Gray
+                    }
+                )
+                fig.add_vline(x=avg_xa, line_dash="dash", line_color="gray", annotation_text="Avg xA")
+                fig.add_hline(y=avg_xg, line_dash="dash", line_color="gray", annotation_text="Avg xG")
+                
+                # Legend adjustment: "Down and left a bit"
+                # Moving it to top-left (x=0, y=1.1) or strictly below?
+                # Usually Plotly legends are right-aligned. Top-left horizontal is a good alternative.
+                # Let's try x=0, y=1.1, orientation='h'
+                fig.update_layout(
+                    template="plotly_white", 
+                    height=500,
+                    legend=dict(
+                        orientation='h', 
+                        yanchor='bottom', y=1.02, 
+                        xanchor='left', x=0  # Shifted left
+                    ),
+                    margin=dict(t=50) # Increase top margin for legend
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Legend Note
+                st.caption(f"xP Column uses {con_ep_label} model.")
+            else:
+                st.info("No players match the filtered criteria")
+
+            
     # Ownership Trends (always at the bottom, outside expander)
     render_ownership_trends(df)

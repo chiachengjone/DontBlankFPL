@@ -66,45 +66,14 @@ def check_ajax_health():
         logger.error(f"❌ AJAX check failed: {e}")
         return False
 
-def check_html_health():
-    """Check the fallback HTML scraping."""
-    logger.info(f"Checking Fallback HTML URL: {HTML_URL}")
-    
-    try:
-        response = requests.get(HTML_URL, headers=HEADERS, timeout=10)
-        response.raise_for_status()
-        html = response.text
-    except requests.RequestException as e:
-        logger.error(f"Failed to fetch HTML URL: {e}")
-        return False
-
-    pattern = r"var\s+playersData\s*=\s*JSON\.parse\('(.+?)'\)"
-    match = re.search(pattern, html)
-    
-    if not match:
-        logger.error("❌ Fallback Failed: Could not find 'playersData' variable in HTML.")
-        # Optional: Save HTML for debugging
-        # with open("debug_understat.html", "w") as f: f.write(html)
-        return False
-    
-    logger.info("✅ Fallback HTML regex match found.")
-    return True
-
 def check_scraper_health():
     ajax_ok = check_ajax_health()
-    html_ok = check_html_health()
     
-    if ajax_ok and html_ok:
-        logger.info("🟢 HEALTHY: Primary and Fallback methods are working.")
-        return True
-    elif ajax_ok and not html_ok:
-        logger.info("🟡 DEGRADED: Primary AJAX working, but HTML fallback is BROKEN.")
-        return True # Considered "Passing" for CI since the app works
-    elif not ajax_ok and html_ok:
-        logger.info("🟡 DEGRADED: Primary AJAX failed, but HTML fallback is working.")
+    if ajax_ok:
+        logger.info("🟢 HEALTHY: Primary AJAX API is working.")
         return True
     else:
-        logger.error("🔴 DOWN: Both Primary and Fallback methods failed.")
+        logger.error("🔴 DOWN: Primary AJAX API failed.")
         return False
 
 if __name__ == "__main__":
