@@ -207,11 +207,8 @@ def render_history_tab(processor, players_df: pd.DataFrame, fetcher):
     
     # ── Transfer Analysis ──
     st.markdown("### Transfer Analysis")
+    st.caption("Tracking free transfers and hits based on squad changes")
     
-<<<<<<< Updated upstream
-    transfers_per_gw = [gw.get('event_transfers', 0) for gw in gw_history]
-    hits_per_gw = [gw.get('event_transfers_cost', 0) for gw in gw_history]
-=======
     # Attempt manual transfer detection if API data seems missing or for higher accuracy
     def get_manual_transfers(team_id, gw_history, fetcher):
         current_gw = fetcher.get_current_gameweek()
@@ -253,7 +250,7 @@ def render_history_tab(processor, players_df: pd.DataFrame, fetcher):
                     'hits': hits
                 })
                 prev_squad = current_squad
-            except Exception:
+            except:
                 # Fallback if specific GW fetch fails
                 manual_data.append({
                     'gw': gw,
@@ -270,30 +267,25 @@ def render_history_tab(processor, players_df: pd.DataFrame, fetcher):
     
     m_data = st.session_state[f"manual_transfers_{team_id}"]
     total_transfers = [d['total'] for d in m_data]
->>>>>>> Stashed changes
     
     fig2 = go.Figure()
     
+    # Total Transfers per GW
     fig2.add_trace(go.Bar(
-        x=gws, y=transfers_per_gw, name='Transfers',
-        marker_color='#3b82f6'
-    ))
-    
-    fig2.add_trace(go.Bar(
-        x=gws, y=[-h/4 for h in hits_per_gw], name='Hits (cost/4)',
-        marker_color='#ef4444'
+        x=gws, y=total_transfers, name='Transfers',
+        marker_color='#3b82f6', opacity=0.8
     ))
     
     fig2.update_layout(
-        height=250,
+        height=300,
         template='plotly_white',
         paper_bgcolor='#ffffff',
         plot_bgcolor='#ffffff',
         font=dict(family='Inter, sans-serif', color='#86868b', size=11),
-        barmode='relative',
+        barmode='stack',
         legend=dict(orientation='h', yanchor='bottom', y=1.02),
         xaxis=dict(title='Gameweek', gridcolor='#e5e5ea'),
-        yaxis=dict(title='Transfers', gridcolor='#e5e5ea'),
+        yaxis=dict(title='Transfers', gridcolor='#e5e5ea', dtick=1),
         margin=dict(l=50, r=30, t=40, b=50)
     )
     
@@ -358,6 +350,11 @@ def render_history_tab(processor, players_df: pd.DataFrame, fetcher):
                 <div style="color:#86868b;font-size:0.72rem;text-transform:uppercase;">Red Arrows</div>
             </div>
             ''', unsafe_allow_html=True)
+        
+        st.markdown("---")
+        
+    # Always show league context at the bottom
+    render_general_analysis(processor, players_df, fetcher)
         
 
 def render_team_evolution(team_id, gw_history, fetcher, players_df):
@@ -607,10 +604,10 @@ def render_team_evolution(team_id, gw_history, fetcher, players_df):
 
 
 def render_general_analysis(processor, players_df: pd.DataFrame, fetcher):
-    """Render general analysis when no team ID is provided."""
+    """Render general analysis in expanders."""
     
-    st.markdown("### General Performance Analysis")
-    st.caption("Enter your Team ID to see personalized statistics")
+    st.markdown("### League & Market Context")
+    st.caption("General season trends and top performers")
     
     df = players_df.copy()
     df['total_points'] = safe_numeric(df.get('total_points', pd.Series([0]*len(df))))
@@ -618,38 +615,80 @@ def render_general_analysis(processor, players_df: pd.DataFrame, fetcher):
     df['selected_by_percent'] = safe_numeric(df['selected_by_percent'])
     
     # Top scorers this season
-    st.markdown("#### Top Scorers This Season")
-    
-    top_scorers = df.nlargest(10, 'total_points')[
-        ['web_name', 'team_name', 'position', 'now_cost', 'total_points', 'selected_by_percent']
-    ].copy()
-    top_scorers.columns = ['Player', 'Team', 'Pos', 'Price', 'Total Points', 'EO%']
-    
-    st.dataframe(
-        top_scorers.style.format({
-            'Price': '£{:.1f}m',
-            'Total Points': '{:.0f}',
-            'EO%': '{:.1f}%'
-        }),
-        hide_index=True,
-        use_container_width=True
-    )
+    with st.expander("Top Season Scorers", expanded=False):
+        top_scorers = df.nlargest(15, 'total_points')[
+            ['web_name', 'team_name', 'position', 'now_cost', 'total_points', 'selected_by_percent']
+        ].copy()
+        top_scorers.columns = ['Player', 'Team', 'Pos', 'Price', 'Total Points', 'EO%']
+        
+        st.dataframe(
+            top_scorers.style.format({
+                'Price': '£{:.1f}m',
+                'Total Points': '{:.0f}',
+                'EO%': '{:.1f}%'
+            }),
+            hide_index=True,
+            use_container_width=True,
+            height=300
+        )
+        
+        # Timeline graph for top 5 players
+        st.markdown("**Top 5 Player Performance Timeline**")
+        top_5_ids = df.nlargest(5, 'total_points')['id'].tolist()
+        
+        timeline_data = []
+        for pid in top_5_ids:
+            p_history = fetcher.get_player_summary(pid).get('history', [])
+            p_name = df[df['id'] == pid].iloc[0]['web_name']
+            
+            cumulative = 0
+            for gw_data in p_history:
+                cumulative += gw_data.get('total_points', 0)
+                timeline_data.append({
+                    'GW': gw_data.get('round', 0),
+                    'Points': cumulative,
+                    'Player': p_name
+                })
+        
+        if timeline_data:
+            tdf = pd.DataFrame(timeline_data)
+            fig_tl = go.Figure()
+            
+            for p_name in tdf['Player'].unique():
+                pdf_p = tdf[tdf['Player'] == p_name]
+                fig_tl.add_trace(go.Scatter(
+                    x=pdf_p['GW'], y=pdf_p['Points'],
+                    name=p_name, mode='lines+markers'
+                ))
+            
+            fig_tl.update_layout(
+                height=300,
+                template='plotly_white',
+                paper_bgcolor='#ffffff',
+                plot_bgcolor='#ffffff',
+                font=dict(family='Inter, sans-serif', color='#86868b', size=11),
+                legend=dict(orientation='h', yanchor='bottom', y=1.02),
+                xaxis=dict(title='Gameweek', gridcolor='#e5e5ea'),
+                yaxis=dict(title='Cumulative Points', gridcolor='#e5e5ea'),
+                margin=dict(l=40, r=20, t=30, b=40)
+            )
+            st.plotly_chart(fig_tl, use_container_width=True)
     
     # Points per million leaders
-    st.markdown("#### Best Value (Points Per Million)")
-    
-    df['ppm'] = df['total_points'] / df['now_cost'].clip(lower=4)
-    ppm_leaders = df[df['total_points'] > 30].nlargest(10, 'ppm')[
-        ['web_name', 'team_name', 'position', 'now_cost', 'total_points', 'ppm']
-    ].copy()
-    ppm_leaders.columns = ['Player', 'Team', 'Pos', 'Price', 'Total Pts', 'Pts/£m']
-    
-    st.dataframe(
-        ppm_leaders.style.format({
-            'Price': '£{:.1f}m',
-            'Total Pts': '{:.0f}',
-            'Pts/£m': '{:.2f}'
-        }),
-        hide_index=True,
-        use_container_width=True
-    )
+    with st.expander("Season Value Leaders (Pts/£m)", expanded=False):
+        df['ppm'] = df['total_points'] / df['now_cost'].clip(lower=4)
+        ppm_leaders = df[df['total_points'] > 30].nlargest(15, 'ppm')[
+            ['web_name', 'team_name', 'position', 'now_cost', 'total_points', 'ppm']
+        ].copy()
+        ppm_leaders.columns = ['Player', 'Team', 'Pos', 'Price', 'Total Pts', 'Pts/£m']
+        
+        st.dataframe(
+            ppm_leaders.style.format({
+                'Price': '£{:.1f}m',
+                'Total Pts': '{:.0f}',
+                'Pts/£m': '{:.2f}'
+            }),
+            hide_index=True,
+            use_container_width=True,
+            height=450
+        )

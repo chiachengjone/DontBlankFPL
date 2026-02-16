@@ -11,7 +11,6 @@ pd.set_option('display.float_format', lambda x: f'{x:.2f}')
 
 # Import from local modules
 from fpl_api import create_data_pipeline
-from config import CACHE_DURATION
 from components.styles import apply_theme, render_header, render_status_bar, render_tab_header
 from tabs.dashboard import render_dashboard_tab
 from tabs.strategy import render_strategy_tab
@@ -41,7 +40,8 @@ apply_theme()
 # ── Session State Defaults ──
 _SESSION_DEFAULTS = {
     'injury_highlight': True,
-    'use_poisson_xp': True,  # True = Poisson blend, False = FPL raw ep_next
+    'use_poisson_xp': True,  # Legacy, keeping for compatibility during migration
+    'active_models': ['ml', 'poisson', 'fpl'], # Default to all 3
     'fpl_team_id': 0,
     # Preferences
     'pref_weeks_ahead': 1,
@@ -57,15 +57,7 @@ for key, default in _SESSION_DEFAULTS.items():
         st.session_state[key] = default
 
 
-def _clear_stale_session_cache():
-    """Remove stale engineered-DF and consensus-EP caches from session state."""
-    stale_prefixes = ('_engineered_df_', '_cep_')
-    stale_keys = [k for k in st.session_state if isinstance(k, str) and k.startswith(stale_prefixes)]
-    for k in stale_keys:
-        del st.session_state[k]
-
-
-@st.cache_resource(ttl=CACHE_DURATION, show_spinner=False)
+@st.cache_resource(ttl=300, show_spinner=False)
 def load_fpl_data():
     """Load FPL data with caching. Only fetches from API once per 5 minutes."""
     try:
@@ -92,7 +84,6 @@ def main():
         st.error(f"Failed to load FPL data: {error}")
         st.info("Check your internet connection and refresh.")
         if st.button("Retry"):
-            _clear_stale_session_cache()
             st.cache_resource.clear()
             st.rerun()
         return
@@ -101,10 +92,15 @@ def main():
         st.error("Could not initialize data processor")
         return
     
-    # Get players data
+    # Get players data (cached per weeks_ahead to avoid re-running Poisson on every rerun)
     try:
-        # Use engineered features DataFrame (includes EPPM, threat momentum, matchup quality, etc.)
-        players_df = processor.get_engineered_features_df(weeks_ahead=st.session_state.pref_weeks_ahead)
+        weeks_ahead = st.session_state.pref_weeks_ahead
+        cache_key = f"_engineered_df_{weeks_ahead}"
+        if cache_key in st.session_state:
+            players_df = st.session_state[cache_key]
+        else:
+            players_df = processor.get_engineered_features_df(weeks_ahead=weeks_ahead)
+            st.session_state[cache_key] = players_df
         st.session_state.players_df = players_df
     except Exception as e:
         st.error(f"Error loading players: {e}")
@@ -128,7 +124,7 @@ def main():
     try:
         gw = fetcher.get_current_gameweek()
         render_status_bar(f"GW {gw} LIVE | {len(players_df)} players | Updated just now")
-    except Exception:
+    except:
         render_status_bar(f"{len(players_df)} players loaded")
     
     # Settings row (compact) -- Team ID + Toggles
@@ -143,33 +139,41 @@ def main():
             key="header_team_id",
             help="Enter your FPL Team ID (find it in the URL of your team page). Used by Squad Builder and Monte Carlo."
         )
-        if team_id_input != 0 and team_id_input < 1:
-            st.error("Team ID must be a positive number.")
-            team_id_input = 0
-        st.session_state.fpl_team_id = int(team_id_input)
+        st.session_state.fpl_team_id = team_id_input
         # Understat warning only when offline
         ustat_active = st.session_state.get('_understat_active', None)
         if ustat_active is False:
             st.warning("Understat offline - using FPL fallback")
-        # Surface partial-coverage warnings (teams using FDR proxy)
-        ustat_status = st.session_state.get('_understat_status', {})
-        fdr_teams = ustat_status.get('fdr_fallback_teams', [])
-        if fdr_teams:
-            st.warning(
-                f"**Understat data missing for {len(fdr_teams)} team(s):** "
-                f"{', '.join(fdr_teams)}. "
-                f"Poisson engine uses FDR proxy (lower precision) for these opponents."
-            )
     with set_col2:
-        new_poisson = st.toggle(
-            "Poisson xP",
-            value=st.session_state.use_poisson_xp,
-            help="ON = Poisson model (70/30 blend with opponent strength). OFF = Raw FPL ep_next."
-        )
-        if new_poisson != st.session_state.use_poisson_xp:
-            st.session_state.use_poisson_xp = new_poisson
-            st.session_state.pop('players_df', None)
-            st.cache_resource.clear()  # Clear cached data to force regeneration
+        st.markdown("<div style='font-size:0.75rem;color:#86868b;margin-bottom:0.2rem;'>Active Models (Model xP)</div>", unsafe_allow_html=True)
+        # Using checkboxes in a nested column layout for a clean look
+        m_col1, m_col2, m_col3 = st.columns(3)
+        with m_col1:
+            use_ml = st.checkbox("ML xP", value='ml' in st.session_state.active_models, key="global_ml", help="ML Prediction")
+        with m_col2:
+            use_poisson = st.checkbox("Poi", value='poisson' in st.session_state.active_models, key="global_poisson", help="Poisson xP")
+        with m_col3:
+            use_fpl = st.checkbox("FPL xP", value='fpl' in st.session_state.active_models, key="global_fpl", help="FPL Raw xP")
+            
+        # Update active_models list
+        new_active = []
+        if use_ml: new_active.append('ml')
+        if use_poisson: new_active.append('poisson')
+        if use_fpl: new_active.append('fpl')
+        
+        # Enforce at least one model is always selected
+        if not new_active:
+            new_active = st.session_state.active_models if st.session_state.active_models else ['fpl']
+            st.warning("At least one model must be selected.")
+            
+        if new_active != st.session_state.active_models:
+            st.session_state.active_models = new_active
+            # Also update legacy toggle for any old dependencies
+            st.session_state.use_poisson_xp = 'poisson' in new_active
+            # Clear consensus EP caches so they recalculate with new model selection
+            for key in list(st.session_state.keys()):
+                if key.startswith('_cep_'):
+                    del st.session_state[key]
             st.rerun()
     with set_col3:
         st.session_state.injury_highlight = st.toggle(

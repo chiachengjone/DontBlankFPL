@@ -5,33 +5,17 @@ import numpy as np
 import plotly.graph_objects as go
 from typing import List, Optional
 
+from config import POSITION_COLORS
 from utils.helpers import safe_numeric
 
 
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-# Position color mapping
-POSITION_COLORS = {
-    'GKP': '#3b82f6',
-    'DEF': '#22c55e',
-    'MID': '#f59e0b',
-    'FWD': '#ef4444'
-}
-
-
 def create_ep_ownership_scatter(
-=======
-def create_dynamic_player_scatter(
->>>>>>> Stashed changes
-=======
-def create_dynamic_player_scatter(
->>>>>>> Stashed changes
     players_df: pd.DataFrame, 
-    x_axis_col: str = "selected_by_percent",
     position_filter: str = "All", 
-    search_player: str = ""
+    search_player: str = "",
+    ep_label: str = "Model xP"
 ) -> Optional[go.Figure]:
-    """Create interactive scatter plot with dynamic X-axis - dark theme."""
+    """Create interactive Expected Points vs Ownership scatter plot - dark theme."""
     df = players_df.copy()
     
     if position_filter != "All":
@@ -40,43 +24,16 @@ def create_dynamic_player_scatter(
     df['minutes'] = safe_numeric(df.get('minutes', pd.Series([0]*len(df))))
     df = df[df['minutes'] > 0]
     
-    # Map common readable names to columns if needed
-    col_map = {
-        "Ownership %": "selected_by_percent",
-        "Form": "form",
-        "Price": "now_cost",
-        "Total Points": "total_points",
-        "ICT Index": "ict_index",
-        "Value (xP/£)": "value_metric"
-    }
+    df['selected_by_percent'] = safe_numeric(df.get('selected_by_percent', pd.Series([0]*len(df))))
     
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-    # Use expected_points (advanced EP) if available, else ep_next
-    if 'expected_points' in df.columns and df['expected_points'].notna().any():
-        df['ep'] = safe_numeric(df['expected_points'])
-=======
-=======
->>>>>>> Stashed changes
-    actual_x_col = col_map.get(x_axis_col, x_axis_col)
-    
-    # Ensure columns exist and are numeric
-    if actual_x_col == "value_metric":
-        df['now_cost_num'] = safe_numeric(df.get('now_cost', pd.Series([5.0]*len(df))), 5.0)
-        # Use consensus_ep for value if available
-        ep_source = 'consensus_ep' if 'consensus_ep' in df.columns else 'ep_next'
-        df[actual_x_col] = safe_numeric(df.get(ep_source, 0)) / df['now_cost_num'].clip(lower=4.0)
-    else:
-        df[actual_x_col] = safe_numeric(df.get(actual_x_col, pd.Series([0]*len(df))))
-    
-    # Ensure Consensus EP (Model xP) is correctly mapped to 'ep'
+    # Use consensus_ep (Model xP) as primary - the weighted blend of ML/Poisson/FPL
+    # Fallback chain: consensus_ep → expected_points_poisson → ep_next_num
     if 'consensus_ep' in df.columns:
         df['ep'] = safe_numeric(df['consensus_ep'])
     elif 'expected_points_poisson' in df.columns and df['expected_points_poisson'].notna().any():
         df['ep'] = safe_numeric(df['expected_points_poisson'])
     elif 'ep_next_num' in df.columns:
         df['ep'] = safe_numeric(df['ep_next_num'])
->>>>>>> Stashed changes
     elif 'ep_next' in df.columns:
         df['ep'] = safe_numeric(df['ep_next'])
     else:
@@ -87,7 +44,7 @@ def create_dynamic_player_scatter(
     if df.empty or len(df) < 3:
         return None
     
-    avg_x = df[actual_x_col].mean()
+    avg_own = df['selected_by_percent'].mean()
     avg_ep = df['ep'].mean()
     
     # Determine if we're searching for a specific player
@@ -113,7 +70,7 @@ def create_dynamic_player_scatter(
             # Non-matching players - greyed out
             if not pos_non_match.empty:
                 fig.add_trace(go.Scatter(
-                    x=pos_non_match[actual_x_col],
+                    x=pos_non_match['selected_by_percent'],
                     y=pos_non_match['ep'],
                     mode='markers',
                     marker=dict(size=6, color='#c7c7cc', opacity=0.2),
@@ -126,7 +83,7 @@ def create_dynamic_player_scatter(
             # Matching players - full color with labels
             if not pos_match.empty:
                 fig.add_trace(go.Scatter(
-                    x=pos_match[actual_x_col],
+                    x=pos_match['selected_by_percent'],
                     y=pos_match['ep'],
                     mode='markers+text',
                     marker=dict(
@@ -141,7 +98,7 @@ def create_dynamic_player_scatter(
                     name=pos,
                     legendgroup=pos,
                     showlegend=True,
-                    hovertemplate=f'<b>%{{text}}</b><br>{x_axis_col}: %{{x:.1f}}<br>EP: %{{y:.1f}}<extra></extra>'
+                    hovertemplate='<b>%{text}</b><br>Ownership: %{x:.1f}%<br>EP: %{y:.1f}<extra></extra>'
                 ))
     else:
         # Normal view - show top players per position with labels
@@ -157,29 +114,21 @@ def create_dynamic_player_scatter(
             non_top = pos_df[~pos_df['is_top']]
             if not non_top.empty:
                 fig.add_trace(go.Scatter(
-                    x=non_top[actual_x_col],
+                    x=non_top['selected_by_percent'],
                     y=non_top['ep'],
                     mode='markers',
                     marker=dict(size=non_top['now_cost'] * 1.2, color=POSITION_COLORS[pos], opacity=0.5),
                     name=pos,
                     legendgroup=pos,
                     showlegend=False,
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-                    hovertemplate='<b>%{customdata}</b><br>Ownership: %{x:.1f}%<br>EP: %{y:.1f}<extra></extra>',
-=======
-                    hovertemplate=f'<b>%{{customdata}}</b><br>{x_axis_col}: %{{x:.1f}}<br>xP: %{{y:.1f}}<extra></extra>',
->>>>>>> Stashed changes
-=======
-                    hovertemplate=f'<b>%{{customdata}}</b><br>{x_axis_col}: %{{x:.1f}}<br>xP: %{{y:.1f}}<extra></extra>',
->>>>>>> Stashed changes
+                    hovertemplate='<b>%{customdata}</b><br>Ownership: %{x:.1f}%<br>xP: %{y:.1f}<extra></extra>',
                     customdata=non_top['web_name']
                 ))
             
             top = pos_df[pos_df['is_top']]
             if not top.empty:
                 fig.add_trace(go.Scatter(
-                    x=top[actual_x_col],
+                    x=top['selected_by_percent'],
                     y=top['ep'],
                     mode='markers+text',
                     marker=dict(size=top['now_cost'] * 1.5, color=POSITION_COLORS[pos], opacity=1.0),
@@ -189,7 +138,7 @@ def create_dynamic_player_scatter(
                     name=pos,
                     legendgroup=pos,
                     showlegend=True,
-                    hovertemplate=f'<b>%{{text}}</b><br>{x_axis_col}: %{{x:.1f}}<br>EP: %{{y:.1f}}<extra></extra>'
+                    hovertemplate='<b>%{text}</b><br>Ownership: %{x:.1f}%<br>EP: %{y:.1f}<extra></extra>'
                 ))
     
     # Ensure all positions appear in legend
@@ -203,26 +152,18 @@ def create_dynamic_player_scatter(
             ))
     
     fig.add_hline(y=avg_ep, line_dash="dash", line_color="rgba(0,0,0,0.1)", 
-                   annotation_text="Avg EP", annotation_font_color="#888")
-    fig.add_vline(x=avg_x, line_dash="dash", line_color="rgba(0,0,0,0.1)", 
-                   annotation_text=f"Avg {x_axis_col}", annotation_font_color="#888")
+                  annotation_text="Avg EP", annotation_font_color="#888")
+    fig.add_vline(x=avg_own, line_dash="dash", line_color="rgba(0,0,0,0.1)", 
+                  annotation_text="Avg Own%", annotation_font_color="#888")
     
     fig.update_layout(
-        height=550,
+        height=500,
         template='plotly_white',
         paper_bgcolor='#ffffff',
         plot_bgcolor='#ffffff',
         font=dict(family='Inter, sans-serif', color='#86868b', size=11),
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
         xaxis_title='Ownership %',
-        yaxis_title='Expected Points',
-=======
-=======
->>>>>>> Stashed changes
-        xaxis_title=x_axis_col,
         yaxis_title=ep_label,
->>>>>>> Stashed changes
         xaxis=dict(gridcolor='#e5e5ea', zerolinecolor='#e5e5ea'),
         yaxis=dict(gridcolor='#e5e5ea', zerolinecolor='#e5e5ea'),
         legend=dict(

@@ -6,7 +6,6 @@ Each function renders one discrete section of the Analytics tab.
 
 import streamlit as st
 import pandas as pd
-import numpy as np
 import plotly.graph_objects as go
 
 from config import POSITION_COLORS
@@ -308,10 +307,10 @@ def render_cbit_analysis(players_df: pd.DataFrame):
             df['aa90_rank'] = df['cbit_aa90'].rank(ascending=False, method='min').astype(int)
             df['prob_rank'] = df['cbit_prob'].rank(ascending=False, method='min').astype(int)
 
-            df['score_display'] = df.apply(lambda r: format_with_rank(f"{r['cbit_score']:.1f}", r['score_rank']), axis=1)
-            df['aa90_display'] = df.apply(lambda r: format_with_rank(f"{r['cbit_aa90']:.1f}", r['aa90_rank']), axis=1)
+            df['score_display'] = df.apply(lambda r: format_with_rank(f"{r['cbit_score']:.2f}", r['score_rank']), axis=1)
+            df['aa90_display'] = df.apply(lambda r: format_with_rank(f"{r['cbit_aa90']:.2f}", r['aa90_rank']), axis=1)
             df['prob_display'] = df.apply(lambda r: format_with_rank(f"{r['cbit_prob']:.0%}", r['prob_rank']), axis=1)
-            
+
             team_col = 'team_name' if 'team_name' in df.columns else 'team'
             display_df = df[['web_name', team_col, 'now_cost', 'aa90_display', 'prob_display', 'cbit_floor', 'cbit_dtt', 'score_display', 'minutes']].copy()
             display_df.columns = ['Player', 'Team', 'Price', 'AA90', 'P(CBIT)', 'Floor', 'DTT', 'Score', 'minutes']

@@ -5,25 +5,23 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 
-<<<<<<< Updated upstream
-from utils.helpers import safe_numeric, get_injury_status, style_df_with_injuries, round_df, normalize_name
-from components.charts import create_ep_ownership_scatter
-=======
 from utils.helpers import (
     safe_numeric, get_injury_status, style_df_with_injuries, round_df, normalize_name,
     calculate_consensus_ep, get_consensus_label, calculate_enhanced_captain_score
 )
-from components.charts import create_dynamic_player_scatter
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
+from components.charts import create_ep_ownership_scatter
 from components.cards import render_player_detail_card
 from fpl_api import CBIT_BONUS_THRESHOLD, CBIT_BONUS_POINTS, MAX_FREE_TRANSFERS, CAPTAIN_MULTIPLIER
 
 
 def render_strategy_tab(processor, players_df: pd.DataFrame):
     """Strategy tab - EP vs Ownership visualization with filters."""
+    
+    # Pre-calculate Consensus EP for the Strategy tab
+    active_models = st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])
+    current_horizon = st.session_state.get('pref_weeks_ahead', 1)
+    players_df = calculate_consensus_ep(players_df, active_models, horizon=current_horizon)
+    con_label = get_consensus_label(active_models, current_horizon)
     
     # Metrics explanation dropdown
     with st.expander("Understanding Strategy Metrics"):
@@ -35,14 +33,14 @@ def render_strategy_tab(processor, players_df: pd.DataFrame):
         
         **Player Landscape Scatter Plot**
         - X-axis: Ownership % (how many managers own them)
-        - Y-axis: Expected Points (predicted GW score)
+        - Y-axis: {con_label} (predicted GW score)
         - Bubble size: Price (bigger = more expensive)
         
         **Quadrant Strategy**
-        - Top-left (high EP, low ownership): Prime differentials
-        - Top-right (high EP, high ownership): Essential template picks
+        - Top-left (high xP, low ownership): Prime differentials
+        - Top-right (high xP, high ownership): Essential template picks
         - Bottom-left: Avoid zone
-        - Bottom-right: Traps (popular but low EP)
+        - Bottom-right: Traps (popular but low xP)
         
         **Color Coding**
         - Green: Attackers (FWD)
@@ -92,18 +90,6 @@ def render_strategy_tab(processor, players_df: pd.DataFrame):
     with f4:
         search_player = st.text_input("Search player", placeholder="Type name to highlight...", key="strat_search")
     
-    # ── Map/Exploration Controls ──
-    st.markdown('<p class="section-title">Player Exploration</p>', unsafe_allow_html=True)
-    c1, c2 = st.columns([1, 3])
-    with c1:
-        x_axis = st.selectbox(
-            "X-Axis Variable", 
-            ["Ownership %", "Form", "Price", "Total Points", "ICT Index", "Value (xP/£)"],
-            index=0,
-            key="strat_x_axis"
-        )
-        st.caption("Change the x-axis to explore different player metrics vs Model xP.")
-    
     # Use base player data for fast graph rendering
     df = players_df.copy()
     df['now_cost'] = safe_numeric(df['now_cost'], 5)
@@ -138,35 +124,20 @@ def render_strategy_tab(processor, players_df: pd.DataFrame):
             if len(matched) > 1:
                 st.caption(f"Other matches: {', '.join(matched['web_name'].tolist()[:10])}")
     
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-    # Scatter plot
-    if 'expected_points' in df.columns or 'ep_next' in df.columns:
-        fig = create_ep_ownership_scatter(df, pos_filter, search_player=search_player)
-=======
-=======
->>>>>>> Stashed changes
-    # Dynamic Scatter plot
+    # Scatter plot - uses consensus_ep (Model xP) calculated at top of tab
     if 'consensus_ep' in df.columns or 'expected_points_poisson' in df.columns or 'ep_next' in df.columns:
-        fig = create_dynamic_player_scatter(
-            df, 
-            x_axis_col=x_axis,
-            position_filter=pos_filter, 
-            search_player=search_player, 
-            ep_label=con_label
-        )
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
+        fig = create_ep_ownership_scatter(df, pos_filter, search_player=search_player, ep_label=con_label)
         if fig:
-            st.plotly_chart(fig, use_container_width=True, key='strategy_dynamic_scatter')
+            st.plotly_chart(fig, use_container_width=True, key='strategy_ep_ownership_scatter')
     else:
         st.info("Data loading...")
     
     # Quick stats
     st.markdown('<p class="section-title">Quick Stats</p>', unsafe_allow_html=True)
     render_quick_stats(df)
+    
+    # Form vs EP bubble chart
+    render_form_vs_ep_chart(df)
     
     # Captain planning
     render_captain_planning(players_df, processor)
@@ -195,12 +166,20 @@ def render_quick_stats(df: pd.DataFrame):
             st.metric("Most Owned", top_owned.iloc[0]['web_name'], f"{top_owned.iloc[0]['selected_by_percent']:.1f}%")
     
     with stat2:
-        ep_col = 'expected_points' if 'expected_points' in df.columns else 'ep_next'
-        if ep_col in df.columns:
-            df[ep_col] = safe_numeric(df[ep_col])
-            top_ep = df.nlargest(1, ep_col)
+        if 'consensus_ep' in df.columns:
+            df['consensus_ep'] = safe_numeric(df['consensus_ep'])
+            top_ep = df.nlargest(1, 'consensus_ep')
             if not top_ep.empty:
-                st.metric("Top EP", top_ep.iloc[0]['web_name'], f"{top_ep.iloc[0][ep_col]:.1f}")
+                current_h = st.session_state.get('pref_weeks_ahead', 1)
+                st.metric(f"Top {get_consensus_label(st.session_state.get('active_models', []), current_h)}", 
+                          top_ep.iloc[0]['web_name'], f"{top_ep.iloc[0]['consensus_ep']:.1f}")
+        else:
+            ep_col = 'expected_points' if 'expected_points' in df.columns else 'ep_next'
+            if ep_col in df.columns:
+                df[ep_col] = safe_numeric(df[ep_col])
+                top_ep = df.nlargest(1, ep_col)
+                if not top_ep.empty:
+                    st.metric("Top xP", top_ep.iloc[0]['web_name'], f"{top_ep.iloc[0][ep_col]:.1f}")
     
     with stat3:
         st.metric("Players Shown", len(df))
@@ -210,16 +189,23 @@ def render_quick_stats(df: pd.DataFrame):
         st.metric("Avg Price", f"{avg_price:.1f}m")
 
 
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
 def render_form_vs_ep_chart(df: pd.DataFrame):
     """Render Form vs EP bubble chart — size = price, color = position."""
-    st.markdown('<p class="section-title">Form vs Expected Points</p>', unsafe_allow_html=True)
+    active_models = st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])
+    current_h = st.session_state.get('pref_weeks_ahead', 1)
+    con_label = get_consensus_label(active_models, current_h)
+    
+    st.markdown(f'<p class="section-title">Form vs {con_label}</p>', unsafe_allow_html=True)
     st.caption("Bubble size = price. Top-right = hot and high-ceiling players.")
     
     chart_df = df.copy()
     chart_df['form'] = safe_numeric(chart_df.get('form', pd.Series([0]*len(chart_df))))
-    chart_df['ep'] = safe_numeric(chart_df.get('expected_points', chart_df.get('ep_next', pd.Series([2]*len(chart_df)))))
+    
+    # Use Model xP (Consensus)
+    if 'consensus_ep' in chart_df.columns:
+        chart_df['ep'] = safe_numeric(chart_df['consensus_ep'])
+    else:
+        chart_df['ep'] = safe_numeric(chart_df.get('expected_points', chart_df.get('ep_next', pd.Series([2]*len(chart_df)))))
     chart_df['minutes'] = safe_numeric(chart_df.get('minutes', pd.Series([0]*len(chart_df))))
     chart_df = chart_df[chart_df['minutes'] > 200]
     
@@ -245,7 +231,7 @@ def render_form_vs_ep_chart(df: pd.DataFrame):
                 line=dict(width=1, color='rgba(0,0,0,0.06)')
             ),
             text=pos_df['web_name'],
-            hovertemplate='<b>%{text}</b><br>Form: %{x:.1f}<br>EP: %{y:.1f}<br><extra></extra>'
+            hovertemplate='<b>%{text}</b><br>Form: %{x:.1f}<br>xP: %{y:.1f}<br><extra></extra>'
         ))
     
     # Add quadrant lines at medians
@@ -262,30 +248,28 @@ def render_form_vs_ep_chart(df: pd.DataFrame):
         plot_bgcolor='#ffffff',
         font=dict(family='Inter, sans-serif', color='#86868b', size=11),
         xaxis=dict(title='Form', gridcolor='#e5e5ea', zerolinecolor='#e5e5ea'),
-        yaxis=dict(title='Expected Points', gridcolor='#e5e5ea', zerolinecolor='#e5e5ea'),
+        yaxis=dict(title=con_label, gridcolor='#e5e5ea', zerolinecolor='#e5e5ea'),
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
         margin=dict(l=50, r=30, t=30, b=50)
     )
     st.plotly_chart(fig, use_container_width=True, key='strategy_form_vs_ep')
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
 
 
 def render_captain_planning(players_df: pd.DataFrame, processor):
     """Render captain planning section."""
     st.markdown('<p class="section-title">Captain Picks</p>', unsafe_allow_html=True)
-    st.caption("Top captain options based on EP, form, and fixture difficulty")
+    st.caption("Top captain options based on xP, form, and fixture difficulty")
     
     cap_df = players_df.copy()
-    cap_df['ep'] = safe_numeric(cap_df.get('expected_points', cap_df.get('ep_next', pd.Series([0]*len(cap_df)))))
+    # Use Consensus EP
+    cap_df['ep'] = safe_numeric(cap_df['consensus_ep'])
     cap_df['form'] = safe_numeric(cap_df.get('form', pd.Series([0]*len(cap_df))))
     cap_df['selected_by_percent'] = safe_numeric(cap_df['selected_by_percent'])
     cap_df['minutes'] = safe_numeric(cap_df.get('minutes', pd.Series([0]*len(cap_df))))
     cap_df = cap_df[cap_df['minutes'] > 500]
     
-    cap_df['captain_score'] = cap_df['ep'] * CAPTAIN_MULTIPLIER + cap_df['form'] * 0.3
+    active_models = st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])
+    cap_df['captain_score'] = cap_df.apply(lambda r: calculate_enhanced_captain_score(r, active_models), axis=1)
     cap_df['captain_ev'] = cap_df['ep'] * CAPTAIN_MULTIPLIER
     
     cap_cols = st.columns(5)
@@ -298,9 +282,9 @@ def render_captain_planning(players_df: pd.DataFrame, processor):
             st.markdown(f'''
             <div class="rule-card">
                 <div style="font-size:0.75rem;color:#888;">#{i+1}</div>
-                <div style="font-size:1.1rem;font-weight:600;color:#fff;">{cap["web_name"]}{injury_badge}</div>
+                <div style="font-size:1.1rem;font-weight:600;color:#1d1d1f;">{cap["web_name"]}{injury_badge}</div>
                 <div style="color:#888;font-size:0.85rem;">{cap.get("team_name", "")} | {cap["now_cost"]:.1f}m</div>
-                <div style="color:#ef4444;font-weight:600;margin-top:0.5rem;">{cap["captain_ev"]:.1f} EV</div>
+                <div style="color:#ef4444;font-weight:600;margin-top:0.5rem;">{cap["ep"]:.1f} {get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl']))}</div>
                 <div style="color:#888;font-size:0.75rem;">Form: {cap["form"]:.1f} | Own: {cap["selected_by_percent"]:.1f}%</div>
             </div>
             ''', unsafe_allow_html=True)
@@ -557,9 +541,10 @@ def render_fixture_difficulty(processor):
                     if not team_players.empty and 'team_name' in team_players.columns:
                         team_squad = team_players[team_players['team_name'] == selected_team].copy()
                         if not team_squad.empty:
-                            team_squad['ep'] = safe_numeric(team_squad.get('expected_points', team_squad.get('ep_next', pd.Series([0]*len(team_squad)))))
+                            # Use consensus_ep (Model xP) - the weighted blend of ML/Poisson/FPL
+                            team_squad['ep'] = safe_numeric(team_squad.get('consensus_ep', team_squad.get('expected_points_poisson', pd.Series([0]*len(team_squad)))))
                             top_players = team_squad.nlargest(5, 'ep')[['web_name', 'position', 'now_cost', 'ep', 'selected_by_percent']]
-                            top_players.columns = ['Player', 'Pos', 'Price', 'EP', 'Own%']
+                            top_players.columns = ['Player', 'Pos', 'Price', get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])), 'Own%']
                             st.dataframe(top_players, hide_index=True, use_container_width=True)
                 else:
                     st.info("No upcoming fixtures found")

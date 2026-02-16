@@ -5,7 +5,10 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 
-from utils.helpers import safe_numeric, style_df_with_injuries, normalize_name
+from utils.helpers import (
+    safe_numeric, style_df_with_injuries, normalize_name,
+    calculate_consensus_ep, get_consensus_label
+)
 from components.styles import render_section_title
 
 
@@ -46,6 +49,10 @@ def render_price_predictor_tab(processor, players_df: pd.DataFrame):
     
     # Prepare data
     df = players_df.copy()
+    active_models = st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])
+    df = calculate_consensus_ep(df, active_models)
+    con_label = get_consensus_label(active_models)
+    
     df['transfers_in_event'] = safe_numeric(df.get('transfers_in_event', pd.Series([0]*len(df))))
     df['transfers_out_event'] = safe_numeric(df.get('transfers_out_event', pd.Series([0]*len(df))))
     df['transfers_in'] = safe_numeric(df.get('transfers_in', pd.Series([0]*len(df))))
@@ -56,7 +63,6 @@ def render_price_predictor_tab(processor, players_df: pd.DataFrame):
     df['cost_change_event'] = safe_numeric(df.get('cost_change_event', pd.Series([0]*len(df))))
     df['cost_change_start'] = safe_numeric(df.get('cost_change_start', pd.Series([0]*len(df))))
     df['selected_by_percent'] = safe_numeric(df['selected_by_percent'])
-    df['expected_points'] = safe_numeric(df.get('expected_points', df.get('ep_next', pd.Series([2.0]*len(df)))))
     
     # Price change thresholds (approximate)
     # Generally: ~80k net transfers for a price change, varies by ownership
@@ -115,23 +121,23 @@ def render_price_predictor_tab(processor, players_df: pd.DataFrame):
     st.caption("Players with net transfers above threshold - buy before they rise!")
     
     if not rising.empty:
-        rise_df = rising.nlargest(5, 'net_transfers')[
+        rise_df = rising.nlargest(15, 'net_transfers')[
             ['web_name', 'team_name', 'position', 'now_cost', 'net_transfers', 
-             'transfers_in_event', 'expected_points', 'selected_by_percent']
+             'transfers_in_event', 'consensus_ep', 'selected_by_percent']
         ].copy()
-        rise_df.columns = ['Player', 'Team', 'Pos', 'Price', 'Net Transfers', 'In', 'EP', 'EO%']
+        rise_df.columns = ['Player', 'Team', 'Pos', 'Price', 'Net Transfers', 'In', con_label, 'EO%']
         
         st.dataframe(
             rise_df.style.format({
                 'Price': '£{:.1f}m',
                 'Net Transfers': '{:+,.0f}',
                 'In': '{:,.0f}',
-                'EP': '{:.2f}',
+                con_label: '{:.2f}',
                 'EO%': '{:.1f}%'
             }),
             hide_index=True,
             use_container_width=True,
-            height=230
+            height=400
         )
     else:
         st.info("No players currently on track to rise tonight")
@@ -143,23 +149,23 @@ def render_price_predictor_tab(processor, players_df: pd.DataFrame):
     st.caption("Players with heavy selling - consider avoiding or selling before they fall")
     
     if not falling.empty:
-        fall_df = falling.nsmallest(5, 'net_transfers')[
+        fall_df = falling.nsmallest(15, 'net_transfers')[
             ['web_name', 'team_name', 'position', 'now_cost', 'net_transfers',
-             'transfers_out_event', 'expected_points', 'selected_by_percent']
+             'transfers_out_event', 'consensus_ep', 'selected_by_percent']
         ].copy()
-        fall_df.columns = ['Player', 'Team', 'Pos', 'Price', 'Net Transfers', 'Out', 'EP', 'EO%']
+        fall_df.columns = ['Player', 'Team', 'Pos', 'Price', 'Net Transfers', 'Out', con_label, 'EO%']
         
         st.dataframe(
             fall_df.style.format({
                 'Price': '£{:.1f}m',
                 'Net Transfers': '{:+,.0f}',
                 'Out': '{:,.0f}',
-                'EP': '{:.2f}',
+                con_label: '{:.2f}',
                 'EO%': '{:.1f}%'
             }),
             hide_index=True,
             use_container_width=True,
-            height=230
+            height=400
         )
     else:
         st.info("No players currently on track to fall tonight")
@@ -175,16 +181,16 @@ def render_price_predictor_tab(processor, players_df: pd.DataFrame):
     with watch_tabs[0]:
         if not watch_rise.empty:
             watch_r_df = watch_rise.nlargest(10, 'net_transfers')[
-                ['web_name', 'team_name', 'position', 'now_cost', 'net_transfers', 'expected_points']
+                ['web_name', 'team_name', 'position', 'now_cost', 'net_transfers', 'consensus_ep']
             ].copy()
             watch_r_df['threshold_pct'] = (watch_r_df['net_transfers'] / RISE_THRESHOLD * 100).round(0)
-            watch_r_df.columns = ['Player', 'Team', 'Pos', 'Price', 'Net Transfers', 'EP', '% to Rise']
+            watch_r_df.columns = ['Player', 'Team', 'Pos', 'Price', 'Net Transfers', con_label, '% to Rise']
             
             st.dataframe(
                 watch_r_df.style.format({
                     'Price': '£{:.1f}m',
                     'Net Transfers': '{:+,.0f}',
-                    'EP': '{:.2f}',
+                    con_label: '{:.2f}',
                     '% to Rise': '{:.0f}%'
                 }),
                 hide_index=True,
@@ -196,16 +202,16 @@ def render_price_predictor_tab(processor, players_df: pd.DataFrame):
     with watch_tabs[1]:
         if not watch_fall.empty:
             watch_f_df = watch_fall.nsmallest(10, 'net_transfers')[
-                ['web_name', 'team_name', 'position', 'now_cost', 'net_transfers', 'expected_points']
+                ['web_name', 'team_name', 'position', 'now_cost', 'net_transfers', 'consensus_ep']
             ].copy()
             watch_f_df['threshold_pct'] = (abs(watch_f_df['net_transfers']) / abs(FALL_THRESHOLD) * 100).round(0)
-            watch_f_df.columns = ['Player', 'Team', 'Pos', 'Price', 'Net Transfers', 'EP', '% to Fall']
+            watch_f_df.columns = ['Player', 'Team', 'Pos', 'Price', 'Net Transfers', con_label, '% to Fall']
             
             st.dataframe(
                 watch_f_df.style.format({
                     'Price': '£{:.1f}m',
                     'Net Transfers': '{:+,.0f}',
-                    'EP': '{:.2f}',
+                    con_label: '{:.2f}',
                     '% to Fall': '{:.0f}%'
                 }),
                 hide_index=True,
@@ -281,15 +287,15 @@ def render_price_predictor_tab(processor, players_df: pd.DataFrame):
         risers = df.nlargest(12, 'cost_change_start')
         if not risers.empty:
             risers_df = risers[['web_name', 'team_name', 'position', 'now_cost', 'cost_change_start', 
-                                'expected_points', 'selected_by_percent']].copy()
+                                'consensus_ep', 'selected_by_percent']].copy()
             risers_df['cost_change_start'] = risers_df['cost_change_start'] / 10
-            risers_df.columns = ['Player', 'Team', 'Pos', 'Price', 'Season +/-', 'EP', 'EO%']
+            risers_df.columns = ['Player', 'Team', 'Pos', 'Price', 'Season +/-', con_label, 'EO%']
             
             st.dataframe(
                 risers_df.style.format({
                     'Price': '£{:.1f}m',
                     'Season +/-': '+£{:.1f}m',
-                    'EP': '{:.2f}',
+                    con_label: '{:.2f}',
                     'EO%': '{:.1f}%'
                 }),
                 hide_index=True,
@@ -300,15 +306,15 @@ def render_price_predictor_tab(processor, players_df: pd.DataFrame):
         fallers = df.nsmallest(12, 'cost_change_start')
         if not fallers.empty:
             fallers_df = fallers[['web_name', 'team_name', 'position', 'now_cost', 'cost_change_start',
-                                  'expected_points', 'selected_by_percent']].copy()
+                                  'consensus_ep', 'selected_by_percent']].copy()
             fallers_df['cost_change_start'] = fallers_df['cost_change_start'] / 10
-            fallers_df.columns = ['Player', 'Team', 'Pos', 'Price', 'Season +/-', 'EP', 'EO%']
+            fallers_df.columns = ['Player', 'Team', 'Pos', 'Price', 'Season +/-', con_label, 'EO%']
             
             st.dataframe(
                 fallers_df.style.format({
                     'Price': '£{:.1f}m',
                     'Season +/-': '{:.1f}m',
-                    'EP': '{:.2f}',
+                    con_label: '{:.2f}',
                     'EO%': '{:.1f}%'
                 }),
                 hide_index=True,

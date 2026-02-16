@@ -6,11 +6,14 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from utils.helpers import safe_numeric, round_df, style_df_with_injuries
+from utils.helpers import safe_numeric, round_df, style_df_with_injuries, get_consensus_label, calculate_consensus_ep
 
 
 def render_genetic_tab(processor, players_df: pd.DataFrame):
     """Genetic Algorithm Optimizer tab — its own top-level tab."""
+    # Ensure consensus_ep is available
+    active_models = st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])
+    players_df = calculate_consensus_ep(players_df, active_models)
 
     st.markdown('<p class="section-title">Genetic Optimizer</p>', unsafe_allow_html=True)
     
@@ -31,10 +34,10 @@ def render_genetic_tab(processor, players_df: pd.DataFrame):
         1. **Selection**: Best squads are chosen to "reproduce"
         2. **Crossover**: Combines players from two good squads
         3. **Mutation**: Random player swaps for diversity
-        4. **Fitness**: Squads scored on total EP, value, and constraints
+        4. **Fitness**: Squads scored on total xP, value, and constraints
         
         **Fitness Score**
-        - Combined metric of squad's total EP and budget efficiency
+        - Combined metric of squad's total xP and budget efficiency
         - Higher fitness = better squad
         
         **When to Use**
@@ -98,6 +101,7 @@ def render_genetic_tab(processor, players_df: pd.DataFrame):
 
             st.markdown("**Optimized Squad**")
 
+            con_label = get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl']))
             squad_data = []
             for pid in best.squad:
                 match = players_df[players_df["id"] == pid]
@@ -110,7 +114,7 @@ def render_genetic_tab(processor, players_df: pd.DataFrame):
                         "Player": player.get("web_name", f"ID:{pid}"),
                         "Position": player.get("position", "?"),
                         "Cost": round(float(player.get("now_cost", 0)), 1),
-                        "EP": round(float(safe_numeric(pd.Series([player.get("expected_points", player.get("ep_next", 0))])).iloc[0]), 2),
+                        con_label: round(float(safe_numeric(pd.Series([player.get("consensus_ep", 0)])).iloc[0]), 2),
                         "Status": "(C)" if is_captain else "XI" if is_starting else "Bench",
                     }
                 )

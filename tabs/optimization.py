@@ -5,22 +5,14 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 
-<<<<<<< Updated upstream
-from utils.helpers import safe_numeric, style_df_with_injuries, round_df
-from optimizer import MAX_PLAYERS_PER_TEAM
-from config import TRANSFER_HIT_COST
-from fpl_api import MAX_FREE_TRANSFERS
-=======
 from utils.helpers import (
     safe_numeric, style_df_with_injuries, round_df,
-    safe_numeric, calculate_consensus_ep, get_consensus_label,
-    get_fixture_ease_map
+    calculate_consensus_ep, get_consensus_label
 )
 from config import (
     MAX_PLAYERS_PER_TEAM, MAX_FREE_TRANSFERS, TRANSFER_HIT_COST,
     POSITION_COLORS,
 )
->>>>>>> Stashed changes
 
 
 def render_optimization_tab(processor, players_df: pd.DataFrame, fetcher):
@@ -40,14 +32,14 @@ def render_optimization_tab(processor, players_df: pd.DataFrame, fetcher):
         - Using more than FTs available costs -4 pts per extra transfer
         
         **Strategy Options**
-        - **Balanced**: 35% EP, 20% Form, 20% Value, 15% Mins, 10% Diff
-        - **Maximum Points**: 55% EP, 25% Form, 20% Mins (best for high budget)
-        - **Differential**: 35% EP, 35% Diff, 15% Form, 15% Mins (rank chasing)
-        - **Value**: 45% Value (EP/m), 30% EP, 25% Mins (tight budget)
+        - **Balanced**: 35% xP, 20% Form, 20% Value, 15% Mins, 10% Diff
+        - **Maximum Points**: 55% xP, 25% Form, 20% Mins (best for high budget)
+        - **Differential**: 35% xP, 35% Diff, 15% Form, 15% Mins (rank chasing)
+        - **Value**: 45% Value (xP/m), 30% xP, 25% Mins (tight budget)
         
         **Transfer Recommendations**
         - Shows best OUT → IN swaps for your squad
-        - EP Gain: Expected points improvement
+        - xP Gain: Predicted points improvement
         - Value: Price difference (positive = saves money)
         
         **Hit Analysis**
@@ -84,69 +76,16 @@ def render_optimization_tab(processor, players_df: pd.DataFrame, fetcher):
     
     bank = st.number_input("Bank (remaining budget)", min_value=0.0, max_value=50.0, value=0.0, step=0.1, key="opt_bank")
     
-    # ── Horizon-Aware Re-calculation ──
-    try:
-        from poisson_ep import calculate_poisson_ep_for_dataframe
-        fixtures_df = processor.fixtures_df
-        current_gw = fetcher.get_current_gameweek()
-        team_stats = st.session_state.get('_understat_team_stats', None)
-        
-        # Calculate Poisson EP for the specific horizon chosen in the UI
-        # Use a session state cache to avoid re-calculating on every unrelated rerun
-        cache_key = f"opt_df_{weeks_ahead}_{strategy}"
-        if cache_key in st.session_state:
-            featured_df = st.session_state[cache_key]
-        else:
-            featured_df = calculate_poisson_ep_for_dataframe(
-                players_df.copy(), fixtures_df, current_gw, team_stats=team_stats, horizon=weeks_ahead
-            )
-            # Use Global Model Selection (Consensus)
-            active_models = st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])
-            featured_df = calculate_consensus_ep(featured_df, active_models, horizon=weeks_ahead)
-            
-            # Additional features
-            ease_map = get_fixture_ease_map(fixtures_df, current_gw, weeks_ahead=weeks_ahead)
-            featured_df['fixture_ease'] = featured_df['team'].map(ease_map).fillna(0.5)
-            featured_df['fixture_ease_scaled'] = (featured_df['fixture_ease'] * 4 + 1).round(1)
-            featured_df['value_score'] = (featured_df['avg_consensus_ep'] / featured_df['now_cost'].clip(lower=4.0) * 10).round(2)
-            
-            # Calculate transfer scores
-            ep_col = 'avg_consensus_ep'
-            calculate_transfer_scores(featured_df, ep_col, strategy)
-            st.session_state[cache_key] = featured_df
-            
-        # Clear stale caches
-        for k in list(st.session_state.keys()):
-            if k.startswith("opt_df_") and k != cache_key:
-                del st.session_state[k]
-                
-    except Exception as e:
-        st.error(f"Engine calculation error: {e}")
-        featured_df = players_df.copy()
-        ep_col = 'ep_next'
-
-    ep_col = 'avg_consensus_ep' if 'avg_consensus_ep' in featured_df.columns else 'ep_next'
-
-    # ── Personalized Analysis ──
-    if team_id > 0:
-        if st.button("Analyze Transfers for My Squad", type="primary", use_container_width=True):
-            with st.spinner("Analyzing your squad..."):
-                try:
-                    analyze_transfers(processor, featured_df, fetcher, team_id, weeks_ahead, free_transfers, strategy, bank)
-                except Exception as e:
-                    st.error(f"Analysis failed: {e}")
-        else:
-            st.info("Click 'Analyze Transfers' above to see personalized swaps for your squad.")
-    
-    # ── General Market Recommendations (Always Shown) ──
-    st.markdown('<p class="section-title">General Market Recommendations</p>', unsafe_allow_html=True)
-    st.caption(f"Top targets for GW{current_gw+1} onwards ({weeks_ahead} GW horizon)")
-    
-    # Position recommendations
-    render_position_recommendations(featured_df, ep_col)
-    
-    # Top 10 overall
-    render_top_picks(featured_df, ep_col)
+    if st.button("Analyze Transfers", type="primary", use_container_width=True):
+        with st.spinner("Analyzing your squad..."):
+            try:
+                analyze_transfers(processor, players_df, fetcher, team_id, weeks_ahead, free_transfers, strategy, bank)
+            except ValueError as e:
+                st.error(f"Team data error: {e}")
+            except Exception as e:
+                st.error(f"Error: {e}")
+    else:
+        st.info("Enter your Team ID and click 'Analyze Transfers' to get personalized recommendations.")
 
 
 def analyze_transfers(processor, players_df, fetcher, team_id, weeks_ahead, free_transfers, strategy, bank):
@@ -173,8 +112,6 @@ def analyze_transfers(processor, players_df, fetcher, team_id, weeks_ahead, free
         has_real_team = False
         st.warning(f"Could not fetch team data for ID {team_id}: {str(e)}. Showing general recommendations.")
     
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
     # Prepare EP metrics - Horizon-Aware Re-calculation
     try:
         from poisson_ep import calculate_poisson_ep_for_dataframe
@@ -188,37 +125,57 @@ def analyze_transfers(processor, players_df, fetcher, team_id, weeks_ahead, free
             featured_df, fixtures_df, current_gw, team_stats=team_stats, horizon=weeks_ahead
         )
         
-        # We take the cumulative Poisson for the horizon and divide by weeks to get a per-GW average
-        # This keeps the metrics comparable and prevents massive inflation over 5-10 week windows
-        featured_df['poisson_ep'] = (safe_numeric(temp_df['expected_points_poisson']) / weeks_ahead).round(2)
+        # Keep as sum; calculate_consensus_ep handles the averaging in its avg_consensus_ep col
+        featured_df['poisson_ep'] = safe_numeric(temp_df['expected_points_poisson']).round(2)
     except Exception as e:
         st.error(f"Poisson re-calculation failed: {e}")
         featured_df['poisson_ep'] = safe_numeric(featured_df.get('expected_points_poisson', 2.0))
 
-    featured_df['fpl_ep'] = safe_numeric(featured_df.get('ep_next_num', featured_df.get('ep_next', 2.0)))
+    featured_df['ep_next_num'] = safe_numeric(featured_df.get('ep_next_num', featured_df.get('ep_next', 2.0)))
     
-    # Force Blended EP as primary optimization target (70% Average Poisson, 30% FPL)
-    featured_df['blended_ep'] = (featured_df['poisson_ep'] * 0.7 + featured_df['fpl_ep'] * 0.3).round(2)
-    ep_col = 'blended_ep'
-=======
+    # Use Global Model Selection (Consensus) - passing weeks_ahead to handle horizon
+    active_models = st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])
+    featured_df = calculate_consensus_ep(featured_df, active_models, horizon=weeks_ahead)
+    # Use average consensus for per-GW transfer scores
     ep_col = 'avg_consensus_ep'
->>>>>>> Stashed changes
-=======
-    ep_col = 'avg_consensus_ep'
->>>>>>> Stashed changes
+    
+    featured_df['selected_by_percent'] = safe_numeric(featured_df['selected_by_percent'])
+    featured_df['now_cost'] = safe_numeric(featured_df['now_cost'], 5)
+    featured_df['minutes'] = safe_numeric(featured_df.get('minutes', pd.Series([0]*len(featured_df))))
+    featured_df['form'] = safe_numeric(featured_df.get('form', pd.Series([0]*len(featured_df))))
+    featured_df['total_points'] = safe_numeric(featured_df.get('total_points', pd.Series([0]*len(featured_df))))
+    
+    # Calculate transfer scores
+    calculate_transfer_scores(featured_df, ep_col, strategy)
+    
+    st.markdown('<p class="section-title">Transfer Recommendations</p>', unsafe_allow_html=True)
+    st.caption("Score 0-10: higher = better player to bring IN")
     
     if has_real_team and your_squad:
         your_squad_set = set(your_squad)
         current_squad_df = featured_df[featured_df['id'].isin(your_squad_set)].copy()
         available_df = featured_df[~featured_df['id'].isin(your_squad_set)].copy()
         
-        # Recommendations logic
+        # Team value tracker
         render_team_value_tracker(current_squad_df, bank)
+        
+        # Budget breakdown
         render_budget_breakdown(current_squad_df, ep_col)
+        
+        # Transfer recommendations
         render_transfer_recommendations(current_squad_df, available_df, ep_col)
+        
+        # AI transfer plan
         render_ai_transfer_plan(current_squad_df, available_df, ep_col, free_transfers, bank)
     else:
-        st.error("Could not find squad for this Team ID. Ensure it is correct and public.")
+        available_df = featured_df.copy()
+        current_squad_df = pd.DataFrame()
+    
+    # Position recommendations
+    render_position_recommendations(available_df, ep_col)
+    
+    # Top 10 overall
+    render_top_picks(available_df, ep_col)
     
     
     # Points projection
@@ -227,72 +184,43 @@ def analyze_transfers(processor, players_df, fetcher, team_id, weeks_ahead, free
 
 
 def calculate_transfer_scores(df, ep_col, strategy):
-    """Calculate transfer scores (v2): uncapped, fixture-aware, and horizon-consistent."""
-    # 1. Non-linear EP Normalization (Power of 1.5 to spread the elite)
-    # Uses average_consensus_ep for consistent multi-GW comparison
+    """Calculate transfer scores based on strategy."""
+    # Normalize EP
     ep_min = df[ep_col].min()
     ep_max = df[ep_col].max()
     ep_range = max(ep_max - ep_min, 0.1)
-    df['ep_norm'] = ((df[ep_col] - ep_min) / ep_range) ** 1.5 * 10
+    df['ep_norm'] = (df[ep_col] - ep_min) / ep_range * 10
     
-    # 2. Fixture Ease Normalization (0-10 scale)
-    # fixture_ease is already calculated per team based on the horizon
-    df['ease_norm'] = df['fixture_ease'] * 10
-    
-    # 3. Normalize form
+    # Normalize form
     form_max = df['form'].max()
     df['form_norm'] = (df['form'] / max(form_max, 0.1)) * 10
     
-    # 4. Non-linear Value Normalization
-    # avg_consensus_ep / price * 10 (base value) then power scaled
+    # Normalize value
     df['value_raw'] = df[ep_col] / df['now_cost'].clip(lower=4)
-    v_min = df['value_raw'].min()
     v_max = df['value_raw'].max()
-    v_range = max(v_max - v_min, 0.1)
-    df['value_norm'] = ((df['value_raw'] - v_min) / v_range) ** 1.2 * 10
+    df['value_norm'] = (df['value_raw'] / max(v_max, 0.1)) * 10
     
-    # 5. Minutes reliability (Capped at 2500 for better scale)
-    df['mins_norm'] = (df['minutes'].clip(upper=2500) / 2500) * 10
+    # Minutes reliability
+    df['mins_norm'] = (df['minutes'].clip(upper=2000) / 2000) * 10
     
-    # 6. Differential
+    # Differential
     df['diff_norm'] = (100 - df['selected_by_percent'].clip(upper=100)) / 10
     
-    # Calculate based on strategy (v2 weights including Ease)
+    # Calculate based on strategy
     if strategy == 'Maximum Points':
-        df['transfer_score'] = (
-            df['ep_norm'] * 0.50 + 
-            df['ease_norm'] * 0.15 + 
-            df['form_norm'] * 0.20 + 
-            df['mins_norm'] * 0.15
-        )
+        df['transfer_score'] = df['ep_norm'] * 0.55 + df['form_norm'] * 0.25 + df['mins_norm'] * 0.20
     elif strategy == 'Differential':
-        df['transfer_score'] = (
-            df['ep_norm'] * 0.30 + 
-            df['ease_norm'] * 0.10 + 
-            df['diff_norm'] * 0.35 + 
-            df['form_norm'] * 0.15 + 
-            df['mins_norm'] * 0.10
-        )
+        df['transfer_score'] = df['ep_norm'] * 0.35 + df['diff_norm'] * 0.35 + df['form_norm'] * 0.15 + df['mins_norm'] * 0.15
     elif strategy == 'Value':
-        df['transfer_score'] = (
-            df['value_norm'] * 0.45 + 
-            df['ep_norm'] * 0.20 + 
-            df['ease_norm'] * 0.15 + 
-            df['mins_norm'] * 0.20
-        )
+        df['transfer_score'] = df['value_norm'] * 0.45 + df['ep_norm'] * 0.30 + df['mins_norm'] * 0.25
     else:  # Balanced
-        df['transfer_score'] = (
-            df['ep_norm'] * 0.30 + 
-            df['ease_norm'] * 0.15 + 
-            df['form_norm'] * 0.15 + 
-            df['value_norm'] * 0.20 + 
-            df['mins_norm'] * 0.10 + 
-            df['diff_norm'] * 0.10
-        )
+        df['transfer_score'] = df['ep_norm'] * 0.35 + df['form_norm'] * 0.20 + df['value_norm'] * 0.20 + df['mins_norm'] * 0.15 + df['diff_norm'] * 0.10
     
-    # UNCAPPED (v2): We no longer min-max scale the final score to 0-10.
-    # This allows elite players to stand out. We only round it.
-    df['transfer_score'] = df['transfer_score'].round(1)
+    # Scale to 0-10
+    ts_min = df['transfer_score'].min()
+    ts_max = df['transfer_score'].max()
+    ts_range = max(ts_max - ts_min, 0.1)
+    df['transfer_score'] = ((df['transfer_score'] - ts_min) / ts_range * 10).round(1)
 
 
 def render_team_value_tracker(current_squad_df, bank):
@@ -319,7 +247,6 @@ def render_budget_breakdown(current_squad_df, ep_col):
     
     pos_spend = current_squad_df.groupby('position')['now_cost'].sum().to_dict()
     pos_order = ['GKP', 'DEF', 'MID', 'FWD']
-    pos_colors = {'GKP': '#3b82f6', 'DEF': '#22c55e', 'MID': '#f59e0b', 'FWD': '#ef4444'}
     
     bud1, bud2 = st.columns([1, 2])
     
@@ -328,7 +255,7 @@ def render_budget_breakdown(current_squad_df, ep_col):
         fig_pie = go.Figure(data=[go.Pie(
             labels=[p for p in pos_order if p in pos_spend],
             values=[pos_spend.get(p, 0) for p in pos_order if p in pos_spend],
-            marker_colors=[pos_colors[p] for p in pos_order if p in pos_spend],
+            marker_colors=[POSITION_COLORS[p] for p in pos_order if p in pos_spend],
             hole=0.4,
             textinfo='label+percent',
             textfont=dict(color='#fff')
@@ -375,25 +302,8 @@ def render_transfer_recommendations(current_squad_df, available_df, ep_col):
     if not current_squad_df.empty:
         st.markdown("**Recommended OUT** (lowest score in your squad)", unsafe_allow_html=True)
         out_candidates = current_squad_df.nsmallest(5, 'transfer_score')
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-        out_display = out_candidates[['web_name', 'team_name', 'position', 'now_cost', 'poisson_ep', 'fpl_ep', 'blended_ep', 'form', 'transfer_score']].copy()
-        out_display.columns = ['Player', 'Team', 'Pos', 'Price', 'Poisson', 'FPL', 'Blend', 'Form', 'Score']
-=======
-=======
->>>>>>> Stashed changes
-        
-        # Standardize for Avg display
-        out_display = out_candidates[['web_name', 'team_name', 'position', 'now_cost', 'value_score', 'fixture_ease_scaled', 'avg_consensus_ep', 'form', 'transfer_score']].copy()
-        out_display.columns = [
-            'Player', 'Team', 'Pos', 'Price', 'Value', 'Ease', 
-            get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl']), is_avg=True), 
-            'Form', 'Score'
-        ]
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
+        out_display = out_candidates[['web_name', 'team_name', 'position', 'now_cost', 'poisson_ep', 'fpl_ep', 'consensus_ep', 'form', 'transfer_score']].copy()
+        out_display.columns = ['Player', 'Team', 'Pos', 'Price', 'Poisson xP', 'FPL xP', get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])), 'Form', 'Score']
         st.dataframe(style_df_with_injuries(out_display), hide_index=True, use_container_width=True)
         
         st.markdown("**Recommended IN** (best available)", unsafe_allow_html=True)
@@ -466,15 +376,13 @@ def render_ai_transfer_plan(current_squad_df, available_df, ep_col, free_transfe
                     'out_team': out_player.get('team_name', ''),
                     'out_pos': pos,
                     'out_price': out_cost,
-                    'out_ep': out_player['consensus_ep'],      # TOTAL for optimization math
-                    'out_avg_ep': out_player[ep_col],          # AVG for display
+                    'out_ep': out_player[ep_col],
                     'out_score': out_player['transfer_score'],
                     'in_name': best_in['web_name'],
                     'in_team': best_in.get('team_name', ''),
                     'in_pos': pos,
                     'in_price': best_in['now_cost'],
-                    'in_ep': best_in['consensus_ep'],          # TOTAL for optimization math
-                    'in_avg_ep': best_in[ep_col],              # AVG for display
+                    'in_ep': best_in[ep_col],
                     'in_score': best_in['transfer_score'],
                 })
                 used_in_ids.add(best_in['id'])
@@ -518,7 +426,7 @@ def render_ai_transfer_plan(current_squad_df, available_df, ep_col, free_transfe
             hit_label = f" + {ep['hits']} hit" if ep['hits'] > 0 else ""
             comp_rows.append({
                 'Transfers': f"{ep['n']} ({free_label}{hit_label})",
-                'EP Gain': round(ep['ep_gain'], 1),
+                'xP Gain': round(ep['ep_gain'], 1),
                 'Hit Cost': f"-{ep['hit_cost']}" if ep['hit_cost'] > 0 else "0",
                 'Net Value': round(ep['net_value'], 1),
                 'Recommended': ">> YES" if is_best else "",
@@ -543,30 +451,14 @@ def render_ai_transfer_plan(current_squad_df, available_df, ep_col, free_transfe
             with tc1:
                 st.markdown(f'''<div class="rule-card">
                     <div style="color:#ef4444;font-weight:600;">OUT: {t['out_name']}</div>
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-                    <div class="rule-label">{t['out_team']} | {t['out_pos']} | {t['out_price']:.1f}m | Blend {t['out_ep']:.2f}</div>
-=======
-                    <div class="rule-label">{t['out_team']} | {t['out_pos']} | {t['out_price']:.1f}m | {get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl']), is_avg=True)} {t['out_avg_ep']:.2f}</div>
->>>>>>> Stashed changes
-=======
-                    <div class="rule-label">{t['out_team']} | {t['out_pos']} | {t['out_price']:.1f}m | {get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl']), is_avg=True)} {t['out_avg_ep']:.2f}</div>
->>>>>>> Stashed changes
+                    <div class="rule-label">{t['out_team']} | {t['out_pos']} | {t['out_price']:.1f}m | {get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl']))} {t['out_ep']:.2f}</div>
                 </div>''', unsafe_allow_html=True)
             with tc2:
                 st.markdown('<div style="text-align:center;padding-top:1rem;color:#fff;font-size:1.5rem;">></div>', unsafe_allow_html=True)
             with tc3:
                 st.markdown(f'''<div class="rule-card">
                     <div style="color:#22c55e;font-weight:600;">IN: {t['in_name']}</div>
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-                    <div class="rule-label">{t['in_team']} | {t['in_pos']} | {t['in_price']:.1f}m | Blend {t['in_ep']:.2f}</div>
-=======
-                    <div class="rule-label">{t['in_team']} | {t['in_pos']} | {t['in_price']:.1f}m | {get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl']), is_avg=True)} {t['in_avg_ep']:.2f}</div>
->>>>>>> Stashed changes
-=======
-                    <div class="rule-label">{t['in_team']} | {t['in_pos']} | {t['in_price']:.1f}m | {get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl']), is_avg=True)} {t['in_avg_ep']:.2f}</div>
->>>>>>> Stashed changes
+                    <div class="rule-label">{t['in_team']} | {t['in_pos']} | {t['in_price']:.1f}m | {get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl']))} {t['in_ep']:.2f}</div>
                 </div>''', unsafe_allow_html=True)
 
         # Summary
@@ -590,7 +482,7 @@ def render_ai_transfer_plan(current_squad_df, available_df, ep_col, free_transfe
             f'<span style="color:{spend_color};font-weight:600;">{net_spend:+.1f}m</span>'
             f' | <span style="color:#888;">Bank After:</span> '
             f'<span style="color:#1d1d1f;font-weight:600;">{bank - net_spend:.1f}m</span>'
-            f' | <span style="color:#888;">EP Gain:</span> '
+            f' | <span style="color:#888;">xP Gain:</span> '
             f'<span style="color:{ep_color};font-weight:600;">{ep_gain:+.1f}</span>'
             f'{hit_html}'
             f' | <span style="color:#888;">Net:</span> '
@@ -610,23 +502,8 @@ def render_position_recommendations(available_df, ep_col):
         pos_df = available_df[available_df['position'] == pos].nlargest(5, 'transfer_score')
         if not pos_df.empty:
             st.markdown(f"**{pos} Recommendations**")
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-            display_df = pos_df[['web_name', 'team_name', 'now_cost', 'poisson_ep', 'fpl_ep', 'blended_ep', 'form', 'selected_by_percent', 'transfer_score']].copy()
-            display_df.columns = ['Player', 'Team', 'Price', 'Poisson', 'FPL', 'Blend', 'Form', 'Owned%', 'Score']
-=======
-=======
->>>>>>> Stashed changes
-            display_df = pos_df[['web_name', 'team_name', 'now_cost', 'value_score', 'fixture_ease_scaled', 'avg_consensus_ep', 'form', 'selected_by_percent', 'transfer_score']].copy()
-            display_df.columns = [
-                'Player', 'Team', 'Price', 'Value', 'Ease', 
-                get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl']), is_avg=True), 
-                'Form', 'Owned%', 'Score'
-            ]
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
+            display_df = pos_df[['web_name', 'team_name', 'now_cost', 'poisson_ep', 'fpl_ep', 'consensus_ep', 'form', 'selected_by_percent', 'transfer_score']].copy()
+            display_df.columns = ['Player', 'Team', 'Price', 'Poisson xP', 'FPL xP', get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])), 'Form', 'Owned%', 'Score']
             st.dataframe(style_df_with_injuries(display_df), hide_index=True, use_container_width=True)
 
 
@@ -634,23 +511,8 @@ def render_top_picks(available_df, ep_col):
     """Render top 10 overall picks."""
     st.markdown('<p class="section-title">Top 10 Overall Picks</p>', unsafe_allow_html=True)
     top_10 = available_df.nlargest(10, 'transfer_score')
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-    top_display = top_10[['web_name', 'team_name', 'position', 'now_cost', 'poisson_ep', 'fpl_ep', 'blended_ep', 'form', 'selected_by_percent', 'transfer_score']].copy()
-    top_display.columns = ['Player', 'Team', 'Pos', 'Price', 'Poisson', 'FPL', 'Blend', 'Form', 'Owned%', 'Score']
-=======
-=======
->>>>>>> Stashed changes
-    top_display = top_10[['web_name', 'team_name', 'position', 'now_cost', 'value_score', 'fixture_ease_scaled', 'avg_consensus_ep', 'form', 'selected_by_percent', 'transfer_score']].copy()
-    top_display.columns = [
-        'Player', 'Team', 'Pos', 'Price', 'Value', 'Ease', 
-        get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl']), is_avg=True), 
-        'Form', 'Owned%', 'Score'
-    ]
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
+    top_display = top_10[['web_name', 'team_name', 'position', 'now_cost', 'poisson_ep', 'fpl_ep', 'consensus_ep', 'form', 'selected_by_percent', 'transfer_score']].copy()
+    top_display.columns = ['Player', 'Team', 'Pos', 'Price', 'Poisson xP', 'FPL xP', get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])), 'Form', 'Owned%', 'Score']
     st.dataframe(style_df_with_injuries(top_display), hide_index=True, use_container_width=True)
 
 
@@ -682,7 +544,7 @@ def render_points_projection(current_squad_df, available_df, ep_col):
         barmode='group',
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
         margin=dict(l=40, r=40, t=40, b=40),
-        yaxis_title='Expected Points'
+        yaxis_title='xP'
     )
     st.plotly_chart(fig_proj, use_container_width=True, key='opt_points_projection')
 

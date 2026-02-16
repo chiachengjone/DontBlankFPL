@@ -9,6 +9,7 @@ from utils.helpers import (
     get_player_fixtures,
     get_injury_status,
     get_price_change_info,
+    get_consensus_label,
     FDR_COLORS
 )
 
@@ -36,9 +37,10 @@ def render_player_detail_card(player_row: Dict, processor, players_df: pd.DataFr
         ''', unsafe_allow_html=True)
     
     with col2:
-        ep = safe_numeric(pd.Series([player_row.get('expected_points', player_row.get('ep_next', 0))])).iloc[0]
+        # Use consensus_ep (Model xP) - the weighted blend of ML/Poisson/FPL
+        ep = safe_numeric(pd.Series([player_row.get('consensus_ep', player_row.get('expected_points_poisson', 0))])).iloc[0]
         form = safe_numeric(pd.Series([player_row.get('form', 0)])).iloc[0]
-        st.metric("Expected Points", f"{ep:.1f}")
+        st.metric(get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])), f"{ep:.1f}")
         st.metric("Form", f"{form:.1f}")
     
     with col3:
@@ -107,7 +109,8 @@ def render_player_detail_card(player_row: Dict, processor, players_df: pd.DataFr
 
 def render_captain_pick_card(player_row: Dict, rank: int = 1):
     """Render captain pick card."""
-    ep = safe_numeric(pd.Series([player_row.get('expected_points', player_row.get('ep_next', 0))])).iloc[0]
+    # Use consensus_ep (Model xP) - the weighted blend of ML/Poisson/FPL
+    ep = safe_numeric(pd.Series([player_row.get('consensus_ep', player_row.get('expected_points_poisson', 0))])).iloc[0]
     form = safe_numeric(pd.Series([player_row.get('form', 0)])).iloc[0]
     
     medal = '#1' if rank == 1 else '#2' if rank == 2 else '#3' if rank == 3 else f'#{rank}'

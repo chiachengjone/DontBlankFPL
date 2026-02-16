@@ -11,8 +11,6 @@ from dataclasses import dataclass
 import warnings
 warnings.filterwarnings('ignore')
 
-from config import ML_BASE_UNCERTAINTY, ML_LOW_EP_UNCERTAINTY, ML_LOW_EP_THRESHOLD
-
 # Lazy imports - these are loaded only when ML is actually used
 _sklearn_loaded = False
 _xgboost_loaded = False
@@ -314,7 +312,7 @@ class MLPredictor:
         
         # Add base uncertainty (FPL predictions have inherent variance)
         # Players with lower predicted points have higher relative uncertainty
-        base_uncertainty = ML_BASE_UNCERTAINTY + ML_LOW_EP_UNCERTAINTY * np.maximum(0, ML_LOW_EP_THRESHOLD - mean_pred) / ML_LOW_EP_THRESHOLD
+        base_uncertainty = 0.5 + 0.3 * np.maximum(0, 4 - mean_pred) / 4
         
         # Combined uncertainty
         std_pred = np.sqrt(model_std**2 + base_uncertainty**2)
@@ -330,21 +328,12 @@ class MLPredictor:
         Predict points for next N gameweeks with confidence intervals.
         
         Returns:
-            Dict mapping player_id to PredictionResult.
-            Returns empty dict if data is insufficient for training.
+            Dict mapping player_id to PredictionResult
         """
         df, feature_cols = self.prepare_data()
         
-        if df.empty or len(feature_cols) == 0:
-            return {}
-        
         # Prepare features
         X = df[feature_cols].fillna(0).values
-        
-        # Need enough samples to train reliably
-        if len(X) < 20:
-            return {}
-        
         X_scaled = self.scaler.fit_transform(X)
         
         # Target: use raw FPL ep_next (ep_next_num is preserved before Poisson blending)

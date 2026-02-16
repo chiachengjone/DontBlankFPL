@@ -17,8 +17,6 @@ import numpy as np
 import pandas as pd
 from scipy.stats import poisson, binom
 
-<<<<<<< Updated upstream
-=======
 from config import (
     GOAL_POINTS as GOAL_PTS,
     ASSIST_POINTS as ASSIST_PTS,
@@ -38,37 +36,9 @@ from config import (
     MAX_K_ASSISTS,
     CLEAN_SHEET_PROBABILITY_CAP,
     BONUS_POINT_POSITION_MULTIPLIER,
-    TEAM_ATTACK_CORRELATION,
-    INJURY_CURVES,
-    CBIT_DECAY_HALFLIFE_GW,
 )
 
->>>>>>> Stashed changes
 logger = logging.getLogger(__name__)
-
-# ── FPL 2025/26 Scoring Rules ──
-GOAL_PTS = {"GKP": 10, "DEF": 6, "MID": 5, "FWD": 4}
-ASSIST_PTS = 3
-CS_PTS = {"GKP": 4, "DEF": 4, "MID": 1, "FWD": 0}
-APPEARANCE_PTS = {60: 2, 1: 1}  # 60+ mins = 2pts, 1-59 = 1pt
-CBIT_THRESHOLD = {"GKP": 12, "DEF": 10, "MID": 12, "FWD": 12}
-CBIT_BONUS = 2
-GOALS_CONCEDED_PER_2 = -1  # GKP/DEF lose 1pt per 2 goals conceded
-SAVE_PTS = 3  # 3 saves = 1pt (for goalkeepers)
-
-# Home/Away multipliers (based on historical EPL data)
-HOME_ADVANTAGE_ATTACK = 1.15  # ~15% more goals at home
-HOME_ADVANTAGE_DEFENSE = 0.90  # ~10% fewer goals conceded at home
-AWAY_MULTIPLIER_ATTACK = 0.87
-AWAY_MULTIPLIER_DEFENSE = 1.10
-
-# League average benchmarks (updated each season)
-LEAGUE_AVG_XG_PER_MATCH = 1.35  # ~2.7 goals per game split between teams
-LEAGUE_AVG_XGA_PER_MATCH = 1.35
-
-# Maximum k for Poisson calculations (player rarely scores 5+ in a match)
-MAX_K_GOALS = 5
-MAX_K_ASSISTS = 4
 
 
 class PoissonEPEngine:
@@ -215,7 +185,7 @@ class PoissonEPEngine:
         # P(0 goals) = e^(-λ)
         p_cs = poisson.pmf(0, max(lambda_opponent, 0.01))
         
-        return min(p_cs, 0.6)  # Cap at 60% - even best teams rarely > 50%
+        return min(p_cs, CLEAN_SHEET_PROBABILITY_CAP)  # Cap CS probability
     
     def calculate_goals_conceded_penalty(
         self,
@@ -315,70 +285,6 @@ class PoissonEPEngine:
         
         return p_plays, p_60_plus
     
-    # ------------------------------------------------------------------
-    # Correlated (Bivariate) Poisson Model
-    # ------------------------------------------------------------------
-    def _bivariate_poisson_joint(
-        self,
-        lambda_g: float,
-        lambda_a: float,
-        rho: float = TEAM_ATTACK_CORRELATION,
-        max_k: int = MAX_K_GOALS,
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Approximate bivariate Poisson joint distribution via a shared
-        latent team-attack factor (Holgate's model).
-
-        Model:
-            X_g = Y_g + Z   (goals)
-            X_a = Y_a + Z   (assists)
-        where Y_g ~ Pois(λ_g - ρ), Y_a ~ Pois(λ_a - ρ), Z ~ Pois(ρ)
-
-        When ρ = 0 this degenerates to the independent Poisson model.
-
-        Returns:
-            Tuple (goal_marginal_probs, assist_marginal_probs) where
-            each array has shape (max_k+1,) **but** the engine also
-            stores the expected "cluster bonus" adjustment on self.
-        """
-        # Ensure ρ doesn't exceed either marginal
-        rho = max(0.0, min(rho, lambda_g, lambda_a))
-
-        lam_g_ind = max(lambda_g - rho, 0.0)
-        lam_a_ind = max(lambda_a - rho, 0.0)
-
-        k = np.arange(max_k + 1)
-
-        # Independent components
-        p_yg = poisson.pmf(k, lam_g_ind) if lam_g_ind > 0 else np.zeros(max_k + 1)
-        p_ya = poisson.pmf(k, lam_a_ind) if lam_a_ind > 0 else np.zeros(max_k + 1)
-        p_z  = poisson.pmf(k, rho) if rho > 0 else np.zeros(max_k + 1)
-
-        if lam_g_ind <= 0:
-            p_yg[0] = 1.0
-        if lam_a_ind <= 0:
-            p_ya[0] = 1.0
-        if rho <= 0:
-            p_z[0] = 1.0
-
-        # Convolve Y_g + Z  and  Y_a + Z  to get marginals
-        goal_probs = np.convolve(p_yg, p_z)[:max_k + 1]
-        assist_probs = np.convolve(p_ya, p_z)[:max_k + 1]
-
-        # Store the covariance-driven "haul uplift" (P(goal ≥ 1 AND assist ≥ 1))
-        # compared to the independence assumption, for downstream bonus calc.
-        p_joint_haul_indep = (1 - poisson.pmf(0, lambda_g)) * (1 - poisson.pmf(0, lambda_a)) if lambda_g > 0 and lambda_a > 0 else 0.0
-        # Under bivariate model, compute exact P(X_g>=1, X_a>=1)
-        p_both_zero = goal_probs[0] * assist_probs[0]  # approx (corr changes this)
-        # Better: use the sum of joint PMF entries where g>=1,a>=1
-        # For efficiency, use inclusion-exclusion:
-        p_g_zero = goal_probs[0]
-        p_a_zero = assist_probs[0]
-        p_joint_haul_corr = max(1.0 - p_g_zero - p_a_zero + p_g_zero * p_a_zero, 0.0)
-        self._last_haul_uplift = max(p_joint_haul_corr - p_joint_haul_indep, 0.0)
-
-        return goal_probs, assist_probs
-
     def calculate_bonus_expected(
         self,
         xg_lambda: float,
@@ -410,7 +316,7 @@ class PoissonEPEngine:
         # 2+ goals + assist(s): ~3.0 avg bonus (max)
         
         # Position adjustments (forwards need more for bonus)
-        pos_mult = {"GKP": 1.5, "DEF": 1.3, "MID": 1.0, "FWD": 0.85}.get(position, 1.0)
+        pos_mult = BONUS_POINT_POSITION_MULTIPLIER.get(position, 1.0)
         
         expected_bonus = (
             # Single goal scenarios
@@ -427,18 +333,13 @@ class PoissonEPEngine:
             p_1g * p_2a_plus * 2.2 * pos_mult
         )
         
-        # Add haul-uplift from correlated model (if computed)
-        haul_uplift = getattr(self, '_last_haul_uplift', 0.0)
-        expected_bonus += haul_uplift * 1.5 * pos_mult  # correlated hauls → extra bonus
-
         return min(expected_bonus, 3.0)  # Cap at 3 bonus points
 
     def calculate_single_fixture_xp(
         self,
         player: Dict,
         opponent_stats: Dict,
-        is_home: bool,
-        fixture_index: int = 0
+        is_home: bool
     ) -> Dict[str, float]:
         """
         Calculate expected points for a single fixture.
@@ -465,26 +366,13 @@ class PoissonEPEngine:
         clearances_per90 = float(player.get('clearances_per90', 0) or 0)
         
         # Fallback: estimate CBIT from clean sheets for defenders
-        # v4: use decay-weighted recent CS ratio when per-GW history exists
         if position in ('GKP', 'DEF') and tackles_per90 == 0:
-            # Try per-GW CBIT history first (populated by enrichment pipeline)
-            cbit_history = player.get('cbit_per_gw_history')  # list of floats
-            if cbit_history and isinstance(cbit_history, (list, np.ndarray)) and len(cbit_history) > 0:
-                # Exponential decay: weight recent GWs more heavily
-                n = len(cbit_history)
-                decay = np.exp(-np.log(2) / CBIT_DECAY_HALFLIFE_GW * np.arange(n)[::-1])
-                tackles_per90 = float(np.dot(cbit_history, decay) / decay.sum())
-                interceptions_per90 = tackles_per90 * 0.7  # rough ratio
-                clearances_per90 = tackles_per90 * 1.2 if position == 'DEF' else tackles_per90 * 0.3
-            else:
-                # Static fallback (legacy)
-                cs_ratio = float(player.get('clean_sheets', 0) or 0) / max(float(player.get('starts', 1) or 1), 1)
-                tackles_per90 = 3.0 if cs_ratio > 0.3 else 2.0
-                interceptions_per90 = 2.5 if cs_ratio > 0.3 else 1.5
-                clearances_per90 = 4.0 if position == 'DEF' else 1.0
+            cs_ratio = float(player.get('clean_sheets', 0) or 0) / max(float(player.get('starts', 1) or 1), 1)
+            tackles_per90 = 3.0 if cs_ratio > 0.3 else 2.0
+            interceptions_per90 = 2.5 if cs_ratio > 0.3 else 1.5
+            clearances_per90 = 4.0 if position == 'DEF' else 1.0
         
         injury_status = player.get('status', 'a')
-        news = str(player.get('news', '')).lower()
         
         # Use granular chance_of_playing if available, else map from status
         cop_raw = player.get('chance_of_playing_next_round', None)
@@ -493,20 +381,6 @@ class PoissonEPEngine:
         else:
             injury_cop = {"a": 100, "d": 50, "i": 10, "s": 0, "n": 0, "u": 0}
             cop = injury_cop.get(injury_status, 80)
-            
-        # ── Injury recovery curve (v4 — injury-type-specific) ──
-        if cop < 100:
-            # Classify injury type from news keywords
-            curve = INJURY_CURVES['default']
-            for keyword, kw_curve in INJURY_CURVES.items():
-                if keyword != 'default' and keyword in news:
-                    curve = kw_curve
-                    break
-
-            # Apply curve based on fixture_index
-            idx = min(fixture_index, 3)
-            cop = cop * curve[idx] / max(curve[0], 0.01) if curve[0] > 0 else curve[idx] * 100
-            cop = max(0.0, min(cop, 100.0))
         
         # Opponent stats
         opp_xga = float(opponent_stats.get('xGA_per90', self._league_avg_xga) or self._league_avg_xga)
@@ -519,35 +393,21 @@ class PoissonEPEngine:
         )
         xp_appearance = p_plays * (p_60_plus * 2 + (1 - p_60_plus) * 1)
         
-        # ── Attacking Points (Goals) — Bivariate Poisson ──
+        # ── Attacking Points (Goals) ──
         lambda_attack = self.calculate_attack_lambda(
             xg_per90, opp_xga, is_home, minutes_per_game
         )
-        # ── Creative Points (Assists) — Bivariate Poisson ──
+        xp_goals, goal_probs = self.poisson_expected_points(
+            lambda_attack, GOAL_PTS.get(position, 4), MAX_K_GOALS
+        )
+        
+        # ── Creative Points (Assists) ──
         lambda_creative = self.calculate_creative_lambda(
             xa_per90, opp_xg, is_home, minutes_per_game
         )
-
-        # Use bivariate (correlated) Poisson when both lambdas > 0
-        if lambda_attack > 0 and lambda_creative > 0 and TEAM_ATTACK_CORRELATION > 0:
-            goal_probs, assist_probs = self._bivariate_poisson_joint(
-                lambda_attack, lambda_creative,
-                rho=TEAM_ATTACK_CORRELATION,
-                max_k=MAX_K_GOALS,
-            )
-            k_goals = np.arange(len(goal_probs))
-            xp_goals = float(np.sum(goal_probs * k_goals)) * GOAL_PTS.get(position, 4)
-            k_assists = np.arange(len(assist_probs))
-            xp_assists = float(np.sum(assist_probs * k_assists)) * ASSIST_PTS
-        else:
-            # Fallback: independent Poisson
-            self._last_haul_uplift = 0.0
-            xp_goals, goal_probs = self.poisson_expected_points(
-                lambda_attack, GOAL_PTS.get(position, 4), MAX_K_GOALS
-            )
-            xp_assists, assist_probs = self.poisson_expected_points(
-                lambda_creative, ASSIST_PTS, MAX_K_ASSISTS
-            )
+        xp_assists, assist_probs = self.poisson_expected_points(
+            lambda_creative, ASSIST_PTS, MAX_K_ASSISTS
+        )
         
         # ── Clean Sheet Points ──
         cs_pts = CS_PTS.get(position, 0)
@@ -636,12 +496,12 @@ class PoissonEPEngine:
             'xp_cbit': 0.0, 'xp_bonus': 0.0, 'fixture_count': len(fixtures)
         }
         
-        for i, fixture in enumerate(fixtures):
+        for fixture in fixtures:
             is_home = fixture.get('team_h') == player_team_id
             opponent_id = fixture.get('team_a') if is_home else fixture.get('team_h')
             opponent_stats = team_stats_map.get(opponent_id, {})
             
-            fx_xp = self.calculate_single_fixture_xp(player, opponent_stats, is_home, fixture_index=i)
+            fx_xp = self.calculate_single_fixture_xp(player, opponent_stats, is_home)
             
             # Sum components
             for key in total_breakdown:
@@ -804,14 +664,6 @@ def calculate_poisson_ep_for_dataframe(
                     "Poisson engine: FDR fallback for %d team(s): %s",
                     len(fdr_fallback_teams), ', '.join(fdr_fallback_teams),
                 )
-                # Surface to UI via session-state so the app can show a warning
-                try:
-                    import streamlit as _st
-                    status = _st.session_state.get('_understat_status', {})
-                    status['fdr_fallback_teams'] = fdr_fallback_teams
-                    _st.session_state['_understat_status'] = status
-                except Exception:
-                    pass
     else:
         reason = (
             "team_stats is None" if team_stats is None
@@ -924,13 +776,13 @@ def calculate_poisson_ep_for_dataframe(
             first_opp_xga = LEAGUE_AVG_XGA_PER_MATCH
             first_opp_xg = LEAGUE_AVG_XG_PER_MATCH
         
-        for i, fx in enumerate(player_fixtures):
+        for fx in player_fixtures:
             opponent_dict = {
                 'xGA_per90': fx['opp_xGA_per90'],
                 'xG_per90': fx['opp_xG_per90'],
             }
             fx_result = engine.calculate_single_fixture_xp(
-                player_dict, opponent_dict, fx['is_home'], fixture_index=i
+                player_dict, opponent_dict, fx['is_home']
             )
             total_xp += fx_result.get('xp_total', 0)
             total_xp_goals += fx_result.get('xp_goals', 0)

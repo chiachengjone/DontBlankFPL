@@ -11,11 +11,6 @@ from copy import deepcopy
 import warnings
 warnings.filterwarnings('ignore')
 
-from config import (
-    MAX_BUDGET, CAPTAIN_MULTIPLIER,
-    GA_DIVERSITY_BONUS, GA_BUDGET_BONUS, GA_MIN_FITNESS,
-)
-
 
 @dataclass
 class GeneticConfig:
@@ -85,7 +80,7 @@ class GeneticOptimizer:
         # Ensure numeric
         df['now_cost'] = pd.to_numeric(df['now_cost'], errors='coerce').fillna(5.0)
         df['expected_points'] = pd.to_numeric(
-            df.get('expected_points', df.get('ep_next', 2.0)),
+            df.get('consensus_ep', df.get('expected_points', df.get('ep_next', 2.0))),
             errors='coerce'
         ).fillna(2.0)
         
@@ -236,9 +231,9 @@ class GeneticOptimizer:
             player = self.player_lookup.get(pid, {})
             ep = player.get('expected_points', 2.0)
             
-            # Captain gets multiplier
+            # Captain gets 1.25x multiplier
             if pid == captain:
-                ep *= CAPTAIN_MULTIPLIER
+                ep *= 1.25
             
             total_ep += ep
         
@@ -248,14 +243,14 @@ class GeneticOptimizer:
             team = self.player_lookup.get(pid, {}).get('team', 0)
             team_counts[team] = team_counts.get(team, 0) + 1
         
-        diversity_bonus = len(team_counts) * GA_DIVERSITY_BONUS
+        diversity_bonus = len(team_counts) * 0.5  # More teams = more diverse
         
         # Bonus for budget efficiency
         total_cost = sum(self.player_lookup.get(pid, {}).get('now_cost', 5) for pid in squad)
-        remaining_budget = MAX_BUDGET - total_cost
-        budget_bonus = remaining_budget * GA_BUDGET_BONUS
+        remaining_budget = 100.0 - total_cost
+        budget_bonus = remaining_budget * 0.1  # Small bonus for keeping bank
         
-        fitness = max(total_ep + diversity_bonus + budget_bonus, GA_MIN_FITNESS)
+        fitness = total_ep + diversity_bonus + budget_bonus
         
         return fitness
     

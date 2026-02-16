@@ -3,7 +3,7 @@
 import pandas as pd
 import numpy as np
 import unicodedata
-from typing import Dict, List
+from typing import Any, Dict, List, Optional, Union
 
 from config import (
     OWNERSHIP_TEMPLATE_THRESHOLD,
@@ -12,6 +12,11 @@ from config import (
     ROTATION_SAFE_MINUTES_PCT,
     ROTATION_MODERATE_PCT,
     UNAVAILABLE_STATUSES,
+    FDR_COLOR_MAP,
+    MODEL_WEIGHTS,
+    ML_FALLBACK_RATIO,
+    PRICE_RISE_NET_TRANSFERS,
+    PRICE_FALL_NET_TRANSFERS,
 )
 
 
@@ -60,15 +65,26 @@ def search_players(df: pd.DataFrame, query: str, limit: int = 10) -> pd.DataFram
     return matches.head(limit)
 
 
-def safe_numeric(series, default=0):
-    """Safely convert series or scalar to numeric, handling NaN values."""
+def safe_numeric(
+    series: Union[pd.Series, pd.Index, np.ndarray, Any],
+    default: float = 0,
+) -> Union[pd.Series, float]:
+    """Safely convert *series* or a scalar to numeric, replacing NaN with *default*.
+
+    Args:
+        series: Any pandas Series / Index / numpy array, or a scalar value.
+        default: Replacement for non-numeric / NaN entries.
+
+    Returns:
+        ``pd.Series`` when the input is array-like; a plain ``float`` for scalars.
+    """
     try:
         if isinstance(series, (pd.Series, pd.Index, np.ndarray)):
             return pd.to_numeric(series, errors='coerce').fillna(default)
         # Scalar case
         val = pd.to_numeric(series, errors='coerce')
         return val if pd.notnull(val) else default
-    except:
+    except Exception:
         return default
 
 
@@ -88,7 +104,7 @@ def get_team_short_name(team_id: int, processor) -> str:
         if not team.empty:
             return team.iloc[0].get('short_name', team.iloc[0].get('name', 'UNK'))
         return 'UNK'
-    except Exception:
+    except:
         return 'UNK'
 
 
@@ -123,12 +139,12 @@ def get_player_fixtures(player_id: int, processor, weeks_ahead: int = 5) -> List
                 'kickoff': fix.get('kickoff_time', '')
             })
         return result
-    except Exception:
+    except:
         return []
 
 
-def _safe_int(value, default=100):
-    """Safely convert value to int, handling NaN/None."""
+def _safe_int(value: Any, default: int = 100) -> int:
+    """Safely convert *value* to ``int``, returning *default* for NaN / None."""
     if value is None:
         return default
     try:
@@ -172,10 +188,10 @@ def get_price_change_info(player_row) -> Dict:
     net_transfers = transfers_in - transfers_out
     
     # Simple price rise/fall prediction based on net transfers
-    if net_transfers > 50000:
+    if net_transfers > PRICE_RISE_NET_TRANSFERS:
         prediction = 'likely_rise'
         pred_color = '#22c55e'
-    elif net_transfers < -50000:
+    elif net_transfers < PRICE_FALL_NET_TRANSFERS:
         prediction = 'likely_fall'
         pred_color = '#ef4444'
     else:
@@ -193,18 +209,12 @@ def get_price_change_info(player_row) -> Dict:
     }
 
 
-# FDR color mapping
-FDR_COLORS = {
-    1: '#22c55e',  # Green - easy
-    2: '#77c45e',  # Light green
-    3: '#f59e0b',  # Yellow - medium
-    4: '#ef6b4e',  # Orange
-    5: '#ef4444'   # Red - hard
-}
+# FDR color mapping (alias for backwards compatibility)
+FDR_COLORS = FDR_COLOR_MAP
 
 
 def get_fdr_color(fdr: int) -> str:
-    """Get color for fixture difficulty rating."""
+    """Return hex colour string for the given FDR value (1-5)."""
     return FDR_COLORS.get(fdr, '#888')
 
 
@@ -386,8 +396,8 @@ def get_ownership_tier(ownership_pct: float) -> Dict:
         return {'tier': 'Differential', 'color': '#a855f7', 'desc': 'Low owned, high ceiling/risk'}
 
 
-def classify_ownership_column(df: pd.DataFrame, col='selected_by_percent') -> pd.Series:
-    """Add ownership tier column to a DataFrame."""
+def classify_ownership_column(df: pd.DataFrame, col: str = 'selected_by_percent') -> pd.Series:
+    """Return a Series of ownership tier labels (Template / Popular / Enabler / Differential)."""
     own = safe_numeric(df.get(col, pd.Series([0] * len(df))))
     return own.apply(lambda x: get_ownership_tier(x)['tier'])
 
@@ -449,8 +459,6 @@ def add_availability_columns(df: pd.DataFrame, players_df: pd.DataFrame = None) 
 
     return df
 
-<<<<<<< Updated upstream
-=======
 
 # ══════════════════════════════════════════════════════════════════════════════
 # EXPECTED POINTS (xP) COLUMN SEMANTICS - EXPLICIT DEFINITIONS
@@ -689,10 +697,10 @@ def calculate_enhanced_captain_score(row: pd.Series, active_models: List[str]) -
     return float((core + pos_bonus + meta) * chance)
 
 
-def get_consensus_label(active_models: List[str], horizon: int = 1, is_avg: bool = False) -> str:
+def get_consensus_label(active_models: List[str], horizon: int = 1) -> str:
     """Return dynamic label for Model xP based on number of active models."""
     if not active_models:
-        return "Avg xP" if is_avg else "xP"
+        return "xP"
         
     if len(active_models) == 1:
         model = active_models[0].lower()
@@ -702,107 +710,6 @@ def get_consensus_label(active_models: List[str], horizon: int = 1, is_avg: bool
             'fpl': 'FPL xP'
         }
         name = label_map.get(model, 'xP')
-        if is_avg:
-            return f"Avg {name}"
         return f"{name} x{horizon}" if horizon > 1 else name
     
-    if is_avg:
-        return "Avg Model xP"
     return f"Model xP ({horizon}GW)" if horizon > 1 else "Model xP"
-
-
-def get_fixture_ease_map(fixtures_df: pd.DataFrame, current_gw: int, weeks_ahead: int = 1) -> Dict[int, float]:
-    """
-    Calculate team-level fixture ease scores for a specific horizon.
-    Returns: Dict mapping team_id to ease_score (0.0 to 1.0).
-    """
-    team_ids = set(fixtures_df['team_h']).union(set(fixtures_df['team_a']))
-    team_ease = {}
-    
-    decay_weights = [0.95 ** i for i in range(weeks_ahead)]
-    max_ease_denom = sum(5 * w for w in decay_weights)
-    
-    for tid in team_ids:
-        # Fixtures in window
-        team_fixtures = fixtures_df[
-            (fixtures_df['event'] >= current_gw) &
-            (fixtures_df['event'] < current_gw + weeks_ahead) &
-            ((fixtures_df['team_h'] == tid) | (fixtures_df['team_a'] == tid))
-        ].sort_values('event')
-        
-        fdrs = []
-        fixture_gws = set()
-        for _, fx in team_fixtures.iterrows():
-            fixture_gws.add(fx['event'])
-            if fx['team_h'] == tid:
-                fdrs.append(fx.get('team_h_difficulty', 3))
-            else:
-                fdrs.append(fx.get('team_a_difficulty', 3))
-        
-        # Fill blanks or missing fixtures with neutral 3.0
-        while len(fdrs) < weeks_ahead:
-            fdrs.append(3.0)
-        fdrs = fdrs[:weeks_ahead]
-        
-        # Weighted ease: (6-fdr) so higher is easier
-        weighted_ease = sum((6 - fdr) * w for fdr, w in zip(fdrs, decay_weights))
-        team_ease[tid] = weighted_ease / max_ease_denom if max_ease_denom > 0 else 0.5
-        
-    return team_ease
-
-
-def get_opponent_stats_map(players_df: pd.DataFrame, fixtures_df: pd.DataFrame, current_gw: int, weeks_ahead: int = 5) -> Dict[int, Dict[str, float]]:
-    """
-    Calculate average opponent stats (xG, xGC) for each team based on upcoming fixtures.
-    Useful for weighting player potential against specific team weaknesses.
-    """
-    # 1. Calculate base team stats from players_df (last N matches performance)
-    team_stats = {}
-    for tid in players_df['team'].unique():
-        t_players = players_df[players_df['team'] == tid]
-        
-        # Attack strength (xG)
-        t_attackers = t_players[t_players['position'].isin(['MID', 'FWD'])]
-        avg_xg = safe_numeric(t_attackers.get('us_xG', t_attackers.get('expected_goals', 0))).mean()
-        
-        # Defense weakness (xGC)
-        t_defenders = t_players[t_players['position'].isin(['GKP', 'DEF'])]
-        avg_xgc = safe_numeric(t_defenders.get('expected_goals_conceded', 0)).mean()
-        
-        team_stats[tid] = {
-            'xg': avg_xg,
-            'xgc': avg_xgc
-        }
-    
-    # 2. Map these to upcoming opponents
-    opp_stats_map = {}
-    team_ids = players_df['team'].unique()
-    
-    for tid in team_ids:
-        team_fixtures = fixtures_df[
-            (fixtures_df['event'] >= current_gw) &
-            (fixtures_df['event'] < current_gw + weeks_ahead) &
-            ((fixtures_df['team_h'] == tid) | (fixtures_df['team_a'] == tid))
-        ]
-        
-        opp_xg_list = []
-        opp_xgc_list = []
-        
-        for _, fx in team_fixtures.iterrows():
-            opp_id = fx['team_a'] if fx['team_h'] == tid else fx['team_h']
-            stats = team_stats.get(opp_id, {'xg': 1.3, 'xgc': 1.3}) # Fallback to neutral
-            opp_xg_list.append(stats['xg'])
-            opp_xgc_list.append(stats['xgc'])
-            
-        # Refined Averaging (v2): Divide by weeks_ahead (horizon) to reflect 
-        # higher cumulative threat in DGWs and zero threat in Blanks.
-        opp_stats_map[tid] = {
-            'avg_opp_xg': sum(opp_xg_list) / weeks_ahead if weeks_ahead > 0 else 1.3,
-            'avg_opp_xgc': sum(opp_xgc_list) / weeks_ahead if weeks_ahead > 0 else 1.3
-        }
-        
-    return opp_stats_map
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes

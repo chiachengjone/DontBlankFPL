@@ -6,7 +6,10 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from utils.helpers import safe_numeric, style_df_with_injuries, normalize_name, search_players
+from utils.helpers import (
+    safe_numeric, style_df_with_injuries, normalize_name, 
+    search_players, calculate_consensus_ep, get_consensus_label
+)
 from components.styles import render_section_title, render_divider, render_stat_card
 
 
@@ -14,35 +17,35 @@ def render_captain_tab(processor, players_df: pd.DataFrame, fetcher):
     """Captain Analysis tab - comprehensive captain decision tool."""
     
     st.markdown('<p class="section-title">Captain Analysis</p>', unsafe_allow_html=True)
-    st.caption("Compare top captain candidates using ML, Poisson, and FPL estimates")
+    st.caption("Compare top captain candidates using ML, Poisson, and FPL xP estimates")
     
     # Metrics explanation dropdown
     with st.expander("Understanding Captain Metrics"):
         st.markdown("""
         **Captain Score**
-        - Blended score combining EP (35%), ML prediction (25%), Form (20%), Ownership (10%), and Threat Momentum (10%)
+        - Blended score combining xP (35%), ML xP (25%), Form (20%), Ownership (10%), and Threat Momentum (10%)
         - Higher score = better captain pick confidence
         
-        **Expected Points (EP)**
-        - FPL's official prediction for points this GW
+        **Model xP (Standardized)**
+        - Model prediction for points this GW
         - Based on fixture difficulty, form, and historical data
         
-        **ML Prediction**
+        **ML xP**
         - Machine learning model prediction (run ML tab first for accuracy)
         - Uses XGBoost ensemble trained on historical FPL data
         
-        **Poisson EP**
+        **Poisson xP**
         - Statistical model using expected goals (xG) and assists (xA)
         - Better for predicting attacking returns
         
-        **Captain EV (Expected Value)**
-        - EP × 1.25 (2025/26 captain multiplier)
-        - The expected points if you captain this player
+        **Captain xP (Expected Value)**
+        - Model xP × 1.25 (2025/26 captain multiplier)
+        - The xP if you captain this player
         
-        **Consensus & Score Weights**
-        - **Consensus**: Equal average of all enabled models (33% each if 3 enabled, 50% if 2).
+        **Global Model xP Weights**
+        - **Model xP**: Weighted average of all enabled models.
         - **Captain Score**: 60% Core Models, 30% Position Potential, 10% Meta.
-        - *Core (3 enabled)*: 35% Poisson, 25% ML.
+        - *Core (3 enabled)*: 35% Poisson xP, 25% ML xP.
         - *Core (2 enabled)*: Re-weights 60% among selections.
         
         **Ownership Consideration**
@@ -50,21 +53,13 @@ def render_captain_tab(processor, players_df: pd.DataFrame, fetcher):
         - Low ownership = differential (big gains if they haul)
         """)
         
-    # Model Selection toggles
-    st.markdown("### Model Selection")
-    m1, m2, m3 = st.columns(3)
-    with m1:
-        enable_poisson = st.checkbox("Poisson Model", value=True, key="cap_enable_poisson")
-    with m2:
-        enable_fpl = st.checkbox("FPL Baseline", value=True, key="cap_enable_fpl")
-    with m3:
-        enable_ml = st.checkbox("ML Prediction", value=True, key="cap_enable_ml")
-        
-    # Validation: Ensure at least one is selected
-    if not (enable_poisson or enable_fpl or enable_ml):
-        st.warning("At least one model must be enabled. Reverting to all models.")
-        enable_poisson = enable_fpl = enable_ml = True
-        
+    # Use Global Model Selection
+    active_models_keys = st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])
+    
+    enable_poisson = 'poisson' in active_models_keys
+    enable_fpl = 'fpl' in active_models_keys
+    enable_ml = 'ml' in active_models_keys
+    
     active_models = []
     if enable_poisson: active_models.append('poisson_ep')
     if enable_fpl: active_models.append('ep_next_num')
@@ -97,52 +92,22 @@ def render_captain_tab(processor, players_df: pd.DataFrame, fetcher):
         df['ml_pred'] = df['expected_points'] * 0.85 + df['form'] * 0.3
         ml_available = False
     
+    # Calculate Global Model xP (Consensus) first
+    active_m = st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])
+    df = calculate_consensus_ep(df, active_m)
+    
     # Consider all players in the database as viable captain candidates
     viable = df.copy()
     
     # Calculate enhanced position-aware captain score
-    def calculate_enhanced_score(row):
-        # 1. Core Models (60% weight)
-        # We re-distribute the 60% weight among active models
-        model_count = len(active_models)
-        if model_count == 3:
-            core = (row['poisson_ep'] * 0.35 + row['ml_pred'] * 0.25)
-        elif model_count == 2:
-            if enable_poisson and enable_ml:
-                core = (row['poisson_ep'] * 0.35 + row['ml_pred'] * 0.25)
-            elif enable_poisson and enable_fpl:
-                core = (row['poisson_ep'] * 0.35 + row['ep_next_num'] * 0.25)
-            else: # FPL + ML
-                core = (row['ep_next_num'] * 0.35 + row['ml_pred'] * 0.25)
-        else: # Only 1 model
-            core = row[active_models[0]] * 0.6
-            
-        # 2. Position-Specific Potential (30% weight)
-        if row['position'] in ['GKP', 'DEF']:
-            p_cs = safe_numeric(pd.Series([row.get('poisson_p_cs', 0.2)])).iloc[0]
-            cbit_p = safe_numeric(pd.Series([row.get('cbit_prob', 0.3)])).iloc[0]
-            pos_bonus = (p_cs * 0.15 + cbit_p * 0.15) * 10
-        else:
-            threat = safe_numeric(pd.Series([row.get('threat_momentum', 0.5)])).iloc[0]
-            matchup = safe_numeric(pd.Series([row.get('matchup_quality', 1.0)])).iloc[0]
-            pos_bonus = (threat * 0.15 * 10 + (matchup / 2) * 0.15 * 10).clip(0, 3)
-            
-        # 3. Meta & Safety (10% weight)
-        eo = row['selected_by_percent'] / 100
-        form_norm = row['form'] / 15
-        meta = (eo * 0.05 + form_norm * 0.05) * 10
-        
-        # 4. Injury Risk Adjustment
-        chance = safe_numeric(pd.Series([row.get('chance_of_playing_next_round', 100)])).iloc[0] / 100
-        if pd.isna(chance): chance = 1.0
-        
-        return (core + pos_bonus + meta) * chance
+    from utils.helpers import calculate_enhanced_captain_score
+    viable['captain_score'] = viable.apply(
+        lambda r: calculate_enhanced_captain_score(r, active_models), axis=1
+    ).round(2)
 
-    viable['captain_score'] = viable.apply(calculate_enhanced_score, axis=1).round(2)
-    
-    # Pre-calculate Consensus for all viable players - only active models
-    active_cols = [viable[m] for m in active_models]
-    viable['consensus'] = sum(active_cols) / len(active_models)
+    # Use pre-calculated consensus_ep (Model xP)
+    viable['consensus'] = safe_numeric(viable['consensus_ep'])
+    viable['captain_ev'] = viable['consensus'] * 1.25 # Captain Multiplier
     
     # ── Your Team's Best Picks ──
     team_id = st.session_state.get('fpl_team_id', 0)
@@ -176,8 +141,8 @@ def render_captain_tab(processor, players_df: pd.DataFrame, fetcher):
                                 <div style="color:#1d1d1f;font-size:1.3rem;font-weight:700;margin:0.3rem 0;">{player['web_name']}{diff_badge}</div>
                                 <div style="color:#86868b;font-size:0.85rem;">{player.get('team_name', '')} | {player['position']}</div>
                                 <div style="margin-top:0.75rem;padding-top:0.5rem;border-top:1px solid rgba(0,0,0,0.08);">
-                                    <div style="color:#86868b;font-size:0.65rem;text-transform:uppercase;">Consensus Prediction</div>
-                                    <div style="color:#1d1d1f;font-size:1.1rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{player['consensus']:.1f} pts</div>
+                                    <div style="color:#86868b;font-size:0.65rem;text-transform:uppercase;">{get_consensus_label(st.session_state.active_models)} Prediction</div>
+                                    <div style="color:#1d1d1f;font-size:1.1rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{player['consensus']:.2f}</div>
                                 </div>
                                 <div style="color:#86868b;font-size:0.7rem;margin-top:0.3rem;">Captain Score: {player['captain_score']:.2f}</div>
                             </div>
@@ -227,12 +192,12 @@ def render_captain_tab(processor, players_df: pd.DataFrame, fetcher):
             # Prepare Stat Grid items based on enabled models
             stat_grid_items = []
             if enable_poisson:
-                stat_grid_items.append(f'<div><div style="color:#86868b;font-size:0.65rem;text-transform:uppercase;">Poisson EP</div><div style="color:#3b82f6;font-weight:600;font-family:\'JetBrains Mono\',monospace;">{ep_poisson:.1f}</div></div>')
+                stat_grid_items.append(f'<div><div style="color:#86868b;font-size:0.65rem;text-transform:uppercase;">Poisson xP</div><div style="color:#3b82f6;font-weight:600;font-family:\'JetBrains Mono\',monospace;">{ep_poisson:.2f}</div></div>')
             if enable_fpl:
-                stat_grid_items.append(f'<div><div style="color:#86868b;font-size:0.65rem;text-transform:uppercase;">FPL EP</div><div style="color:#22c55e;font-weight:600;font-family:\'JetBrains Mono\',monospace;">{fpl_ep:.1f}</div></div>')
+                stat_grid_items.append(f'<div><div style="color:#86868b;font-size:0.65rem;text-transform:uppercase;">FPL xP</div><div style="color:#22c55e;font-weight:600;font-family:\'JetBrains Mono\',monospace;">{fpl_ep:.2f}</div></div>')
             if enable_ml:
-                stat_grid_items.append(f'<div><div style="color:#86868b;font-size:0.65rem;text-transform:uppercase;">ML Pred</div><div style="color:#f59e0b;font-weight:600;font-family:\'JetBrains Mono\',monospace;">{ml:.1f}</div></div>')
-            stat_grid_items.append(f'<div><div style="color:#86868b;font-size:0.65rem;text-transform:uppercase;">Form</div><div style="color:#1d1d1f;font-weight:600;font-family:\'JetBrains Mono\',monospace;">{form:.1f}</div></div>')
+                stat_grid_items.append(f'<div><div style="color:#86868b;font-size:0.65rem;text-transform:uppercase;">ML xP</div><div style="color:#f59e0b;font-weight:600;font-family:\'JetBrains Mono\',monospace;">{ml:.2f}</div></div>')
+            stat_grid_items.append(f'<div><div style="color:#86868b;font-size:0.65rem;text-transform:uppercase;">Form</div><div style="color:#1d1d1f;font-weight:600;font-family:\'JetBrains Mono\',monospace;">{form:.2f}</div></div>')
             
             grid_columns = 2
             stat_grid_html = f'<div style="display:grid;grid-template-columns:repeat({grid_columns},1fr);gap:0.5rem;padding:0 1rem;text-align:center;background:#fff;border-left:1px solid rgba(0,0,0,0.04);border-right:1px solid rgba(0,0,0,0.04);">' + "".join(stat_grid_items) + '</div>'
@@ -241,8 +206,8 @@ def render_captain_tab(processor, players_df: pd.DataFrame, fetcher):
                 {stat_grid_html}
                 <div style="background:#fff;border:1px solid rgba(0,0,0,0.04);border-top:none;border-radius:10px;border-top-left-radius:0;border-top-right-radius:0;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:0 1rem 1rem 1rem;text-align:center;">
                     <div style="margin-top:0.75rem;padding-top:0.5rem;border-top:1px solid rgba(0,0,0,0.08);">
-                        <div style="color:#86868b;font-size:0.65rem;text-transform:uppercase;">Consensus</div>
-                        <div style="color:#1d1d1f;font-size:1.1rem;font-weight:700;font-family:\'JetBrains Mono\',monospace;">{consensus:.1f} pts</div>
+                        <div style="color:#86868b;font-size:0.65rem;text-transform:uppercase;">{get_consensus_label(st.session_state.active_models)}</div>
+                        <div style="color:#1d1d1f;font-size:1.1rem;font-weight:700;font-family:\'JetBrains Mono\',monospace;">{consensus:.2f}</div>
                     </div>
                     <div style="color:#86868b;font-size:0.7rem;margin-top:0.3rem;">EO: {eo:.1f}%</div>
                 </div>
@@ -290,8 +255,8 @@ def render_captain_tab(processor, players_df: pd.DataFrame, fetcher):
         
         if enable_poisson:
             cols_to_keep.append('poisson_ep')
-            col_names.append('Poisson EP')
-            format_dict['Poisson EP'] = '{:.2f}'
+            col_names.append('Poisson xP')
+            format_dict['Poisson xP'] = '{:.2f}'
         if enable_fpl:
             cols_to_keep.append('ep_next_num')
             col_names.append('FPL EP')
@@ -302,7 +267,7 @@ def render_captain_tab(processor, players_df: pd.DataFrame, fetcher):
             format_dict['ML Pred'] = '{:.2f}'
             
         cols_to_keep.extend(['consensus', 'form', 'selected_by_percent', 'captain_score'])
-        col_names.extend(['Consensus', 'Form', 'EO%', 'Score'])
+        col_names.extend(['Model xP', 'Form', 'EO%', 'Score'])
         
         display_df = filtered[cols_to_keep].copy()
         display_df.columns = col_names
@@ -383,9 +348,9 @@ def render_captain_tab(processor, players_df: pd.DataFrame, fetcher):
         if p1_data is not None and p2_data is not None:
             # Radar chart comparison
             categories = []
-            if enable_poisson: categories.append('Poisson EP')
-            if enable_fpl: categories.append('FPL EP')
-            if enable_ml: categories.append('ML Prediction')
+            if enable_poisson: categories.append('Poisson xP')
+            if enable_fpl: categories.append('FPL xP')
+            if enable_ml: categories.append('ML xP')
             categories.extend(['Recent Form', 'Matchup Ease', 'Bonus Potential'])
             
             # Helper to get bonus potential based on position
@@ -452,15 +417,16 @@ def render_captain_tab(processor, players_df: pd.DataFrame, fetcher):
             
             fig.update_layout(
                 polar=dict(
-                    radialaxis=dict(visible=True, range=[0, 100], gridcolor='#333'),
+                    radialaxis=dict(visible=True, range=[0, 100], gridcolor='#e5e5ea'),
+                    angularaxis=dict(gridcolor='#e5e5ea', linecolor='#e5e5ea'),
                     bgcolor='#ffffff'
                 ),
                 showlegend=True,
                 template='plotly_white',
                 paper_bgcolor='#ffffff',
-                font=dict(family='Inter, sans-serif', color='#fff'),
+                font=dict(family='Inter, sans-serif', color='#444', size=11),
                 height=350,
-                margin=dict(l=60, r=60, t=30, b=30)
+                margin=dict(l=80, r=80, t=30, b=30)
             )
             
             st.plotly_chart(fig, use_container_width=True)
@@ -472,16 +438,16 @@ def render_captain_tab(processor, players_df: pd.DataFrame, fetcher):
                 items = []
                 if enable_poisson:
                     win = "✓" if p1_data['poisson_ep'] >= p2_data['poisson_ep'] else ""
-                    items.append(f'<div style="display:flex;justify-content:space-between;"><span>Poisson EP:</span><span style="color:#1d1d1f;">{p1_data["poisson_ep"]:.1f} {win}</span></div>')
+                    items.append(f'<div style="display:flex;justify-content:space-between;"><span>Poisson xP:</span><span style="color:#1d1d1f;">{p1_data["poisson_ep"]:.2f} {win}</span></div>')
                 if enable_fpl:
                     win = "✓" if p1_data['ep_next_num'] >= p2_data['ep_next_num'] else ""
-                    items.append(f'<div style="display:flex;justify-content:space-between;"><span>FPL EP:</span><span style="color:#1d1d1f;">{p1_data["ep_next_num"]:.1f} {win}</span></div>')
+                    items.append(f'<div style="display:flex;justify-content:space-between;"><span>FPL xP:</span><span style="color:#1d1d1f;">{p1_data["ep_next_num"]:.2f} {win}</span></div>')
                 if enable_ml:
                     win = "✓" if p1_data['ml_pred'] >= p2_data['ml_pred'] else ""
-                    items.append(f'<div style="display:flex;justify-content:space-between;"><span>ML Pred:</span><span style="color:#1d1d1f;">{p1_data["ml_pred"]:.1f} {win}</span></div>')
+                    items.append(f'<div style="display:flex;justify-content:space-between;"><span>ML xP:</span><span style="color:#1d1d1f;">{p1_data["ml_pred"]:.2f} {win}</span></div>')
                 
                 win_form = "✓" if p1_data['form'] >= p2_data['form'] else ""
-                items.append(f'<div style="display:flex;justify-content:space-between;"><span>Form:</span><span style="color:#1d1d1f;">{p1_data["form"]:.1f} {win_form}</span></div>')
+                items.append(f'<div style="display:flex;justify-content:space-between;"><span>Form:</span><span style="color:#1d1d1f;">{p1_data["form"]:.2f} {win_form}</span></div>')
                 items.append(f'<div style="display:flex;justify-content:space-between;"><span>EO:</span><span style="color:#1d1d1f;">{p1_data["selected_by_percent"]:.1f}%</span></div>')
                 
                 st.markdown(f'''
@@ -497,16 +463,16 @@ def render_captain_tab(processor, players_df: pd.DataFrame, fetcher):
                 items = []
                 if enable_poisson:
                     win = "✓" if p2_data['poisson_ep'] >= p1_data['poisson_ep'] else ""
-                    items.append(f'<div style="display:flex;justify-content:space-between;"><span>Poisson EP:</span><span style="color:#1d1d1f;">{p2_data["poisson_ep"]:.1f} {win}</span></div>')
+                    items.append(f'<div style="display:flex;justify-content:space-between;"><span>Poisson xP:</span><span style="color:#1d1d1f;">{p2_data["poisson_ep"]:.2f} {win}</span></div>')
                 if enable_fpl:
                     win = "✓" if p2_data['ep_next_num'] >= p1_data['ep_next_num'] else ""
-                    items.append(f'<div style="display:flex;justify-content:space-between;"><span>FPL EP:</span><span style="color:#1d1d1f;">{p2_data["ep_next_num"]:.1f} {win}</span></div>')
+                    items.append(f'<div style="display:flex;justify-content:space-between;"><span>FPL xP:</span><span style="color:#1d1d1f;">{p2_data["ep_next_num"]:.2f} {win}</span></div>')
                 if enable_ml:
                     win = "✓" if p2_data['ml_pred'] >= p1_data['ml_pred'] else ""
-                    items.append(f'<div style="display:flex;justify-content:space-between;"><span>ML Pred:</span><span style="color:#1d1d1f;">{p2_data["ml_pred"]:.1f} {win}</span></div>')
+                    items.append(f'<div style="display:flex;justify-content:space-between;"><span>ML xP:</span><span style="color:#1d1d1f;">{p2_data["ml_pred"]:.2f} {win}</span></div>')
                 
                 win_form = "✓" if p2_data['form'] >= p1_data['form'] else ""
-                items.append(f'<div style="display:flex;justify-content:space-between;"><span>Form:</span><span style="color:#1d1d1f;">{p2_data["form"]:.1f} {win_form}</span></div>')
+                items.append(f'<div style="display:flex;justify-content:space-between;"><span>Form:</span><span style="color:#1d1d1f;">{p2_data["form"]:.2f} {win_form}</span></div>')
                 items.append(f'<div style="display:flex;justify-content:space-between;"><span>EO:</span><span style="color:#1d1d1f;">{p2_data["selected_by_percent"]:.1f}%</span></div>')
                 
                 st.markdown(f'''
@@ -528,7 +494,7 @@ def render_captain_tab(processor, players_df: pd.DataFrame, fetcher):
     st.markdown("### Differential Captain Picks")
     st.caption("Low ownership (<10%) with high ceiling potential")
     
-    diff_captains = viable[(viable['selected_by_percent'] < 10) & (viable['expected_points'] > 3)].nlargest(8, 'captain_score')
+    diff_captains = viable[(viable['selected_by_percent'] < 10) & (safe_numeric(viable['consensus_ep']) > 3)].nlargest(8, 'captain_score')
     
     if not diff_captains.empty:
         diff_cols = st.columns(4)
@@ -550,42 +516,57 @@ def render_captain_tab(processor, players_df: pd.DataFrame, fetcher):
     
     # ── Historical Captain Success Rate ──
     st.markdown("---")
-    st.markdown("### Captain Success Metrics")
-    st.caption("Based on form momentum and recent returns")
+    # ── Comparison of Captain Types ──
+    st.markdown("---")
+    st.markdown("### Top Captains by Category")
+    st.caption("Comparison of Safe (EO>35%), Differential (EO<15%), and overall Top candidates")
     
-    # Form trend visualization
-    form_df = viable.nlargest(8, 'captain_score').copy()
+    # Identify categories
+    safe_caps = viable[viable['selected_by_percent'] >= 35].nlargest(5, 'captain_score').copy()
+    diff_caps = viable[viable['selected_by_percent'] < 15].nlargest(5, 'captain_score').copy()
+    top_caps = viable.nlargest(5, 'captain_score').copy()
     
-    if not form_df.empty and 'form' in form_df.columns:
+    # Combine for visualization
+    plot_data = []
+    
+    for _, p in top_caps.iterrows():
+        plot_data.append({'Player': p['web_name'], 'Score': p['captain_score'], 'Category': 'Top Pick', 'Color': '#3b82f6'})
+    
+    for _, p in safe_caps.iterrows():
+        plot_data.append({'Player': p['web_name'], 'Score': p['captain_score'], 'Category': 'Safe (Template)', 'Color': '#22c55e'})
+        
+    for _, p in diff_caps.iterrows():
+        plot_data.append({'Player': p['web_name'], 'Score': p['captain_score'], 'Category': 'Differential', 'Color': '#f59e0b'})
+        
+    if plot_data:
+        pdf = pd.DataFrame(plot_data)
+        
         fig = go.Figure()
         
-        for i, (_, p) in enumerate(form_df.iterrows()):
-            pos_color = pos_colors.get(p['position'], '#888')
-            form_val = p['form']
-            ep_val = p['expected_points']
-            
+        categories = pdf['Category'].unique()
+        for cat in categories:
+            cat_df = pdf[pdf['Category'] == cat]
             fig.add_trace(go.Bar(
-                x=[p['web_name']],
-                y=[form_val],
-                name='Form',
-                marker_color=pos_color,
-                opacity=0.8,
-                showlegend=(i == 0),
-                legendgroup='form',
-                hovertemplate=f"<b>{p['web_name']}</b><br>Form: {form_val:.1f}<br>EP: {ep_val:.2f}<extra></extra>"
+                x=cat_df['Player'],
+                y=cat_df['Score'],
+                name=cat,
+                marker_color=cat_df['Color'].iloc[0],
+                hovertemplate="<b>%{x}</b><br>Category: " + cat + "<br>Score: %{y:.2f}<extra></extra>"
             ))
-        
+            
         fig.update_layout(
-            height=300,
+            height=400,
             template='plotly_white',
             paper_bgcolor='#ffffff',
             plot_bgcolor='#ffffff',
             font=dict(family='Inter, sans-serif', color='#86868b', size=11),
-            xaxis=dict(gridcolor='#e5e5ea', tickangle=45),
-            yaxis=dict(title='Form', gridcolor='#e5e5ea'),
-            margin=dict(l=50, r=30, t=20, b=80),
-            showlegend=False,
+            xaxis=dict(title='Player', gridcolor='#e5e5ea', tickangle=45),
+            yaxis=dict(title='Captaincy Score', gridcolor='#e5e5ea'),
+            margin=dict(l=50, r=30, t=20, b=100),
+            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
             bargap=0.3
         )
         
         st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("Not enough data to generate comparison chart")

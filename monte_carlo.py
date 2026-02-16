@@ -11,11 +11,6 @@ from dataclasses import dataclass
 import warnings
 warnings.filterwarnings('ignore')
 
-from config import (
-    MC_STD_EP_WEIGHT, MC_STD_FORM_BASELINE, MC_STD_FORM_WEIGHT,
-    MC_STD_ROTATION_WEIGHT, MC_STD_MIN, MC_EPSILON,
-)
-
 # Lazy import for scipy
 _scipy_stats = None
 
@@ -98,10 +93,10 @@ class MonteCarloEngine:
         # High form = lower variance (more predictable)
         # Low minutes = higher variance (rotation risk)
         df['estimated_std'] = (
-            df['ep_next'] * MC_STD_EP_WEIGHT +
-            (MC_STD_FORM_BASELINE - df['form']) * MC_STD_FORM_WEIGHT +
-            (90 - df['minutes'].clip(0, 90*38) / 38) / 90 * MC_STD_ROTATION_WEIGHT
-        ).clip(lower=MC_STD_MIN)
+            df['ep_next'] * 0.4 +  # Base volatility proportional to EP
+            (5 - df['form']) * 0.3 +  # Poor form = more variance
+            (90 - df['minutes'].clip(0, 90*38) / 38) / 90 * 2  # Rotation adds variance
+        ).clip(lower=0.5)
         
         self.distributions = df[['id', 'ep_next', 'estimated_std', 'form', 'minutes']].to_dict('records')
     
@@ -112,12 +107,12 @@ class MonteCarloEngine:
         """
         # Prevent division by zero
         if std <= 0:
-            std = MC_STD_MIN
+            std = 0.5
         
         # Gamma parameters: shape (k) and scale (theta)
         # mean = k * theta, var = k * theta^2
-        theta = (std ** 2) / max(ep, MC_EPSILON)
-        k = max(ep, MC_EPSILON) / theta
+        theta = (std ** 2) / max(ep, 0.1)
+        k = max(ep, 0.1) / theta
         
         # Generate samples
         samples = self.rng.gamma(k, theta, size=self.n_simulations)
@@ -133,9 +128,6 @@ class MonteCarloEngine:
         Simulate using truncated normal (no negative points).
         Good for high-ownership premiums with consistent returns.
         """
-        # Guard against invalid std
-        if std <= 0:
-            std = MC_STD_MIN
         # Generate normal samples
         samples = self.rng.normal(ep, std, size=self.n_simulations)
         # Truncate at 0 (no negative points)
@@ -150,86 +142,22 @@ class MonteCarloEngine:
         bonus_prob: float = 0.3
     ) -> np.ndarray:
         """
-        Simulate using Bivariate Poisson for base points + bonus points.
-        Models correlated scoring events (goals, assists) using Holgate's model.
+        Simulate using Poisson for base points + bonus points.
+        Models discrete scoring events (goals, assists, CS).
         """
-        # Get player data for lambda estimation
-        player_row = self.players_df[self.players_df['id'] == player_id]
-        if player_row.empty:
-            return self.rng.poisson(max(ep * 0.7, 0.5), size=self.n_simulations).astype(float)
+        # Base points from Poisson
+        base_rate = max(ep * 0.7, 0.5)  # 70% from base scoring
+        base_points = self.rng.poisson(base_rate, size=self.n_simulations)
         
-        player = player_row.iloc[0]
-        pos = player.get('position', 'MID')
+        # Bonus points (0, 1, 2, or 3) with probability
+        bonus_points = self.rng.choice(
+            [0, 1, 2, 3],
+            size=self.n_simulations,
+            p=[1-bonus_prob, bonus_prob*0.5, bonus_prob*0.3, bonus_prob*0.2]
+        )
         
-        # ── Step 1: Extract or Estimate Lambdas ──
-        # Prefer pre-calculated lambdas from the Poisson engine if available
-        # These are usually stored in session or as engineered features
-        lam_g = float(player.get('lambda_attack', 0))
-        lam_a = float(player.get('lambda_creative', 0))
-        
-        # Fallback: estimate from ep_next if not available
-        if lam_g <= 0 and lam_a <= 0:
-            # Simple heuristic mapping from EP to lambdas
-            from config import GOAL_POINTS, ASSIST_POINTS
-            gpt = GOAL_POINTS.get(pos, 4)
-            # Rough split: 60% of non-appearance points from goals for FWDs, 30% for MIDs
-            att_ratio = 0.6 if pos == 'FWD' else 0.4 if pos == 'MID' else 0.1
-            non_app_ep = max(ep - 2.0, 0.1)
-            lam_g = (non_app_ep * att_ratio) / gpt
-            lam_a = (non_app_ep * (1 - att_ratio)) / ASSIST_POINTS
-
-        # ── Step 2: Bivariate Simulation (Holgate's Model) ──
-        # X_g = Y_g + Z, X_a = Y_a + Z where Z ~ Pois(rho)
-        from config import TEAM_ATTACK_CORRELATION
-        rho = max(0.0, min(TEAM_ATTACK_CORRELATION, lam_g, lam_a))
-        
-        lam_g_ind = max(lam_g - rho, 0.0)
-        lam_a_ind = max(lam_a - rho, 0.0)
-        
-        z = self.rng.poisson(rho, size=self.n_simulations)
-        y_g = self.rng.poisson(lam_g_ind, size=self.n_simulations)
-        y_a = self.rng.poisson(lam_a_ind, size=self.n_simulations)
-        
-        goals = y_g + z
-        assists = y_a + z
-        
-        # ── Step 3: Calculate Points ──
-        from config import GOAL_POINTS, ASSIST_POINTS, CLEAN_SHEET_POINTS
-        gpt = GOAL_POINTS.get(pos, 4)
-        apt = ASSIST_POINTS
-        
-        # Base scoring
-        base_points = (goals * gpt + assists * apt).astype(float)
-        
-        # Appearance + CS + CBIT (simulated as binary/binomial)
-        # We simplify these for MC to keep it fast
-        p_plays = float(player.get('starts_pct', 0.8))
-        plays = self.rng.random(size=self.n_simulations) < p_plays
-        
-        # Clean Sheet
-        p_cs = float(player.get('p_cs', 0.3))
-        cs_pts = CLEAN_SHEET_POINTS.get(pos, 0)
-        cs = (self.rng.random(size=self.n_simulations) < p_cs) * cs_pts
-        
-        # CBIT
-        p_cbit = float(player.get('p_cbit', 0.2))
-        from config import CBIT_BONUS_POINTS
-        cbit = (self.rng.random(size=self.n_simulations) < p_cbit) * CBIT_BONUS_POINTS
-        
-        # Bonus Points (simplified based on returns)
-        # Hauls increase bonus probability
-        bonus = np.zeros(self.n_simulations)
-        has_return = (goals + assists) > 0
-        haul = (goals + assists) >= 2
-        
-        # Probability of bonus given a return
-        bonus[has_return & ~haul] = self.rng.choice([0, 1, 2], size=np.sum(has_return & ~haul), p=[0.4, 0.4, 0.2])
-        bonus[haul] = self.rng.choice([1, 2, 3], size=np.sum(haul), p=[0.2, 0.3, 0.5])
-        
-        # Combine all components (only if the player "plays")
-        samples = (2.0 + base_points + cs + cbit + bonus) * plays
-        
-        return samples
+        samples = base_points + bonus_points
+        return samples.astype(float)
     
     def _simulate_player_mixed(
         self,
