@@ -170,8 +170,102 @@ def render_history_tab(processor, players_df: pd.DataFrame, fetcher):
     st.plotly_chart(fig, width="stretch")
     
     st.markdown("---")
+
+    # ── Manager Report Card ──
+    st.markdown("### Manager Report Card")
+    st.caption("Review your Captaincy efficiency and Bench choices.")
     
-    # ── Team Evolution (Set & Forget Comparison) ──
+    # Check if we need to generate/update the report
+    # We trigger if metrics are missing OR if the Team ID has changed
+    current_team_id = st.session_state.get('retro_team_id', -1)
+    
+    if 'retro_metrics' not in st.session_state or current_team_id != team_id:
+        progress_bar = st.progress(0, text="Analyzing season history...")
+        
+        try:
+            from utils.retro_analysis import calculate_retro_metrics
+            # Pass players_df and progress callback
+            metrics = calculate_retro_metrics(fetcher, team_id, players_df, progress_callback=progress_bar.progress)
+            st.session_state['retro_metrics'] = metrics
+            st.session_state['retro_team_id'] = team_id
+        finally:
+            progress_bar.empty()
+    
+    # Display metrics if available in session state
+    if st.session_state['retro_metrics']:
+        metrics = st.session_state['retro_metrics']
+        
+        if 'error' in metrics:
+            st.error(f"Analysis failed: {metrics['error']}")
+        else:
+            r1, r2 = st.columns(2)
+            with r1:
+                st.metric("Captaincy Efficiency", f"{metrics['captain_efficiency']:.1f}%", 
+                          help="Percentage of maximum possible points captured by your captain choices.")
+            with r2:
+                st.metric("Points Benched", f"{metrics['bench_points_total']}",
+                          help="Total points left on your bench this season.")
+            
+            # Detailed History Charts
+            st.markdown("**History Breakdown**")
+            
+            # Prepare DataFrames
+            cap_df = pd.DataFrame(metrics['captain_history'])
+            bench_df = pd.DataFrame(metrics['bench_history'])
+            
+            # Captaincy Chart
+            if not cap_df.empty:
+                fig_cap = go.Figure()
+                # Bar for Max Possible (Missed Potential + Active)
+                # We stack "Actual Points" (Green) and "Missed" (Red) to reach Max
+                fig_cap.add_trace(go.Bar(
+                    x=cap_df['gw'], 
+                    y=cap_df['cap_pts'], 
+                    name='Captain Points', 
+                    marker_color='#22c55e',
+                    hovertext=cap_df['cap_name'] + ': ' + cap_df['cap_pts'].astype(str) + 'pts',
+                    hoverinfo='text'
+                ))
+                fig_cap.add_trace(go.Bar(
+                    x=cap_df['gw'], 
+                    y=cap_df['max_possible'] - cap_df['cap_pts'], 
+                    name='Missed Potential', 
+                    marker_color='#ef4444',
+                    opacity=0.6,
+                    hovertext='Best: ' + cap_df['max_name'] + ' (' + cap_df['max_possible'].astype(str) + 'pts)',
+                    hoverinfo='text'
+                ))
+                fig_cap.update_layout(
+                    title="Captaincy History (Actual vs Max)", 
+                    barmode='stack', 
+                    height=300, 
+                    margin=dict(l=20, r=20, t=40, b=20),
+                    template='plotly_white',
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                )
+                st.plotly_chart(fig_cap, width="stretch")
+
+            # Bench Chart - Matches Captaincy Style
+            if not bench_df.empty:
+                fig_bench = go.Figure()
+                fig_bench.add_trace(go.Bar(
+                    x=bench_df['gw'], 
+                    y=bench_df['points'], 
+                    name='Bench Points', 
+                    marker_color='#60a5fa', # Blue to differentiate
+                    text=bench_df['points'],
+                    textposition='auto'
+                ))
+                fig_bench.update_layout(
+                    title="Bench Points per Gameweek", 
+                    height=300, 
+                    margin=dict(l=20, r=20, t=40, b=20),
+                    template='plotly_white',
+                    showlegend=False
+                )
+                st.plotly_chart(fig_bench, width="stretch")
+    
+    st.markdown("---")
     st.markdown("### Team Evolution Analysis")
     st.caption("Compare your actual performance vs 'frozen' versions of your squad (Set & Forget)")
     

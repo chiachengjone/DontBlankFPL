@@ -195,6 +195,22 @@ class FPLDataFetcher:
         data = response.json()
         self._set_cache(cache_key, data)
         return data
+
+    def get_transfers(self, team_id: int) -> List[Dict]:
+        """Fetch transfer history for a team."""
+        team_id = int(team_id)
+        cache_key = f'transfers_{team_id}'
+        cached = self._get_cached(cache_key)
+        if cached:
+            return cached
+
+        response = self._request_with_retry(
+            f"{FPL_BASE_URL}/entry/{team_id}/transfers/",
+            context=f"entry/{team_id}/transfers",
+        )
+        data = response.json()
+        self._set_cache(cache_key, data)
+        return data
     
     def get_fixtures(self) -> List[Dict]:
         """Fetch all fixtures for the season."""

@@ -88,7 +88,6 @@ def render_optimization_tab(processor, players_df: pd.DataFrame, fetcher):
     else:
         st.info("Enter your Team ID and click 'Analyze Transfers' to get personalized recommendations.")
 
-
 def analyze_transfers(processor, players_df, fetcher, team_id, weeks_ahead, free_transfers, strategy, bank):
     """Main transfer analysis logic."""
     
