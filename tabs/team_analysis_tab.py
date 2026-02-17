@@ -11,6 +11,7 @@ from utils.helpers import (
     calculate_consensus_ep, get_consensus_label
 )
 from components.styles import render_section_title, render_fixture_badge
+from understat_api import TEAM_NAME_MAP
 
 
 def get_fixture_string(processor, team_id: int, num_gws: int = 5) -> list:
@@ -266,63 +267,6 @@ def render_team_analysis_tab(processor, players_df: pd.DataFrame):
             </div>
             ''', unsafe_allow_html=True)
             
-        # ── Set Piece Stats Table ──
-        st.caption("Set Piece Efficiency (vs League)")
-        
-        # Calculate stats for ALL teams to determine ranks
-        team_stats_list = []
-        for tid in processor.teams_df['id'].unique():
-            t_data = players_df[players_df['team'] == tid]
-            
-            # Goals column might be 'goals' (Understat) or 'goals_scored' (FPL)
-            goals_col = 'goals' if 'goals' in t_data.columns else 'goals_scored'
-            
-            pens_scored = 0
-            total_goals = 0
-            
-            if goals_col in t_data.columns:
-                total_goals = t_data[goals_col].sum()
-                # Penalties: Goal - NP Goal (if npg exists)
-                if 'npg' in t_data.columns:
-                    pens_scored = (t_data[goals_col] - t_data['npg']).clip(lower=0).sum()
-            
-            team_stats_list.append({
-                'team_id': tid,
-                'pens': pens_scored,
-                'goals': total_goals
-            })
-            
-        stats_df = pd.DataFrame(team_stats_list)
-        if not stats_df.empty:
-            stats_df['pen_rank'] = stats_df['pens'].rank(ascending=False, method='min')
-            stats_df['goal_rank'] = stats_df['goals'].rank(ascending=False, method='min')
-            
-            curr = stats_df[stats_df['team_id'] == team_id]
-            if not curr.empty:
-                c_pens = curr['pens'].iloc[0]
-                c_prank = int(curr['pen_rank'].iloc[0])
-                c_goals = curr['goals'].iloc[0]
-                c_grank = int(curr['goal_rank'].iloc[0])
-                
-                # Display as Cards
-                eff_cols = st.columns(2)
-                
-                with eff_cols[0]:
-                    st.markdown(f'''
-                    <div style="background:#ffffff;border:1px solid rgba(0,0,0,0.04);border-radius:10px;padding:0.8rem;text-align:center;">
-                        <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">Penalties Scored</div>
-                        <div style="color:#1d1d1f;font-weight:600;font-size:1.1rem;">{c_pens:.0f} <span style="font-size:0.75rem;color:#888;font-weight:400;">({c_prank}º)</span></div>
-                    </div>
-                    ''', unsafe_allow_html=True)
-                    
-                with eff_cols[1]:
-                    st.markdown(f'''
-                    <div style="background:#ffffff;border:1px solid rgba(0,0,0,0.04);border-radius:10px;padding:0.8rem;text-align:center;">
-                        <div style="color:#86868b;font-size:0.7rem;text-transform:uppercase;">Total Goals</div>
-                        <div style="color:#1d1d1f;font-weight:600;font-size:1.1rem;">{c_goals:.0f} <span style="font-size:0.75rem;color:#888;font-weight:400;">({c_grank}º)</span></div>
-                    </div>
-                    ''', unsafe_allow_html=True)
-        
         st.markdown("---")
 
         # ── Team Attack/Defense Stats (Moved up) ──
@@ -330,33 +274,64 @@ def render_team_analysis_tab(processor, players_df: pd.DataFrame):
         
         # Calculate stats for ALL teams to determine ranks
         all_team_stats = []
+        understat_teams_df = st.session_state.get("_understat_team_stats", pd.DataFrame())
+        
         for tid in processor.teams_df['id'].unique():
             t_players = players_df[players_df['team'] == tid]
-            t_attackers = t_players[t_players['position'].isin(['MID', 'FWD'])]
             t_defenders = t_players[t_players['position'].isin(['GKP', 'DEF'])]
             
-            def _sum_col(df, col, alt_col=None):
-                if col in df.columns:
-                    return safe_numeric(df[col]).sum()
-                if alt_col and alt_col in df.columns:
-                    return safe_numeric(df[alt_col]).sum()
-                return 0
-                
+            # 1. Base Stats (Sum of Players)
+            base_goals = safe_numeric(t_players['goals_scored']).sum()
+            base_xg = safe_numeric(t_players.get('us_xG', t_players.get('expected_goals', 0))).sum()
+            base_gc = safe_numeric(t_defenders['goals_conceded']).sum() / max(len(t_defenders), 1)
+            
+            # 2. Try to get authoritative Understat Team Stats
+            us_goals, us_xg, us_gc, us_cs = None, None, None, None
+            
+            if not understat_teams_df.empty:
+                # Map FPL team name -> Understat team name
+                team_row = processor.teams_df[processor.teams_df['id'] == tid]
+                if not team_row.empty:
+                    fpl_name = team_row.iloc[0]['name']
+                    us_name = TEAM_NAME_MAP.get(fpl_name, fpl_name)
+                    
+                    match = understat_teams_df[understat_teams_df['understat_team'] == us_name]
+                    if not match.empty:
+                        us_row = match.iloc[0]
+                        us_goals = us_row['goals_per90'] * us_row['games_played']
+                        us_xg = us_row['xG_for_total']
+                        us_gc = us_row['conceded_per90'] * us_row['games_played']
+                        if 'cleansheets_per90' in us_row:
+                             us_cs = us_row['cleansheets_per90']
+
+            # 3. Hybrid Merge (Prefer Understat for Goals/xG/GC/CS)
+            final_goals = us_goals if us_goals is not None else base_goals
+            final_xg = us_xg if us_xg is not None else base_xg
+            final_gc = us_gc if us_gc is not None else (base_gc if base_gc > 0 else 0)
+            final_cs = us_cs if us_cs is not None else (safe_numeric(t_defenders['clean_sheets']).sum() / max(len(t_defenders), 1))
+            
+            # Assists and Saves - Use Understat if available to avoid transfer inflation
+            # (Understat matches by Team, so us_assists is strictly for this team)
+            def _sum_col(df, col):
+                return safe_numeric(df.get(col, 0)).sum()
+            
             def _mean_col(df, col):
-                if col in df.columns:
-                    return safe_numeric(df[col]).mean()
-                return 0
+                return safe_numeric(df.get(col, 0)).mean()
+
+            # Prefer us_assists/us_xA if available, else fallback to FPL (inflated)
+            final_assists = _sum_col(t_players, 'us_assists') if 'us_assists' in t_players.columns else _sum_col(t_players, 'assists')
+            final_xa = _sum_col(t_players, 'us_xA') if 'us_xA' in t_players.columns else _sum_col(t_players, 'expected_assists')
 
             all_team_stats.append({
                 'id': tid,
-                'goals': _sum_col(t_attackers, 'goals_scored'),
-                'assists': _sum_col(t_attackers, 'assists'),
-                'xg': _sum_col(t_attackers, 'us_xG', 'expected_goals'),
-                'xa': _sum_col(t_attackers, 'us_xA', 'expected_assists'),
-                'cs': _sum_col(t_defenders, 'clean_sheets') / max(len(t_defenders), 1),
+                'goals': final_goals,
+                'assists': final_assists,
+                'xg': final_xg,
+                'xa': final_xa,
+                'cs': final_cs,
                 'saves': _sum_col(t_defenders, 'saves'),
                 'cbit': _mean_col(t_defenders, 'cbit_score'),
-                'gc': _sum_col(t_defenders, 'goals_conceded') / max(len(t_defenders), 1)
+                'gc': final_gc
             })
         
         stats_df = pd.DataFrame(all_team_stats)
@@ -369,13 +344,16 @@ def render_team_analysis_tab(processor, players_df: pd.DataFrame):
 
         stat_cols = st.columns(2)
         
+        # Get current team's stats row
+        curr = stats_df[stats_df['id'] == team_id].iloc[0]
+        
         with stat_cols[0]:
             st.markdown("**Attacking Output**")
-            attackers = team_players[team_players['position'].isin(['MID', 'FWD'])]
-            total_goals = safe_numeric(attackers.get('goals_scored', 0)).sum()
-            total_assists = safe_numeric(attackers.get('assists', 0)).sum()
-            total_xg = safe_numeric(attackers.get('us_xG', attackers.get('expected_goals', 0))).sum()
-            total_xa = safe_numeric(attackers.get('us_xA', attackers.get('expected_assists', 0))).sum()
+            # Use pre-calculated stats (hybrid Understat/FPL) for consistency
+            total_goals = curr['goals']
+            total_assists = curr['assists']
+            total_xg = curr['xg']
+            total_xa = curr['xa']
             
             st.markdown(f'''
             <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:0.5rem;">
@@ -400,11 +378,10 @@ def render_team_analysis_tab(processor, players_df: pd.DataFrame):
         
         with stat_cols[1]:
             st.markdown("**Defensive Output**")
-            defenders = team_players[team_players['position'].isin(['GKP', 'DEF'])]
-            total_cs = safe_numeric(defenders.get('clean_sheets', 0)).sum() / max(len(defenders), 1)
-            total_saves = safe_numeric(defenders.get('saves', 0)).sum()
-            avg_cbit = safe_numeric(defenders.get('cbit_score', 0)).mean()
-            goals_conceded = safe_numeric(defenders.get('goals_conceded', 0)).sum() / max(len(defenders), 1)
+            total_cs = curr['cs']
+            total_saves = curr['saves']
+            avg_cbit = curr['cbit']
+            goals_conceded = curr['gc']
             
             st.markdown(f'''
             <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:0.5rem;">

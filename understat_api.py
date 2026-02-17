@@ -173,6 +173,9 @@ def build_team_stats_df(teams_raw: Dict) -> pd.DataFrame:
         total_npxga = sum(float(m.get("npxGA", 0)) for m in history)
         total_scored = sum(int(m.get("scored", 0)) for m in history)
         total_missed = sum(int(m.get("missed", 0)) for m in history)
+        
+        # Calculate clean sheets directly from match history
+        total_cleansheets = sum(1 for m in history if int(m.get("missed", 0)) == 0)
 
         rows.append({
             "understat_team": title,
@@ -186,6 +189,8 @@ def build_team_stats_df(teams_raw: Dict) -> pd.DataFrame:
             "npxGA_per90": total_npxga / games,
             "goals_per90": total_scored / games,
             "conceded_per90": total_missed / games,
+            "cleansheets_total": total_cleansheets,
+            "cleansheets_per90": total_cleansheets / games,
         })
 
     df = pd.DataFrame(rows)

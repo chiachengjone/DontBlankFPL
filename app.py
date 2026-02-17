@@ -265,7 +265,7 @@ def main():
     
     with tab12:
         render_tab_header("Genetic Optimizer", "Evolutionary algorithm for exploring diverse squad solutions")
-        render_genetic_tab(processor, players_df.copy())
+        render_genetic_tab(processor, players_df.copy(), fetcher)
     
 
 
