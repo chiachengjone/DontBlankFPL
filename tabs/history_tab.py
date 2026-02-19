@@ -269,10 +269,8 @@ def render_history_tab(processor, players_df: pd.DataFrame, fetcher):
     st.markdown("### Team Evolution Analysis")
     st.caption("Compare your actual performance vs 'frozen' versions of your squad (Set & Forget)")
     
-    if st.button("Run Evolution Analysis", type="primary", width="stretch", key="run_evo_btn"):
-        render_team_evolution(team_id, gw_history, fetcher, players_df)
-    else:
-        st.info("Click to run Team Evolution analysis (analyzes all past gameweeks)")
+    # Auto-run
+    render_team_evolution(team_id, gw_history, fetcher, players_df)
     
     st.markdown("---")
     
@@ -361,22 +359,14 @@ def render_history_tab(processor, players_df: pd.DataFrame, fetcher):
         return manual_data
 
     # Use session state to avoid repeated heavy API calls
-    if st.button("Analyze Transfer History", type="secondary", width="stretch", key="run_transfer_btn"):
-        if f"manual_transfers_{team_id}" not in st.session_state:
-            with st.spinner("Analyzing squad history (this may take 30s)..."):
-                st.session_state[f"manual_transfers_{team_id}"] = get_manual_transfers(team_id, gw_history, fetcher)
-        
-        m_data = st.session_state.get(f"manual_transfers_{team_id}", [])
-        total_transfers = [d['total'] for d in m_data]
-    else:
-        # Show cached data if available, otherwise show nothing/button
-        if f"manual_transfers_{team_id}" in st.session_state:
-             m_data = st.session_state[f"manual_transfers_{team_id}"]
-             total_transfers = [d['total'] for d in m_data]
-        else:
-             st.info("Click above to analyze transfer history (crawls all gameweeks)")
-             m_data = [] # empty to skip chart
-             total_transfers = []
+    # Auto-run (no button)
+    if f"manual_transfers_{team_id}" not in st.session_state:
+        # Only show spinner if we actually need to compute
+        with st.spinner("Analyzing transfer history..."):
+            st.session_state[f"manual_transfers_{team_id}"] = get_manual_transfers(team_id, gw_history, fetcher)
+    
+    m_data = st.session_state.get(f"manual_transfers_{team_id}", [])
+    total_transfers = [d['total'] for d in m_data]
     
     fig2 = go.Figure()
     
@@ -481,52 +471,66 @@ def render_team_evolution(team_id, gw_history, fetcher, players_df):
     
     current_gw = fetcher.get_current_gameweek()
     
-    # We need player information to identify captains/subs correctly if we wanted full accuracy,
-    # but for "Team Evolution", we'll use the 11 starters + captain bonus of that specific GW.
-    # To keep it simple and fast, we'll use the starting 11 IDs.
+    # Caching key for this team's evolution data
+    evo_cache_key = f"evo_data_{team_id}"
     
-    with st.spinner("Analyzing squad evolution history..."):
-        all_gw_picks = {}
-        for gw in gw_history:
-            num = gw.get('event')
-            if not num: continue
-            
-            picks_data = fetcher.get_team_picks(team_id, num)
-            if not picks_data or 'picks' not in picks_data: continue
-            
-            picks = picks_data['picks']
-            # Starters only (position 1-11)
-            starters = [p['element'] for p in picks if p['position'] <= 11]
-            captain = next((p['element'] for p in picks if p['is_captain']), None)
-            
-            picks_set = set(starters)
-            
-            if picks_set != last_picks_set:
-                versions.append({
-                    'gw': num,
+    # Check if we have cached data for this team
+    if evo_cache_key in st.session_state:
+        versions = st.session_state[evo_cache_key]['versions']
+        gw_points_map = st.session_state[evo_cache_key]['gw_points_map']
+    else:
+        # We need player information to identify captains/subs correctly if we wanted full accuracy,
+        # but for "Team Evolution", we'll use the 11 starters + captain bonus of that specific GW.
+        # To keep it simple and fast, we'll use the starting 11 IDs.
+        
+        with st.spinner("Analyzing squad evolution history (this runs once)..."):
+            all_gw_picks = {}
+            for gw in gw_history:
+                num = gw.get('event')
+                if not num: continue
+                
+                picks_data = fetcher.get_team_picks(team_id, num)
+                if not picks_data or 'picks' not in picks_data: continue
+                
+                picks = picks_data['picks']
+                # Starters only (position 1-11)
+                starters = [p['element'] for p in picks if p['position'] <= 11]
+                captain = next((p['element'] for p in picks if p['is_captain']), None)
+                
+                picks_set = set(starters)
+                
+                if picks_set != last_picks_set:
+                    versions.append({
+                        'gw': num,
+                        'starters': starters,
+                        'captain': captain,
+                        'label': f"GW{num} Squad"
+                    })
+                    last_picks_set = picks_set
+                
+                all_gw_picks[num] = {
                     'starters': starters,
-                    'captain': captain,
-                    'label': f"GW{num} Squad"
-                })
-                last_picks_set = picks_set
+                    'captain': captain
+                }
+
+            if not versions:
+                st.info("No squad changes detected yet.")
+                return
+
+            # Fetch live data (player points) for all GWs analyzed
+            gw_points_map = {} # {gw: {player_id: points}}
+            for gw in gw_history:
+                num = gw.get('event')
+                live_data = fetcher.get_event_live(num)
+                elements = live_data.get('elements', [])
+                player_scores = {e['id']: e['stats']['total_points'] for e in elements}
+                gw_points_map[num] = player_scores
             
-            all_gw_picks[num] = {
-                'starters': starters,
-                'captain': captain
+            # Cache the expensive part
+            st.session_state[evo_cache_key] = {
+                'versions': versions,
+                'gw_points_map': gw_points_map
             }
-
-        if not versions:
-            st.info("No squad changes detected yet.")
-            return
-
-        # Fetch live data (player points) for all GWs analyzed
-        gw_points_map = {} # {gw: {player_id: points}}
-        for gw in gw_history:
-            num = gw.get('event')
-            live_data = fetcher.get_event_live(num)
-            elements = live_data.get('elements', [])
-            player_scores = {e['id']: e['stats']['total_points'] for e in elements}
-            gw_points_map[num] = player_scores
 
     # Calculate points for each version in each GW
     evolution_data = []

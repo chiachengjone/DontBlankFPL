@@ -522,8 +522,18 @@ def render_captain_tab(processor, players_df: pd.DataFrame, fetcher):
     st.caption("Comparison of Safe (EO>35%), Differential (EO<15%), and overall Top candidates")
     
     # Identify categories
-    safe_caps = viable[viable['selected_by_percent'] >= 35].nlargest(5, 'captain_score').copy()
-    diff_caps = viable[viable['selected_by_percent'] < 15].nlargest(5, 'captain_score').copy()
+    # Identify categories using ranking logic to ensure we always show 5
+    # Safe: Top 5 scores among the 20 highest owned players
+    safe_caps = viable.nlargest(20, 'selected_by_percent').nlargest(5, 'captain_score').copy()
+    
+    # Differential: Top 5 scores among the 30 lowest owned players (or < 15%)
+    # Let's stick to < 15% but if empty, fall back to lowest owned
+    diff_pool = viable[viable['selected_by_percent'] < 15]
+    if len(diff_pool) < 5:
+        diff_pool = viable.nsmallest(20, 'selected_by_percent')
+    diff_caps = diff_pool.nlargest(5, 'captain_score').copy()
+    
+    # Top Pick: Top 5 overall scores
     top_caps = viable.nlargest(5, 'captain_score').copy()
     
     # Combine for visualization

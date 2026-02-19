@@ -6,7 +6,8 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 
-from utils.helpers import safe_numeric, round_df, style_df_with_injuries, normalize_name
+from utils.helpers import safe_numeric, round_df, style_df_with_injuries, normalize_name, get_injury_status
+from tabs.analytics_helpers import format_with_rank
 
 
 def render_ml_tab(processor, players_df: pd.DataFrame):
@@ -331,81 +332,135 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
         # ── Quick Insights ──
         st.markdown("### Quick Picks")
         
+        # Filter strictly for Quick Picks (No red flags)
+        # We need to merge status back to pred_df or look up
+        # Let's filter pred_df by looking up IDs in players_df
+        
+        def is_available(pid):
+            p = players_df[players_df['id'] == pid]
+            if p.empty: return True
+            stat = p.iloc[0].get('status', 'a')
+            chance = p.iloc[0].get('chance_of_playing_next_round', 100)
+            if pd.isna(chance): chance = 100
+            # Exclude strict Red (0% or 'u'/'i' with 0)
+            # We allow Yellow (75, 50, 25)
+            if stat == 'u' or (stat == 'i' and chance == 0) or chance == 0:
+                return False
+            return True
+
+        valid_ids = [pid for pid in pred_df['id'] if is_available(pid)]
+        qp_df = pred_df[pred_df['id'].isin(valid_ids)].copy()
+        
         qp1, qp2, qp3, qp4 = st.columns(4)
         
-        top_pick = pred_df.head(1)
-        if not top_pick.empty:
+        # 1. Highest Certainty (was Top Pick by ML xP)
+        # Sort by Certainty descending, then ML xP
+        highest_certainty = qp_df.sort_values(
+            ['Certainty', 'ML xP'], ascending=[False, False]
+        ).head(1)
+        
+        if not highest_certainty.empty:
             with qp1:
+                row = highest_certainty.iloc[0]
                 st.metric(
-                    "Top Pick",
-                    top_pick.iloc[0]["Player"],
-                    f"{top_pick.iloc[0]['ML xP']:.2f} pts",
-                    help="Highest ML predicted points"
+                    "Highest Certainty",
+                    row['Player'],
+                    f"{row['Certainty']:.0f}%",
+                    help="Highest confidence model prediction"
                 )
         
-        # Best value (ML xP / price)
-        pred_df["_value"] = pred_df["ML xP"] / pred_df["Price"].clip(lower=4)
-        best_value = pred_df.nlargest(1, "_value")
+        # 2. Best Value (ML xP / Price)
+        qp_df["_value"] = qp_df["ML xP"] / qp_df["Price"].clip(lower=4)
+        best_value = qp_df.nlargest(1, "_value")
         if not best_value.empty:
             with qp2:
+                row = best_value.iloc[0]
                 st.metric(
                     "Best Value",
-                    best_value.iloc[0]["Player"],
-                    f"£{best_value.iloc[0]['Price']}m",
-                    help="Best ML prediction per £"
+                    row['Player'],
+                    f"£{row['Price']}m",
+                    help="Most points per million"
                 )
         
-        # Biggest upside vs FPL
-        biggest_upside = pred_df.nlargest(1, "vs FPL")
+        # 3. Biggest Upside (vs FPL)
+        biggest_upside = qp_df.nlargest(1, "vs FPL")
         if not biggest_upside.empty:
             with qp3:
+                row = biggest_upside.iloc[0]
                 st.metric(
-                    "Underpriced",
-                    biggest_upside.iloc[0]["Player"],
-                    f"{biggest_upside.iloc[0]['vs FPL']:+.2f} vs FPL",
-                    help="ML thinks this player is underrated"
+                    "Model Favorite",
+                    row['Player'],
+                    f"{row['vs FPL']:+.2f}",
+                    help="Biggest positive difference vs FPL prediction"
                 )
         
-        # Most certain high prediction
-        high_certainty = pred_df[pred_df["Certainty"] >= 50].nlargest(1, "ML xP")
-        if not high_certainty.empty:
+        # 4. Top Raw ML xP (Fallback for the old 'Top Pick' slot, but now as 'Highest Points')
+        top_raw = qp_df.nlargest(1, "ML xP")
+        if not top_raw.empty:
             with qp4:
+                row = top_raw.iloc[0]
                 st.metric(
-                    "Safest Pick",
-                    high_certainty.iloc[0]["Player"],
-                    f"{high_certainty.iloc[0]['Certainty']:.0f}% certain",
-                    help="High prediction with narrow range"
+                    "Highest Points",
+                    row['Player'],
+                    f"{row['ML xP']:.2f}",
+                    help="Highest absolute point prediction"
                 )
         
         # ── Full results table ──
-        st.markdown(f"### ML Predictions (next {gws} GW{'s' if gws > 1 else ''}) — {len(pred_df)} found")
+        # ── Full results table ──
+        st.markdown(f"### ML Predictions (next {horizon} GW{'s' if horizon > 1 else ''}) — {len(pred_df)} found")
         
         # Prepare display dataframe
         poisson_label = f"Poisson xP ({horizon}GW)" if horizon > 1 else "Poisson xP"
         
-        display_cols = ["Player", "Pos", "Team", "Price", "Minutes", ml_label]
+        # Calculate Ranks (before display formatting)
+        # 1 = Highest
+        pred_df['ml_rank'] = pred_df[ml_label].rank(ascending=False, method='min').astype(int)
+        pred_df['fpl_rank'] = pred_df[fpl_label].rank(ascending=False, method='min').astype(int)
+        pred_df['poisson_rank'] = pred_df[poisson_label].rank(ascending=False, method='min').astype(int)
+        
+        # Create display columns with brackets
+        pred_df['ML Display'] = pred_df.apply(
+            lambda r: format_with_rank(f"{r[ml_label]:.2f}", r['ml_rank']), axis=1
+        )
+        pred_df['FPL Display'] = pred_df.apply(
+            lambda r: format_with_rank(f"{r[fpl_label]:.2f}", r['fpl_rank']), axis=1
+        )
+        pred_df['Poisson Display'] = pred_df.apply(
+            lambda r: format_with_rank(f"{r[poisson_label]:.2f}", r['poisson_rank']), axis=1
+        )
+
+        display_cols = ["Player", "Pos", "Team", "Price", "Minutes", 'ML Display', "Range"]
         if horizon > 1:
             display_cols.append("Avg ML")
-        display_cols.extend(["Range", fpl_label, "vs FPL", poisson_label, "vs Poisson", "Certainty"])
+        display_cols.extend(['FPL Display', "vs FPL", 'Poisson Display', "vs Poisson", "Certainty"])
         
-        full_df = pred_df[display_cols].copy()
+        full_df = pred_df.copy()
         
+        final_df = full_df[display_cols].copy()
+        final_df = final_df.rename(columns={
+            'ML Display': ml_label,
+            'FPL Display': fpl_label,
+            'Poisson Display': poisson_label
+        })
+
         # Use column_config for formatting
         col_config = {
             "Price": st.column_config.NumberColumn("Price", format="£%.1fm"),
             "Minutes": st.column_config.NumberColumn("Mins", format="%d"),
-            ml_label: st.column_config.NumberColumn(ml_label, format="%.2f"),
-            fpl_label: st.column_config.NumberColumn(fpl_label, format="%.2f"),
+            ml_label: st.column_config.TextColumn(ml_label), # Text for brackets
+            fpl_label: st.column_config.TextColumn(fpl_label),
+            "Range": st.column_config.TextColumn("Range", width="medium"), # Explicitly config Range
             "vs FPL": st.column_config.NumberColumn("vs FPL", format="%+.2f"),
-            poisson_label: st.column_config.NumberColumn(poisson_label, format="%.2f"),
+            poisson_label: st.column_config.TextColumn(poisson_label),
             "vs Poisson": st.column_config.NumberColumn("vs Poisson", format="%+.2f"),
             "Certainty": st.column_config.NumberColumn("Certainty", format="%.0f%%"),
         }
-        if "Avg ML" in full_df.columns:
+        if "Avg ML" in final_df.columns:
             col_config["Avg ML"] = st.column_config.NumberColumn("Avg ML", format="%.2f")
 
         st.dataframe(
-            style_df_with_injuries(full_df, players_df),
+            style_df_with_injuries(final_df, players_df),
             width="stretch",
             hide_index=True,
             height=600,
