@@ -42,13 +42,15 @@ st.set_page_config(
 apply_theme()
 
 # ── Session State Defaults ──
+# We initialize these default values to ensure the app has a stable starting state.
+# These control everything from the active model view to the user's preferred settings.
 _SESSION_DEFAULTS = {
-    'injury_highlight': True,
-    'use_poisson_xp': True,  # Legacy, keeping for compatibility during migration
-    'active_models': ['ml', 'poisson', 'fpl'], # Default to all 3
-    'fpl_team_id': 0,
-    # Preferences
-    'pref_weeks_ahead': 1,
+    'injury_highlight': True,           # Visual cue for injured players
+    'use_poisson_xp': True,             # Legacy toggle, kept for backward compatibility
+    'active_models': ['ml', 'poisson', 'fpl'], # Default to showing all 3 models for maximum context
+    'fpl_team_id': 0,                   # Default Team ID (0 means no team loaded)
+    # User Preferences (persisted across reruns)
+    'pref_weeks_ahead': 1,              # Default horizon for xP calculations
     'pref_strategy': 'Balanced',
     'pref_max_price': 15.0,
     'pref_position': 'All',
@@ -63,11 +65,17 @@ for key, default in _SESSION_DEFAULTS.items():
 
 @st.cache_resource(ttl=300, show_spinner=False)
 def load_fpl_data():
-    """Load FPL data with caching. Only fetches from API once per 5 minutes."""
+    """
+    Load FPL data with smart caching.
+    
+    This function creates the data pipeline and fetches fresh data.
+    It is cached for 5 minutes (300s) to prevent hammering the FPL API 
+    and to speed up the user experience on page reloads.
+    """
     try:
         fetcher, processor = create_data_pipeline()
-        # Pre-build the players DataFrame during cache so subsequent
-        # calls to processor.players_df are instant
+        # Trigger the property access to pre-build the players DataFrame 
+        # inside the cache. This ensures subsequent access is instant.
         _ = processor.players_df
         return fetcher, processor, None
     except Exception as e:
@@ -75,19 +83,23 @@ def load_fpl_data():
 
 
 def main():
-    """Main application."""
+    """
+    Main application entry point.
+    Orchestrates the UI flow: Header -> Data Load -> Settings -> Tabs.
+    """
     
-    # Header
+    # ── Header & Title ──
     render_header("FPL Strategy Engine", "2025/26")
     
-    # Load data
+    # ── Data Loading Phase ──
     with st.spinner("Loading data..."):
         fetcher, processor, error = load_fpl_data()
     
+    # Handle critical data load failures gracefully
     if error:
         st.error(f"Failed to load FPL data: {error}")
         st.info("Check your internet connection and refresh.")
-        # Graceful degradation: show cached data if available
+        # Fallback: Try to use the last known good data if the API fails
         if '_last_good_players_df' in st.session_state:
             st.warning("Showing last cached data (may be stale).")
             players_df = st.session_state['_last_good_players_df']
@@ -101,46 +113,62 @@ def main():
         st.error("Could not initialize data processor")
         return
     
-    # Get players data (cached per weeks_ahead to avoid re-running Poisson on every rerun)
+    # ── Feature Engineering ──
+    # We cache the 'engineered' dataframe (with Poisson xP, etc.) separately 
+    # because it depends on the 'weeks_ahead' setting, which can change.
     try:
         weeks_ahead = st.session_state.pref_weeks_ahead
         cache_key = f"_engineered_df_{weeks_ahead}"
+        
         if cache_key in st.session_state:
             players_df = st.session_state[cache_key]
         else:
+            # This is the heavy lifting: calculating xP for the next N gameweeks
             players_df = processor.get_engineered_features_df(weeks_ahead=weeks_ahead)
             st.session_state[cache_key] = players_df
+            
         st.session_state.players_df = players_df
-        # Store last-good copy for graceful degradation on next failure
+        # Save a copy for emergency fallback
         st.session_state['_last_good_players_df'] = players_df
+        
     except Exception as e:
         st.error(f"Error loading players: {e}")
         return
     
-    # Auto-run ML predictions on first load
+    # ── ML Model Initialization ──
+    # We attempt to auto-run the ML predictions on the first load so the 
+    # "ML Predictions" tab is populated without needing a manual click.
     if "ml_predictions" not in st.session_state:
         try:
             from ml_predictor import create_ml_pipeline
             predictor = create_ml_pipeline(players_df)
+            # Default to 1 GW prediction for speed on startup
             predictions = predictor.predict_gameweek_points(n_gameweeks=1, use_ensemble=True)
+            
             st.session_state["ml_predictions"] = predictions
             st.session_state["ml_predictor"] = predictor
             st.session_state["ml_gws"] = 1
+            
+            # Run cross-validation to get accuracy metrics
             cv_scores = predictor.cross_validate_predictions(n_splits=3)
             st.session_state["ml_cv_scores"] = cv_scores
+            
         except (ImportError, ValueError, RuntimeError) as exc:
             logger.debug("ML auto-init skipped: %s", exc)
-            # Silently fall back — ML tab button still available
+            # If ML fails to auto-load, we just skip it. The user can retry 
+            # in the ML tab later.
 
-    # Status bar + settings on same row
+    # ── Status Bar ──
     try:
         gw = fetcher.get_current_gameweek()
         render_status_bar(f"GW {gw} LIVE | {len(players_df)} players | Updated just now")
     except Exception:
         render_status_bar(f"{len(players_df)} players loaded")
     
-    # Settings row (compact) -- Team ID + Toggles
+    # ── Global Controls (Team ID & Model Selection) ──
     set_col1, set_col2, set_col3 = st.columns(3, vertical_alignment="center")
+    
+    # Column 1: Team ID Input
     with set_col1:
         with st.form("team_id_form", border=False):
             team_id_input = st.number_input(
@@ -149,56 +177,60 @@ def main():
                 max_value=99_999_999,
                 value=st.session_state.fpl_team_id,
                 step=1,
-                help="Enter your FPL Team ID. Used by Squad Builder and Monte Carlo."
+                help="Enter your FPL Team ID to analyze your specific squad."
             )
             submitted = st.form_submit_button("Sync Team", width="stretch")
             if submitted:
                 st.session_state.fpl_team_id = int(team_id_input)
                 st.rerun()
 
-        # Understat warning only when offline
+        # Understat status check
         ustat_active = st.session_state.get('_understat_active', None)
         if ustat_active is False:
             st.warning("Understat offline - using FPL fallback")
+            
+    # Column 2: Active Model Toggles
+    # This allows the user to mix-and-match which prediction models they trust.
     with set_col2:
         st.markdown("<div style='font-size:0.75rem;color:#86868b;margin-bottom:0.2rem;'>Active Models (Model xP)</div>", unsafe_allow_html=True)
-        # Using checkboxes in a nested column layout for a clean look
         m_col1, m_col2, m_col3 = st.columns(3)
         with m_col1:
-            use_ml = st.checkbox("ML xP", value='ml' in st.session_state.active_models, key="global_ml", help="ML Prediction")
+            use_ml = st.checkbox("ML xP", value='ml' in st.session_state.active_models, key="global_ml", help="Machine Learning Model")
         with m_col2:
-            use_poisson = st.checkbox("Poi", value='poisson' in st.session_state.active_models, key="global_poisson", help="Poisson xP")
+            use_poisson = st.checkbox("Poi", value='poisson' in st.session_state.active_models, key="global_poisson", help="Poisson xG/xA Model")
         with m_col3:
-            use_fpl = st.checkbox("FPL xP", value='fpl' in st.session_state.active_models, key="global_fpl", help="FPL Raw xP")
+            use_fpl = st.checkbox("FPL xP", value='fpl' in st.session_state.active_models, key="global_fpl", help="Official FPL Predictions")
             
-        # Update active_models list
+        # Logic to update the active_models list based on checkboxes
         new_active = []
         if use_ml: new_active.append('ml')
         if use_poisson: new_active.append('poisson')
         if use_fpl: new_active.append('fpl')
         
-        # Enforce at least one model is always selected
+        # Guard clause: Don't allow deselecting everything
         if not new_active:
             new_active = st.session_state.active_models if st.session_state.active_models else ['fpl']
             st.warning("At least one model must be selected.")
             
         if new_active != st.session_state.active_models:
             st.session_state.active_models = new_active
-            # Also update legacy toggle for any old dependencies
             st.session_state.use_poisson_xp = 'poisson' in new_active
-            # Clear consensus EP caches so they recalculate with new model selection
+            # Clear caches that depend on model selection (like Consensus EP)
             for key in list(st.session_state.keys()):
                 if key.startswith('_cep_'):
                     del st.session_state[key]
             st.rerun()
+            
+    # Column 3: Global Visual Toggles
     with set_col3:
         st.session_state.injury_highlight = st.toggle(
             "Injury highlights",
             value=st.session_state.injury_highlight,
-            help="Color-code rows by injury status"
+            help="Visually flag injured/doubtful players in tables"
         )
     
-    # Navigation tabs
+    # ── Main Navigation Tabs ──
+    # Define the core structure of the application
     tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12 = st.tabs([
         "Dashboard",
         "Strategy",
@@ -214,6 +246,9 @@ def main():
         "Monte Carlo",
         "Genetic",
     ])
+    
+    # Load each tab's content
+    # Note: We pass 'players_df.copy()' to ensure tabs don't accidentally mutate the master dataframe
     
     with tab0:
         render_tab_header("Dashboard", "At-a-glance overview of your gameweek — key metrics, top picks and alerts")
@@ -267,7 +302,6 @@ def main():
         render_tab_header("Genetic Optimizer", "Evolutionary algorithm for exploring diverse squad solutions")
         render_genetic_tab(processor, players_df.copy(), fetcher)
     
-
 
 
 if __name__ == "__main__":

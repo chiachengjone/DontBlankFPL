@@ -54,16 +54,31 @@ class EngineeredFeaturesResult:
 
 
 class FPLDataFetcher:
-    """Handles all FPL API data fetching operations with rate limiting and retry."""
+    """
+    Handles all communication with the FPL API.
+    
+    This class is designed to be robust:
+    1.  **Rate Limiting**: Ensures we don't send too many requests too fast.
+    2.  **Retries**: Automatically tries again if the internet blips or FPL is busy.
+    3.  **Caching**: Remembers answers for a while to save time.
+    """
 
-    # Rate limiting: minimum seconds between API calls
+    # ── Configuration ──
+    # Minimum time (seconds) to wait between requests to be polite to the server
     MIN_REQUEST_INTERVAL: float = 1.0
+    
+    # How many times to try again if a request fails
     MAX_RETRIES: int = 3
-    RETRY_BACKOFF_BASE: float = 2.0  # exponential backoff: 2s, 4s, 8s
-    REQUEST_TIMEOUT: int = 15  # seconds
+    
+    # "Backoff" means we wait longer after each failure (2s, 4s, 8s...)
+    RETRY_BACKOFF_BASE: float = 2.0
+    
+    # Give up if the server doesn't respond in this many seconds
+    REQUEST_TIMEOUT: int = 15
     
     def __init__(self, odds_api_key: Optional[str] = None):
         self.session = requests.Session()
+        # Masquerade as a browser/app to avoid being blocked
         self.session.headers.update({
             'User-Agent': 'FPL-Strategy-Engine/2.0',
             'Accept-Charset': 'utf-8'
@@ -74,50 +89,65 @@ class FPLDataFetcher:
         self.cache_duration = CACHE_DURATION
         self._last_request_time: float = 0.0
 
-    # ── Rate limiting ─────────────────────────────────────────────────────────
+    # ── Rate Limiting & Retries ──
+
     def _rate_limit(self):
-        """Enforce minimum interval between API requests."""
+        """
+        Calculates how much time has passed since the last request and sleeps
+        if necessary to ensure we respect the MIN_REQUEST_INTERVAL.
+        """
         elapsed = time.time() - self._last_request_time
         if elapsed < self.MIN_REQUEST_INTERVAL:
             time.sleep(self.MIN_REQUEST_INTERVAL - elapsed)
         self._last_request_time = time.time()
 
     def _request_with_retry(self, url: str, context: str = "") -> requests.Response:
-        """Make an HTTP GET with rate limiting and exponential-backoff retry."""
+        """
+        Sends an HTTP GET request with built-in safety nets.
+        
+        If the server says "Too Many Requests" (429) or fails unexpectedly,
+        this will wait a bit and try again up to MAX_RETRIES times.
+        """
         last_exc: Optional[Exception] = None
         for attempt in range(self.MAX_RETRIES):
-            self._rate_limit()
+            self._rate_limit() # Always pause before sending
             try:
                 response = self.session.get(url, timeout=self.REQUEST_TIMEOUT)
+                
+                # Special handling for FPL's rate limit response
                 if response.status_code == 429:  # Too Many Requests
                     wait = self.RETRY_BACKOFF_BASE ** (attempt + 1)
-                    logger.warning("Rate limited by FPL API (429), retrying in %.1fs… (%s)", wait, context)
+                    logger.warning("FPL says to slow down! Waiting %.1fs (Context: %s)", wait, context)
                     time.sleep(wait)
                     continue
-                response.raise_for_status()
+                
+                response.raise_for_status() # Raise error for 404/500 codes
                 response.encoding = 'utf-8'
                 return response
             except requests.RequestException as exc:
                 last_exc = exc
                 if attempt < self.MAX_RETRIES - 1:
                     wait = self.RETRY_BACKOFF_BASE ** (attempt + 1)
-                    logger.warning("Request failed (%s), retrying in %.1fs… [%s]", context, wait, exc)
+                    logger.warning("Network blip (%s). Retrying in %.1fs... Error: %s", context, wait, exc)
                     time.sleep(wait)
-        raise FPLAPIError(f"Failed after {self.MAX_RETRIES} retries ({context}): {last_exc}")
+        
+        # If we get here, we've exhausted all retries
+        raise FPLAPIError(f"Gave up after {self.MAX_RETRIES} tries ({context}). Last error: {last_exc}")
 
-    # ── Caching ───────────────────────────────────────────────────────────────
+    # ── Smart Caching ──
+
     def _get_cached(self, key: str) -> Optional[dict]:
-        """Retrieve cached data if not expired."""
+        """Check if we have a valid (non-expired) copy of this data in memory."""
         if key in self._cache:
             if time.time() < self._cache_expiry.get(key, 0):
                 return self._cache[key]
-            # Expired – evict
+            # It's expired, so clear it out to make room for fresh data
             self._cache.pop(key, None)
             self._cache_expiry.pop(key, None)
         return None
     
     def _set_cache(self, key: str, data: dict):
-        """Cache data with expiration. Evicts oldest entries when cache is full."""
+        """Store data in memory. If full, throw out the oldest item."""
         # Evict oldest entries if at capacity
         if len(self._cache) >= _MAX_CACHE_ENTRIES:
             oldest_key = min(self._cache_expiry, key=self._cache_expiry.get)
@@ -128,8 +158,9 @@ class FPLDataFetcher:
     
     def get_bootstrap_static(self) -> Dict:
         """
-        Fetch general player/team info from bootstrap-static endpoint.
-        Returns all players, teams, events (gameweeks), and game settings.
+        Fetch the 'Big Data' from FPL.
+        Contains all players, teams, gameweek schedules, and rules.
+        This is the foundation for everything else.
         """
         cached = self._get_cached('bootstrap')
         if cached:

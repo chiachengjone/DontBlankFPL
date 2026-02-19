@@ -138,37 +138,51 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
             fpl_ep_raw = safe_numeric(pd.Series([player.get('ep_next_num', player.get('ep_next', 0))])).iloc[0]
             ml_pred = pred.predicted_points
             
-            # Certainty calculation
+            # ── Certainty Calculation ──
+            # "Certainty" is our measure of how confident the model is.
+            # We derive it from the width of the confidence interval (CI).
+            # Narrow CI = High Certainty. Wide CI = Low Certainty.
+            
             ci_low, ci_high = pred.confidence_interval
             ci_width = ci_high - ci_low
+            
+            # Normalize uncertainty relative to the predicted points
+            # (A 2-point spread matters more for a 4-point player than a 10-point player)
             if ml_pred > 0.5:
                 relative_uncertainty = (ci_width / ml_pred) * 100
             else:
+                # Fallback for very low predictions to avoid division by near-zero
                 relative_uncertainty = ci_width * 50
+                
+            # Convert to a 0-100% scale (inverted, so 100% is perfect certainty)
             certainty = max(0, min(100, 100 - relative_uncertainty))
 
-            # Scale metrics by horizon - match Analytics tab simple scaling for comparison
+            # ── Horizon Scaling ──
+            # When looking 3-5 weeks ahead, uncertainty naturally grows.
+            # We scale metrics to match the selected horizon (User Slider).
             horizon = n_gameweeks
             
-            # Use pre-calculated Poisson EP from engine (already totaled for horizon)
+            # 1. Poisson xP: Already calculated for the full horizon by the engine
             poisson_ep = safe_numeric(player.get('expected_points_poisson', 0.0))
             
-            # FPL EP scaling (simple multiplier to match Analytics tab display)
+            # 2. FPL xP: Simple multiplication (Naive extrapolation)
             fpl_ep = fpl_ep_raw * horizon
             
-            # ML Pred scaling (simple multiplier to match Analytics tab comparison)
+            # 3. ML xP: Simple multiplication for the total
             ml_pred_total = ml_pred * horizon
             
-            # Certainty scaling (reduces with distance)
-            certainty_base = certainty # From previous calculation
+            # 4. Certainty Decay: Confidence drops the further out we look
+            # We apply a decay factor (0.95^weeks)
+            certainty_base = certainty 
             certainty_horizon = certainty_base * (0.95 ** (horizon - 1))
             
-            # Scale Range (uncertainty) based on horizon
-            # Sum range linearly as it represents the bounds of total points
-            # Scaling factors for decay still apply
+            # 5. Range Expansion: The possible range of outcomes widens over time
+            # We sum the range linearly but apply a decay to the bounds
             scaled_ci_low = 0.0
             scaled_ci_high = 0.0
             for i in range(horizon):
+                # Future weeks are harder to predict, so we widen the bounds slightly
+                # (represented here by summing decayed components)
                 decay = 0.92 ** i
                 scaled_ci_low += ci_low * decay
                 scaled_ci_high += ci_high * decay

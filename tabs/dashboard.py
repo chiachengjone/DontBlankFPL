@@ -31,64 +31,69 @@ from utils.helpers import (
 
 
 def render_dashboard_tab(processor, players_df: pd.DataFrame):
-    """Dashboard overview - key metrics and recommendations at a glance."""
+    """
+    Dashboard Overview.
     
-    # Pre-calculate Consensus EP for the entire dashboard
+    This is the landing page of the application. It provides:
+    1.  **Key Metrics**: Gameweek averages, your score, and active models.
+    2.  **Top Picks**: The best players for the upcoming gameweek according to the selected models.
+    3.  **Insights**: Captaincy recommendations, fixture swings, and market trends.
+    """
+    
+    # ── Preparation ──
+    # Work on a copy to avoid affecting other tabs
     players_df = players_df.copy()
     
-    # Ensure ML data is present if available in session state
+    # If ML predictions have been run (in the background or via the ML tab),
+    # we merge them here so the dashboard can use them.
     if 'ml_predictions' in st.session_state and 'ml_pred' not in players_df.columns:
         ml_preds = st.session_state['ml_predictions']
         players_df['ml_pred'] = players_df['id'].apply(
             lambda pid: ml_preds[pid].predicted_points if pid in ml_preds else 0
         )
 
+    # Calculate Consensus EP (Model xP)
+    # This blends the selected models (ML, Poisson, FPL) into a single "Master Prediction".
     active_models = st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])
     players_df = calculate_consensus_ep(players_df, active_models)
     con_label = get_consensus_label(active_models)
 
-    # Metrics explanation dropdown
-    # Prioritizing Model xP explanation at the top
+    # ── Help & Explanations ──
     with st.expander("Understanding Dashboard Metrics"):
         st.markdown(f"""
         **Model xP ({con_label})**
-        The Model xP is a weighted average of several predictive models. The current weightages are:
-        - **3 Models Active**: ML xP (40%), Poisson xP (40%), FPL xP (20%)
-        - **ML xP + Poisson xP**: ML xP (50%), Poisson xP (50%)
-        - **ML xP + FPL xP**: ML xP (67%), FPL xP (33%)
-        - **Poisson xP + FPL xP**: Poisson xP (67%), FPL xP (33%)
-        - **Single Model**: 100% of selected model
+        This is your "Master Prediction". It's a weighted average of the models you've enabled:
+        - **All 3 Active**: ML (40%), Poisson (40%), FPL (20%). *Balanced approach.*
+        - **ML + Poisson**: 50/50 split. *Pure data-driven.*
+        - **ML + FPL**: ML (67%), FPL (33%). *Smart but grounded.*
+        - **Single Model**: 100% of that model.
         
         **Gameweek Overview**
-        - **Current GW**: The active gameweek number
-        - **GW Average**: Average points scored by all managers this GW
-        - **Your GW Score**: Your points this GW (minus any transfer hits)
-        - **vs Average**: How many points above/below the average you scored
+        - **GW Average**: The average score of all FPL managers.
+        - **vs Average**: How much you beat (or lost to) the average. Green is good!
         
-        **Top Picks by Position**
-        - Shows highest {con_label} players per position
-        - Yellow background indicates injured/doubtful players
-        - Ownership tier shows how template vs differential a pick is
-        
-        **Captain Quick Pick**
-        - Top 3 captain candidates based on {con_label}, form, and ownership
-        - xP = Expected Value ({con_label} × captain multiplier)
+        **Top Picks**
+        - The highest predicted scorers for the next gameweek.
+        - **Yellow Background**: The player has an injury flag (check before buying!).
+        - **Tiers**: Tells you if a player is "Template" (everyone owns them) or a "Differential".
         
         **Fixture Swings**
-        - Teams whose schedule is about to get easier (green) or harder (red)
-        - Useful for planning transfers 3-6 GWs ahead
+        - **Green**: Schedule is getting easier. Target these teams.
+        - **Red**: Schedule is getting harder. Avoid or sell.
         """)
-
+        
+    # ── Current Status ──
     try:
         current_gw = processor.fetcher.get_current_gameweek()
     except Exception:
         current_gw = 1
 
-    # Fetch GW average score and user score from bootstrap events
+    # Fetch live score data (Average and User)
     gw_avg_score = 0
     user_gw_points = None
-    user_total_points = None
     team_id = st.session_state.get('fpl_team_id', 0)
+    
+    # 1. Get Global Average
     try:
         bootstrap = processor.fetcher.get_bootstrap_static()
         events = bootstrap.get('events', [])
@@ -99,24 +104,23 @@ def render_dashboard_tab(processor, players_df: pd.DataFrame):
     except Exception:
         pass
 
-    # Fetch user's GW score if team ID is set
+    # 2. Get Your Team's Score (if Team ID is set)
     if team_id and team_id > 0:
         try:
             picks_data = processor.fetcher.get_team_picks(team_id, current_gw)
             if isinstance(picks_data, dict):
                 entry_hist = picks_data.get('entry_history', {})
                 user_gw_points = entry_hist.get('points', None)
-                user_total_points = entry_hist.get('total_points', None)
-                # Subtract transfer cost already included in points
+                # Adjust for hits taken
                 transfer_cost = entry_hist.get('event_transfers_cost', 0)
                 if user_gw_points is not None:
                     user_gw_points = user_gw_points - transfer_cost
         except Exception:
             pass
 
-    # ── GW Header ──
+    # ── Gameweek Scoreboard ──
     st.markdown('<p class="section-title">Gameweek Overview</p>', unsafe_allow_html=True)
-
+    
     g1, g2, g3, g4 = st.columns(4)
     with g1:
         st.metric("Current GW", current_gw)
@@ -126,7 +130,7 @@ def render_dashboard_tab(processor, players_df: pd.DataFrame):
         if user_gw_points is not None:
             st.metric("Your GW Score", user_gw_points)
         else:
-            st.metric("Your Team ID", team_id if team_id else "Not set")
+            st.metric("Your Team ID", team_id if team_id else "Not set", help="Enter Team ID in settings above")
     with g4:
         if user_gw_points is not None and gw_avg_score:
             diff = user_gw_points - gw_avg_score
@@ -136,25 +140,19 @@ def render_dashboard_tab(processor, players_df: pd.DataFrame):
             avg_ep = safe_numeric(players_df.get('expected_points', players_df.get('ep_next', pd.Series([0] * len(players_df))))).mean()
             st.metric("Avg xP (all)", f"{avg_ep:.2f}")
 
-    # ── Top Picks ──
+    # ── Widget Grid ──
     render_top_picks_summary(players_df)
-
-    # ── Captaincy Quick Pick ──
     render_captain_quick_pick(players_df)
 
-    # ── Squad Performance ──
     with st.container():
         render_squad_performance(processor, players_df, current_gw, team_id)
 
-    # ── Fixture Swings ──
     with st.container():
         render_fixture_swings(processor)
 
-    # ── Ownership Breakdown ──
     with st.container():
         render_ownership_breakdown(players_df)
 
-    # ── Transfer Trends ──
     with st.container():
         render_transfer_trends(players_df)
 
