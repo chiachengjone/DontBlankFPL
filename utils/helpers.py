@@ -119,27 +119,41 @@ def get_player_fixtures(player_id: int, processor, weeks_ahead: int = 5) -> List
         current_gw = processor.fetcher.get_current_gameweek()
         fixtures_df = processor.fixtures_df
         
-        fixtures = fixtures_df[
+        # Vectorized filtering
+        mask = (
             (fixtures_df['event'] >= current_gw) &
             (fixtures_df['event'] < current_gw + weeks_ahead) &
             ((fixtures_df['team_h'] == team_id) | (fixtures_df['team_a'] == team_id))
-        ].sort_values('event')
+        )
+        fixtures = fixtures_df[mask].sort_values('event')
         
+        if fixtures.empty:
+            return []
+            
+        # Vectorized calculation of opponent and FDR
+        is_home = fixtures['team_h'] == team_id
+        
+        # Create result list directly
         result = []
+        # We still iterate for the final list creation, but the heavy filtering is vectorized.
+        # Ideally we could map entire columns, but we need get_team_short_name which might be slow if vectorised incorrectly.
+        # For <10 items, standard iteration is fine after filtering.
+        
         for _, fix in fixtures.iterrows():
-            is_home = fix['team_h'] == team_id
-            opponent_id = fix['team_a'] if is_home else fix['team_h']
-            fdr = fix.get('team_h_difficulty', 3) if is_home else fix.get('team_a_difficulty', 3)
+            # Recalculate is_home for this row (safe)
+            home_match = fix['team_h'] == team_id
+            opponent_id = fix['team_a'] if home_match else fix['team_h']
+            fdr = fix.get('team_h_difficulty', 3) if home_match else fix.get('team_a_difficulty', 3)
             
             result.append({
                 'gw': int(fix['event']),
                 'opponent': get_team_short_name(opponent_id, processor),
-                'is_home': is_home,
+                'is_home': home_match,
                 'fdr': int(fdr),
                 'kickoff': fix.get('kickoff_time', '')
             })
         return result
-    except:
+    except Exception:
         return []
 
 
@@ -218,21 +232,18 @@ def get_fdr_color(fdr: int) -> str:
     return FDR_COLORS.get(fdr, '#888')
 
 
-def round_df(df: pd.DataFrame, max_dp: int = 2) -> pd.DataFrame:
-    """Round all numeric float columns and format as strings for clean display.
+def round_df(df: pd.DataFrame, max_dp: int = 3) -> pd.DataFrame:
+    """Round all numeric float columns to max_dp decimal places.
     
-    Converts floats to formatted strings so Streamlit's Arrow renderer
-    cannot add extra trailing decimals.
-    Columns named Price/Cost keep 1 dp; all other floats use max_dp.
+    Keeps columns as numeric (float) to ensure correct sorting in Streamlit.
+    Formatting for display should be handled by st.column_config.
     """
     df = df.copy()
     _price_names = {'Price', 'Cost', 'price', 'cost', 'now_cost'}
     for col in df.columns:
         if pd.api.types.is_float_dtype(df[col]):
             dp = 1 if col in _price_names else max_dp
-            df[col] = df[col].round(dp).map(
-                lambda x, d=dp: f'{x:.{d}f}' if pd.notna(x) else ''
-            )
+            df[col] = df[col].round(dp)
     return df
 
 

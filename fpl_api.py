@@ -421,7 +421,7 @@ class FPLDataProcessor:
         
         return df
     
-    def calculate_cbit_metrics(self, df: pd.DataFrame) -> pd.DataFrame:
+    def calculate_cbit_metrics(self, df: pd.DataFrame, team_fdrs: Optional[Dict] = None) -> pd.DataFrame:
         """
         Calculate enhanced CBIT metrics (Clearances, Blocks, Interceptions, Tackles).
         2025/26 "DefCon" scoring: DEF threshold=10, others=12 for +2 bonus.
@@ -517,6 +517,27 @@ class FPLDataProcessor:
             opp_xg = pd.to_numeric(df['poisson_opp_xG_per90'], errors='coerce').fillna(1.35)
             league_avg_xg = opp_xg[opp_xg > 0].mean() or 1.35
             df['cbit_matchup'] = (opp_xg / league_avg_xg).clip(0.5, 2.0).round(2)
+        elif team_fdrs is not None:
+             # Use FDR as proxy: Higher FDR = Harder Opponent = More Defensive Actions
+             # Map FDR 1-5 to Matchup 0.7-1.3
+             def get_matchup_from_fdr(tid):
+                 try:
+                     # Ensure ID is int for lookup
+                     tid = int(tid)
+                 except (ValueError, TypeError):
+                     return 1.0
+                 
+                 fdrs = team_fdrs.get(tid)
+                 if not fdrs:
+                     return 1.0 # Default if no fixtures found
+                     
+                 next_fdr = fdrs[0]
+                 # FDR 5 (Hard) -> 1.3 (More defensive actions expected)
+                 # FDR 1 (Easy) -> 0.7 (Fewer defensive actions expected)
+                 # FDR 3 (Avg)  -> 1.0 (Neutral)
+                 return 1.0 + (next_fdr - 3.0) * 0.15
+                 
+             df['cbit_matchup'] = df['team'].map(get_matchup_from_fdr).fillna(1.0).clip(0.7, 1.4).round(2)
         else:
             df['cbit_matchup'] = 1.0
         
@@ -901,13 +922,13 @@ class FPLDataProcessor:
         status = EngineStatus()
         df = self.players_df.copy()
         
-        # 1. CBIT Metrics
-        df = self.calculate_cbit_metrics(df)
-        
-        # 2. Team Fixture Metrics
+        # 1. Team Fixture Metrics (Calculated first so they can be used for Matchup logic)
         team_fdrs, team_blanks, team_ease, decay_weights, _ = self._get_team_fixture_metrics(weeks_ahead)
         df['fixture_ease'] = df['team'].map(team_ease).fillna(0.5).astype(float)
         df['blank_count'] = df['team'].map(lambda tid: len(team_blanks.get(tid, set()))).fillna(0).astype(int)
+        
+        # 2. CBIT Metrics (Now uses FDR for matchup)
+        df = self.calculate_cbit_metrics(df, team_fdrs=team_fdrs)
         
         # 3. Base EP Prep
         df['ep_next_num'] = pd.to_numeric(df.get('ep_next', 0), errors='coerce').fillna(0.0)

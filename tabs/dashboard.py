@@ -398,15 +398,37 @@ def render_fixture_swings(processor):
             st.markdown("**Getting Easier**")
             improving = swing_df.nlargest(DASHBOARD_FIXTURE_SWINGS, 'Swing')
             improving_display = improving.copy()
-            improving_display['Swing'] = improving_display['Swing'].apply(lambda x: f"+{x:.2f}" if x > 0 else f"{x:.2f}")
-            st.dataframe(improving_display, hide_index=True, width="stretch")
+            # st.dataframe with column_config handles formatting while preserving sort order
+            st.dataframe(
+                improving_display, 
+                hide_index=True, 
+                width="stretch",
+                column_config={
+                    "Swing": st.column_config.NumberColumn(
+                        "Swing",
+                        format="%+.2f",
+                        help="Change in fixture difficulty (Positive = Easier)"
+                    )
+                }
+            )
 
         with sw2:
             st.markdown("**Getting Harder**")
             declining = swing_df.nsmallest(DASHBOARD_FIXTURE_SWINGS, 'Swing')
             declining_display = declining.copy()
-            declining_display['Swing'] = declining_display['Swing'].apply(lambda x: f"{x:.2f}")
-            st.dataframe(declining_display, hide_index=True, width="stretch")
+            # declining_display['Swing'] is numeric
+            st.dataframe(
+                declining_display, 
+                hide_index=True, 
+                width="stretch",
+                column_config={
+                    "Swing": st.column_config.NumberColumn(
+                        "Swing",
+                        format="%.2f",  # Already negative, no need for + sign
+                        help="Change in fixture difficulty (Negative = Harder)"
+                    )
+                }
+            )
 
         # Bar chart
         sorted_swing = swing_df.sort_values('Swing', ascending=True)
@@ -493,15 +515,37 @@ def render_transfer_trends(players_df: pd.DataFrame):
         st.markdown("**Most Transferred In**")
         risers = df.nlargest(8, 'transfers_in_event')[['web_name', 'team_name', 'now_cost', 'transfers_in_event']].copy()
         risers.columns = ['Player', 'Team', 'Price', 'Transfers In']
-        risers['Transfers In'] = risers['Transfers In'].apply(lambda x: f"+{int(x):,}")
-        st.dataframe(style_df_with_injuries(risers), hide_index=True, width="stretch")
+        # risers['Transfers In'] is numeric
+        st.dataframe(
+            style_df_with_injuries(risers), 
+            hide_index=True, 
+            width="stretch",
+            column_config={
+                "Transfers In": st.column_config.NumberColumn(
+                    "Transfers In",
+                    format="+%d"
+                ),
+                "Price": st.column_config.NumberColumn("Price", format="£%.1fm")
+            }
+        )
 
     with t2:
         st.markdown("**Most Transferred Out**")
         fallers = df.nlargest(8, 'transfers_out_event')[['web_name', 'team_name', 'now_cost', 'transfers_out_event']].copy()
         fallers.columns = ['Player', 'Team', 'Price', 'Transfers Out']
-        fallers['Transfers Out'] = fallers['Transfers Out'].apply(lambda x: f"-{int(x):,}")
-        st.dataframe(style_df_with_injuries(fallers), hide_index=True, width="stretch")
+        # fallers['Transfers Out'] is numeric
+        st.dataframe(
+            style_df_with_injuries(fallers), 
+            hide_index=True, 
+            width="stretch",
+            column_config={
+                "Transfers Out": st.column_config.NumberColumn(
+                    "Transfers Out",
+                    format="-%d"
+                ),
+                "Price": st.column_config.NumberColumn("Price", format="£%.1fm")
+            }
+        )
 
 
 # ── Internal Helpers ──

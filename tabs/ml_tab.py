@@ -49,7 +49,12 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
         """)
 
     # ── Controls ──
-    current_horizon = st.session_state.get('pref_weeks_ahead', 1)
+    # Use independent state for ML tab horizon
+    if 'ml_weeks_ahead' not in st.session_state:
+        st.session_state['ml_weeks_ahead'] = 1
+        
+    current_horizon = st.session_state['ml_weeks_ahead']
+    
     ml_label = f"ML xP x{current_horizon}" if current_horizon > 1 else "ML xP"
     fpl_label = f"FPL xP x{current_horizon}" if current_horizon > 1 else "FPL xP"
     poisson_label = f"Poisson xP ({current_horizon}GW)" if current_horizon > 1 else "Poisson xP"
@@ -93,19 +98,23 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
     with ctrl6:
         n_gameweeks = st.slider(
             "xP Horizon (GWs)", 1, 5,
-            value=current_horizon,
             help="Sum xP over the next N gameweeks using full engine",
-            key="ml_horizon_slider"
+            key="ml_weeks_ahead"
         )
-        if n_gameweeks != current_horizon:
-            st.session_state.pref_weeks_ahead = n_gameweeks
-            # Clear cached players_df to force recalculation in app.py
-            if 'players_df' in st.session_state:
-                del st.session_state.players_df
-            st.rerun()
         
-        horizon = current_horizon # Use consistent state for current run
+        horizon = n_gameweeks 
     
+    # ── Data Decoupling ──
+    # Fetch data specifically for this horizon, independent of the global/Analytics tab
+    # This prevents the "1 GW Global" setting from breaking "5 GW ML" projections
+    ml_cache_key = f"ml_df_h{horizon}"
+    if ml_cache_key in st.session_state:
+        ml_players_df = st.session_state[ml_cache_key]
+    else:
+        # Only show spinner if we actually need to compute (it's fast usually)
+        ml_players_df = processor.get_engineered_features_df(weeks_ahead=horizon)
+        st.session_state[ml_cache_key] = ml_players_df
+
     search_player_input = st.text_input(
         "Search player",
         placeholder="Type player name...",
@@ -129,7 +138,8 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
         std_of_preds = np.std(all_preds) if all_preds else 1.0
         
         for pid, pred in predictions.items():
-            match = players_df[players_df["id"] == pid]
+            # Use the decoupled dataframe for lookups
+            match = ml_players_df[ml_players_df["id"] == pid]
             if match.empty:
                 continue
             player = match.iloc[0]
@@ -221,13 +231,13 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
             
             # Match if query starts with beginning of either name on the original players_df
             # then find the corresponding ID in pred_df
-            if 'first_normalized' not in players_df.columns:
-                players_df['first_normalized'] = players_df['first_name'].apply(lambda x: normalize_name(str(x).lower()))
-                players_df['second_normalized'] = players_df['second_name'].apply(lambda x: normalize_name(str(x).lower()))
+            if 'first_normalized' not in ml_players_df.columns:
+                ml_players_df['first_normalized'] = ml_players_df['first_name'].apply(lambda x: normalize_name(str(x).lower()))
+                ml_players_df['second_normalized'] = ml_players_df['second_name'].apply(lambda x: normalize_name(str(x).lower()))
             
-            matched_ids = players_df[
-                (players_df['first_normalized'].str.startswith(q, na=False)) |
-                (players_df['second_normalized'].str.startswith(q, na=False))
+            matched_ids = ml_players_df[
+                (ml_players_df['first_normalized'].str.startswith(q, na=False)) |
+                (ml_players_df['second_normalized'].str.startswith(q, na=False))
             ]["id"].tolist()
             
             player_row = pred_df[pred_df["id"].isin(matched_ids)]
@@ -433,40 +443,24 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
         pred_df['fpl_rank'] = pred_df[fpl_label].rank(ascending=False, method='min').astype(int)
         pred_df['poisson_rank'] = pred_df[poisson_label].rank(ascending=False, method='min').astype(int)
         
-        # Create display columns with brackets
-        pred_df['ML Display'] = pred_df.apply(
-            lambda r: format_with_rank(f"{r[ml_label]:.2f}", r['ml_rank']), axis=1
-        )
-        pred_df['FPL Display'] = pred_df.apply(
-            lambda r: format_with_rank(f"{r[fpl_label]:.2f}", r['fpl_rank']), axis=1
-        )
-        pred_df['Poisson Display'] = pred_df.apply(
-            lambda r: format_with_rank(f"{r[poisson_label]:.2f}", r['poisson_rank']), axis=1
-        )
-
-        display_cols = ["Player", "Pos", "Team", "Price", "Minutes", 'ML Display', "Range"]
+        display_cols = ["Player", "Pos", "Team", "Price", "Minutes", ml_label, "Range"]
         if horizon > 1:
             display_cols.append("Avg ML")
-        display_cols.extend(['FPL Display', "vs FPL", 'Poisson Display', "vs Poisson", "Certainty"])
+        display_cols.extend([fpl_label, "vs FPL", poisson_label, "vs Poisson", "Certainty"])
         
         full_df = pred_df.copy()
         
         final_df = full_df[display_cols].copy()
-        final_df = final_df.rename(columns={
-            'ML Display': ml_label,
-            'FPL Display': fpl_label,
-            'Poisson Display': poisson_label
-        })
 
         # Use column_config for formatting
         col_config = {
             "Price": st.column_config.NumberColumn("Price", format="£%.1fm"),
             "Minutes": st.column_config.NumberColumn("Mins", format="%d"),
-            ml_label: st.column_config.TextColumn(ml_label), # Text for brackets
-            fpl_label: st.column_config.TextColumn(fpl_label),
+            ml_label: st.column_config.NumberColumn(ml_label, format="%.2f"),
+            fpl_label: st.column_config.NumberColumn(fpl_label, format="%.2f"),
             "Range": st.column_config.TextColumn("Range", width="medium"), # Explicitly config Range
             "vs FPL": st.column_config.NumberColumn("vs FPL", format="%+.2f"),
-            poisson_label: st.column_config.TextColumn(poisson_label),
+            poisson_label: st.column_config.NumberColumn(poisson_label, format="%.2f"),
             "vs Poisson": st.column_config.NumberColumn("vs Poisson", format="%+.2f"),
             "Certainty": st.column_config.NumberColumn("Certainty", format="%.0f%%"),
         }

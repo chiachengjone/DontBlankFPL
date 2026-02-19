@@ -197,32 +197,11 @@ def render_analytics_tab(processor, players_df: pd.DataFrame):
         # Using subscripts to make the rank look secondary and "lighter" (proxy for transparency)
         # while keeping the table interactive in st.dataframe
 
-        rank_df['expected_points_display'] = rank_df.apply(
-            lambda r: format_with_rank(f"{r['expected_points']:.2f}", r['p_rank']), axis=1
-        )
-        rank_df['ep_next_display'] = rank_df.apply(
-            lambda r: format_with_rank(f"{r['ep_next_val'] * horizon:.2f}", r['f_rank']), axis=1
-        )
-        rank_df['ml_pred_display'] = rank_df.apply(
-            lambda r: format_with_rank(f"{r['ml_pred']:.2f}", r['m_rank']), axis=1
-        )
-        rank_df['consensus_ep_display'] = rank_df.apply(
-            lambda r: format_with_rank(f"{r['consensus_ep']:.2f}", r['c_rank']), axis=1
-        )
-        if horizon > 1 and 'ac_rank' in rank_df.columns:
-            rank_df['avg_consensus_ep_display'] = rank_df.apply(
-                lambda r: format_with_rank(f"{r['avg_consensus_ep']:.2f}", r['ac_rank']), axis=1
-            )
-        
-        rank_df['total_points_display'] = rank_df.apply(
-            lambda r: format_with_rank(f"{int(r['total_points'])}", r['tp_rank']), axis=1
-        )
+        # No longer creating display columns with ranks to allow numeric sorting
+        # Ranks are still calculated in rank_df if we want to display them separately, but for now we rely on sorting.
+        pass
     else:
-        rank_df['expected_points_display'] = ""
-        rank_df['ep_next_display'] = ""
-        rank_df['ml_pred_display'] = ""
-        rank_df['consensus_ep_display'] = ""
-        rank_df['total_points_display'] = ""
+        pass
 
     # Apply search filter to the ranked subset
     filtered_df = rank_df
@@ -354,9 +333,8 @@ def render_analytics_tab(processor, players_df: pd.DataFrame):
                 role_df['xa_rank'] = role_df[xa_col].rank(ascending=False, method='min').astype(int)
                 
                 # Format Columns
-                role_df['xg_display'] = role_df.apply(lambda r: format_with_rank(f"{r[xg_col]:.2f}", r['xg_rank']), axis=1)
-                role_df['xa_display'] = role_df.apply(lambda r: format_with_rank(f"{r[xa_col]:.2f}", r['xa_rank']), axis=1)
-                role_df['ep_display'] = role_df['consensus_ep'].apply(lambda x: f"{x:.2f}")
+                # Format Columns - Use raw numeric for sorting
+                role_df['ep_val'] = role_df['consensus_ep']
 
                 # 3. Table (Appears First)
                 st.markdown("#### Role Breakdown")
@@ -365,7 +343,7 @@ def render_analytics_tab(processor, players_df: pd.DataFrame):
                 sort_col = sort_map.get(role_sort, xg_col)
                 asc = (role_sort == "Price")
                 
-                role_disp = role_df[['web_name', 'team_name', 'position', 'Role', 'xg_display', 'xa_display', 'ep_display', 'now_cost']].copy()
+                role_disp = role_df[['web_name', 'team_name', 'position', 'Role', xg_col, xa_col, 'consensus_ep', 'now_cost']].copy()
                 role_disp.columns = ['Player', 'Team', 'Pos', 'Role', 'xG/90', 'xA/90', con_ep_label, 'Price']
                 
                 # Sort the source to determine order
@@ -376,7 +354,13 @@ def render_analytics_tab(processor, players_df: pd.DataFrame):
                     style_df_with_injuries(role_disp, players_df),
                     hide_index=True,
                     use_container_width=True,
-                    height=400
+                    height=400,
+                    column_config={
+                        "Price": st.column_config.NumberColumn(format="£%.1fm"),
+                        "xG/90": st.column_config.NumberColumn(format="%.2f"),
+                        "xA/90": st.column_config.NumberColumn(format="%.2f"),
+                        con_ep_label: st.column_config.NumberColumn(format="%.2f"),
+                    }
                 )
 
                 # 4. Scatter Plot (Appears Below)

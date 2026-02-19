@@ -315,7 +315,17 @@ def render_transfer_recommendations(current_squad_df, available_df, ep_col):
         out_candidates = current_squad_df.nsmallest(5, 'transfer_score')
         out_display = out_candidates[['web_name', 'team_name', 'position', 'now_cost', 'poisson_ep', 'ep_next_num', 'consensus_ep', 'form', 'transfer_score']].copy()
         out_display.columns = ['Player', 'Team', 'Pos', 'Price', 'Poisson xP', 'FPL xP', get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])), 'Form', 'Score']
-        st.dataframe(style_df_with_injuries(out_display), hide_index=True, width="stretch")
+        
+        col_config = {
+            "Price": st.column_config.NumberColumn(format="£%.1fm"),
+            "Poisson xP": st.column_config.NumberColumn(format="%.2f"),
+            "FPL xP": st.column_config.NumberColumn(format="%.2f"),
+            out_display.columns[6]: st.column_config.NumberColumn(format="%.2f"), # Consensus
+            "Form": st.column_config.NumberColumn(format="%.1f"),
+            "Score": st.column_config.NumberColumn(format="%.1f")
+        }
+        
+        st.dataframe(style_df_with_injuries(out_display), hide_index=True, width="stretch", column_config=col_config)
         
         st.markdown("**Recommended IN** (best available)", unsafe_allow_html=True)
 
@@ -443,7 +453,11 @@ def render_ai_transfer_plan(current_squad_df, available_df, ep_col, free_transfe
                 'Recommended': ">> YES" if is_best else "",
             })
         comp_df = pd.DataFrame(comp_rows)
-        st.dataframe(comp_df, hide_index=True, width="stretch")
+        # Apply config for floats here too
+        st.dataframe(comp_df, hide_index=True, width="stretch", column_config={
+            "xP Gain": st.column_config.NumberColumn(format="%.1f"),
+            "Net Value": st.column_config.NumberColumn(format="%.1f"),
+        })
 
     # Display the best plan
     if best_plan:
@@ -514,8 +528,20 @@ def render_position_recommendations(available_df, ep_col):
         if not pos_df.empty:
             st.markdown(f"**{pos} Recommendations**")
             display_df = pos_df[['web_name', 'team_name', 'now_cost', 'poisson_ep', 'ep_next_num', 'consensus_ep', 'form', 'selected_by_percent', 'transfer_score']].copy()
-            display_df.columns = ['Player', 'Team', 'Price', 'Poisson xP', 'FPL xP', get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])), 'Form', 'Owned%', 'Score']
-            st.dataframe(style_df_with_injuries(display_df), hide_index=True, width="stretch")
+            labels = ['Player', 'Team', 'Price', 'Poisson xP', 'FPL xP', get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])), 'Form', 'Owned%', 'Score']
+            display_df.columns = labels
+            
+            p_config = {
+                "Price": st.column_config.NumberColumn(format="£%.1fm"),
+                "Poisson xP": st.column_config.NumberColumn(format="%.2f"),
+                "FPL xP": st.column_config.NumberColumn(format="%.2f"),
+                labels[5]: st.column_config.NumberColumn(format="%.2f"),
+                "Form": st.column_config.NumberColumn(format="%.1f"),
+                "Owned%": st.column_config.NumberColumn(format="%.1f%%"),
+                "Score": st.column_config.NumberColumn(format="%.1f")
+            }
+            
+            st.dataframe(style_df_with_injuries(display_df), hide_index=True, width="stretch", column_config=p_config)
 
 
 def render_top_picks(available_df, ep_col):
@@ -523,8 +549,19 @@ def render_top_picks(available_df, ep_col):
     st.markdown('<p class="section-title">Top 10 Overall Picks</p>', unsafe_allow_html=True)
     top_10 = available_df.nlargest(10, 'transfer_score')
     top_display = top_10[['web_name', 'team_name', 'position', 'now_cost', 'poisson_ep', 'ep_next_num', 'consensus_ep', 'form', 'selected_by_percent', 'transfer_score']].copy()
-    top_display.columns = ['Player', 'Team', 'Pos', 'Price', 'Poisson xP', 'FPL xP', get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])), 'Form', 'Owned%', 'Score']
-    st.dataframe(style_df_with_injuries(top_display), hide_index=True, width="stretch")
+    labels = ['Player', 'Team', 'Pos', 'Price', 'Poisson xP', 'FPL xP', get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])), 'Form', 'Owned%', 'Score']
+    top_display.columns = labels
+    
+    t_config = {
+        "Price": st.column_config.NumberColumn(format="£%.1fm"),
+        "Poisson xP": st.column_config.NumberColumn(format="%.2f"),
+        "FPL xP": st.column_config.NumberColumn(format="%.2f"),
+        labels[6]: st.column_config.NumberColumn(format="%.2f"),
+        "Form": st.column_config.NumberColumn(format="%.1f"),
+        "Owned%": st.column_config.NumberColumn(format="%.1f%%"),
+        "Score": st.column_config.NumberColumn(format="%.1f")
+    }
+    st.dataframe(style_df_with_injuries(top_display), hide_index=True, width="stretch", column_config=t_config)
 
 
 def render_points_projection(current_squad_df, available_df, ep_col):

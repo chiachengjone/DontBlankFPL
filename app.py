@@ -32,8 +32,8 @@ from tabs.wildcard_tab import render_wildcard_tab
 
 # Page configuration
 st.set_page_config(
-    page_title="FPL Strategy Engine 2025/26",
-    page_icon="FPL",
+    page_title="DontBlank | FPL Strategy Engine",
+    page_icon="⚽",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -89,7 +89,7 @@ def main():
     """
     
     # ── Header & Title ──
-    render_header("FPL Strategy Engine", "2025/26")
+    render_header("DontBlank", "AI-powered insights for Fantasy Premier League 2025/26")
     
     # ── Data Loading Phase ──
     with st.spinner("Loading data..."):

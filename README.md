@@ -1,4 +1,4 @@
-#  FPL Strategy Engine 2025/26
+# DontBlank | FPL Strategy Engine 2025/26
 
 A high-performance Streamlit application for Fantasy Premier League strategy optimization, built specifically for the **2025/26 season rules**.
 

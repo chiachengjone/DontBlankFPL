@@ -273,10 +273,20 @@ def render_captain_tab(processor, players_df: pd.DataFrame, fetcher):
         display_df.columns = col_names
         
         st.dataframe(
-            style_df_with_injuries(display_df, players_df, format_dict=format_dict),
+            style_df_with_injuries(display_df, players_df),
             hide_index=True,
             width="stretch",
-            height=400
+            height=400,
+            column_config={
+                "Price": st.column_config.NumberColumn(format="£%.1fm"),
+                "Poisson xP": st.column_config.NumberColumn(format="%.2f"),
+                "FPL EP": st.column_config.NumberColumn(format="%.2f"),
+                "ML Pred": st.column_config.NumberColumn(format="%.2f"),
+                "Model xP": st.column_config.NumberColumn(format="%.2f"),
+                "Form": st.column_config.NumberColumn(format="%.2f"),
+                "EO%": st.column_config.NumberColumn(format="%.1f%%"),
+                "Score": st.column_config.NumberColumn(format="%.2f"),
+            }
         )
     
     st.markdown("---")

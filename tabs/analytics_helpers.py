@@ -34,12 +34,13 @@ def format_with_rank(val, rank):
 
 def render_player_table(df: pd.DataFrame, horizon: int = 1):
     """Render the main player table with RRI differential columns and CBIT score (DEF/GKP only)."""
-    ep_col = 'expected_points_display' if 'expected_points_display' in df.columns else 'expected_points'
-    fpl_col = 'ep_next_display' if 'ep_next_display' in df.columns else 'ep_next'
-    ml_col = 'ml_pred_display' if 'ml_pred_display' in df.columns else 'ml_pred'
-    con_col = 'consensus_ep_display' if 'consensus_ep_display' in df.columns else 'consensus_ep'
-    ac_col = 'avg_consensus_ep_display' if 'avg_consensus_ep_display' in df.columns else 'avg_consensus_ep'
-    tp_col = 'total_points_display' if 'total_points_display' in df.columns else 'total_points'
+    # Use raw numeric columns
+    ep_col = 'expected_points_poisson'
+    fpl_col = 'ep_next_val'
+    ml_col = 'ml_pred'
+    con_col = 'consensus_ep'
+    ac_col = 'avg_consensus_ep'
+    tp_col = 'total_points'
 
     base_cols = ['web_name', 'team_name', 'position', 'now_cost', 'selected_by_percent',
                  ep_col, fpl_col, ml_col, con_col]
@@ -52,12 +53,10 @@ def render_player_table(df: pd.DataFrame, horizon: int = 1):
         base_cols.append('cbit_score')
 
     display_cols = [c for c in base_cols if c in df.columns]
-
-    numeric_cols = ['now_cost', 'selected_by_percent', 'threat_momentum', 'cbit_score']
-    if ep_col == 'expected_points': numeric_cols.append('expected_points')
-    if fpl_col == 'ep_next': numeric_cols.append('ep_next')
-    if ml_col == 'ml_pred': numeric_cols.append('ml_pred')
-    if con_col == 'consensus_ep': numeric_cols.append('consensus_ep')
+    
+    # Ensure they are numeric
+    numeric_cols = ['now_cost', 'selected_by_percent', 'threat_momentum', 'cbit_score', 
+                    ep_col, fpl_col, ml_col, con_col, ac_col, tp_col]
 
     for col in numeric_cols:
         if col in df.columns:
@@ -95,7 +94,32 @@ def render_player_table(df: pd.DataFrame, horizon: int = 1):
     renamed = renamed.loc[:, ~renamed.columns.duplicated()]
 
     st.markdown(f'<p class="section-title">Players ({len(df)} found)</p>', unsafe_allow_html=True)
-    st.dataframe(style_df_with_injuries(renamed), hide_index=True, width="stretch", height=600)
+    
+    # Configure columns
+    col_config = {
+        "Price": st.column_config.NumberColumn(format="£%.1fm"),
+        "Own%": st.column_config.NumberColumn(format="%.1f%%"),
+        "Total Points": st.column_config.NumberColumn(format="%d"),
+        "Threat Momentum": st.column_config.NumberColumn(format="%.2f"),
+        "CBIT": st.column_config.NumberColumn(format="%.2f"),
+        # Dynamic columns - Numeric with 2dp
+        ep_label: st.column_config.NumberColumn(format="%.2f"),
+        fpl_ep_label: st.column_config.NumberColumn(format="%.2f"),
+        ml_ep_label: st.column_config.NumberColumn(format="%.2f"),
+        con_ep_label: st.column_config.NumberColumn(format="%.2f"),
+    }
+    
+    if horizon > 1:
+        ac_label = f"Avg {con_ep_label}"
+        col_config[ac_label] = st.column_config.NumberColumn(format="%.2f")
+
+    st.dataframe(
+        style_df_with_injuries(renamed), 
+        hide_index=True, 
+        width="stretch", 
+        height=600,
+        column_config=col_config
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -208,13 +232,8 @@ def render_value_by_position(players_df: pd.DataFrame, con_ep_label: str):
     if not val_table.empty:
         val_table['eppm_rank'] = val_table['eppm_val'].rank(ascending=False, method='min').astype(int)
         val_table['roi_rank'] = val_table['roi_val'].rank(ascending=False, method='min').astype(int)
-        val_table['eppm_display'] = val_table.apply(lambda r: format_with_rank(f"{r['eppm_val']:.2f}", r['eppm_rank']), axis=1)
-        val_table['roi_display'] = val_table.apply(lambda r: format_with_rank(f"{r['roi_val']:.3f}", r['roi_rank']), axis=1)
-    else:
-        val_table['eppm_display'] = ""
-        val_table['roi_display'] = ""
-
-    val_display = val_table[['web_name', 'team_name', 'position', 'now_cost', 'eppm_display', 'roi_display']].copy()
+    
+    val_display = val_table[['web_name', 'team_name', 'position', 'now_cost', 'eppm_val', 'roi_val']].copy()
     val_display.columns = ['Player', 'Team', 'Pos', 'Price', 'xP/m', 'ROI/m']
 
     v_sort_map = {"xP/m": "eppm_val", "ROI/m": "roi_val", "Price": "now_cost"}
@@ -224,6 +243,11 @@ def render_value_by_position(players_df: pd.DataFrame, con_ep_label: str):
     st.dataframe(
         style_df_with_injuries(val_display, players_df),
         hide_index=True, width="stretch", height=400,
+        column_config={
+            "Price": st.column_config.NumberColumn(format="£%.1fm"),
+            "xP/m": st.column_config.NumberColumn(format="%.3f"),
+            "ROI/m": st.column_config.NumberColumn(format="%.2f", help="Return on Investment per million"),
+        }
     )
 
     # xP/m by position chart
@@ -304,28 +328,39 @@ def render_cbit_analysis(players_df: pd.DataFrame):
         df = df[(df['now_cost'] <= c_max_price) & (df['minutes'] >= c_min_mins)]
 
         if not df.empty:
-            df['score_rank'] = df['cbit_score'].rank(ascending=False, method='min').astype(int)
-            df['dtt_rank'] = df['cbit_dtt'].rank(ascending=False, method='min').astype(int)
-            df['prob_rank'] = df['cbit_prob'].rank(ascending=False, method='min').astype(int)
-
-            df['score_display'] = df.apply(lambda r: format_with_rank(f"{r['cbit_score']:.2f}", r['score_rank']), axis=1)
-            df['dtt_display'] = df.apply(lambda r: format_with_rank(f"{r['cbit_dtt']:.1f}", r['dtt_rank']), axis=1)
-            df['prob_display'] = df.apply(lambda r: format_with_rank(f"{r['cbit_prob']:.0%}", r['prob_rank']), axis=1)
-
             team_col = 'team_name' if 'team_name' in df.columns else 'team'
-            display_df = df[['web_name', team_col, 'now_cost', 'cbit_aa90', 'prob_display', 'cbit_floor', 'dtt_display', 'cbit_matchup', 'score_display', 'minutes']].copy()
+            display_df = df[['web_name', team_col, 'now_cost', 'cbit_aa90', 'cbit_prob', 'cbit_floor', 'cbit_dtt', 'cbit_matchup', 'cbit_score', 'minutes']].copy()
             display_df.columns = ['Player', 'Team', 'Price', 'AA90', 'P(CBIT)', 'Floor', 'DTT', 'Matchup', 'Score', 'minutes']
-
-            c_sort_mapping = {"Score": "cbit_score", "AA90": "cbit_aa90", "P(CBIT)": "cbit_prob", "Price": "now_cost"}
+            
+            # Fix P(CBIT) scaling: if small (0-1), convert to 0-100
+            if display_df['P(CBIT)'].max() <= 1.05:
+                display_df['P(CBIT)'] = display_df['P(CBIT)'] * 100
+            
+            c_sort_mapping = {"Score": "Score", "AA90": "AA90", "P(CBIT)": "P(CBIT)", "Price": "Price"}
             c_asc = (c_sort == "Price")
-            sorted_index = df.sort_values(c_sort_mapping[c_sort], ascending=c_asc).index
+            sorted_index = display_df.sort_values(c_sort_mapping[c_sort], ascending=c_asc).index
             display_df = display_df.loc[sorted_index]
 
-            display_df['Price'] = display_df['Price'].apply(lambda x: f"£{x:.1f}m")
-            display_df['Floor'] = display_df['Floor'].apply(lambda x: f"{x:.1f}")
             display_df = display_df.drop(columns=['minutes'])
+            
+            col_config = {
+                "Price": st.column_config.NumberColumn(format="£%.1fm"),
+                "Floor": st.column_config.NumberColumn(format="%.2f"),
+                "AA90": st.column_config.NumberColumn(format="%.2f"),
+                "Matchup": st.column_config.NumberColumn(format="%.2f"),
+                "Score": st.column_config.NumberColumn(format="%.2f"),
+                "DTT": st.column_config.NumberColumn(format="%.1f", help="Distance to Threshold"),
+                "P(CBIT)": st.column_config.NumberColumn(format="%d%%"),
+            }
 
-            st.dataframe(style_df_with_injuries(display_df, players_df), hide_index=True, width="stretch", height=400, key='cbit_table_final')
+            st.dataframe(
+                style_df_with_injuries(display_df, players_df), 
+                hide_index=True, 
+                width="stretch", 
+                height=400, 
+                key='cbit_table_final',
+                column_config=col_config
+            )
         else:
             st.info("No players match the CBIT filter criteria")
     else:
@@ -509,51 +544,45 @@ def render_advanced_metrics(players_df: pd.DataFrame, con_ep_label: str):
         eng_table = eng_table[(eng_table['now_cost'] <= d_max_price) & (eng_table['minutes'] >= d_min_mins)]
 
         if not eng_table.empty:
-            # Calculate Ranks for bracket display
+            # Calculate Ranks (kept for internal logic if needed, but not displayed combined)
             eng_table['xnp_rank'] = eng_table['differential_gain'].rank(ascending=False, method='min').astype(int)
             eng_table['score_rank'] = eng_table[eng_sort].rank(ascending=False, method='min').astype(int)
 
-            # Format with rank
-            eng_table['xnp_display'] = eng_table.apply(lambda r: format_with_rank(f"{r['differential_gain']:.2f}", r['xnp_rank']), axis=1)
-            eng_table['score_display'] = eng_table.apply(lambda r: format_with_rank(f"{r[eng_sort]:.2f}", r['score_rank']), axis=1)
-
             eng_display_cols = ['web_name', 'team_name', 'position', 'now_cost', 'consensus_ep',
-                                'xnp_display', 'diff_roi', 'eo_top10k', 'matchup_quality', 'selected_by_percent', 'score_display']
-            
-            # Filter cols not in eng_table (though we just created them)
-            # eng_display_cols = [c for c in eng_display_cols if c in eng_table.columns]
+                                'differential_gain', 'diff_roi', 'eo_top10k', 'matchup_quality', 'selected_by_percent', eng_sort]
             
             display_eng = eng_table[eng_display_cols].copy()
             eng_rename = {
                 'web_name': 'Player', 'team_name': 'Team', 'position': 'Pos',
                 'now_cost': 'Price', 'consensus_ep': con_ep_label, 
-                'xnp_display': 'xNP',
+                'differential_gain': 'xNP',
                 'diff_roi': 'ROI/m', 'eo_top10k': 'EO10k%', 'matchup_quality': 'Matchup',
-                'selected_by_percent': 'Own%', 'score_display': 'Score',
+                'selected_by_percent': 'Own%', eng_sort: 'Score',
             }
             display_eng = display_eng.rename(columns=eng_rename)
 
-            # Sorting needs to happen on the underlying numeric values, but we are displaying strings.
-            # Using a hidden sorter column is tricky with st.dataframe(style_df...).
-            # Instead, we sort the DataFrame BEFORE renaming/formatting if we want initial sort order,
-            # BUT st.dataframe sorting is client-side for simple tables.
-            # However, for the initial view:
-            
             d_sort_map = {"Score": eng_sort, "xNP": "differential_gain", "ROI/m": "diff_roi", "Price": "now_cost"}
             d_asc = (d_sort == "Price")
-            
-            # Sort the source table first to get the indices right, then slice the display table?
-            # Actually, let's just sort display_eng based on the mapped column from eng_table
-            # We can re-attach the numeric sort columns temporarily or just sort display_eng by index if we sort eng_table first.
             
             sorted_indices = eng_table.sort_values(d_sort_map.get(d_sort, eng_sort), ascending=d_asc).index
             display_eng = display_eng.loc[sorted_indices]
 
-            for c in ['Price', 'ROI/m', 'EO10k%', 'Own%']:
-                if c in display_eng.columns and pd.api.types.is_numeric_dtype(display_eng[c]):
-                    display_eng[c] = display_eng[c].round(2)
-
-            st.dataframe(style_df_with_injuries(display_eng), hide_index=True, width="stretch", height=400)
+            st.dataframe(
+                style_df_with_injuries(display_eng), 
+                hide_index=True, 
+                width="stretch", 
+                height=400,
+                column_config={
+                    "Price": st.column_config.NumberColumn(format="£%.1fm"),
+                    con_ep_label: st.column_config.NumberColumn(format="%.2f"),
+                    "xNP": st.column_config.NumberColumn(format="%.2f"),
+                    "ROI/m": st.column_config.NumberColumn(format="%.2f"),
+                    "EO10k%": st.column_config.NumberColumn(format="%.1f%%"),
+                    "Matchup": st.column_config.NumberColumn(format="%.2f"),
+                    "Own%": st.column_config.NumberColumn(format="%.1f%%"),
+                    "Score": st.column_config.NumberColumn(format="%.2f"),
+                }
+            )
         else:
             st.info("No engineered differentials found")
 
@@ -821,7 +850,15 @@ def render_set_and_forget(players_df: pd.DataFrame, con_ep_label: str):
             pos_df = df[df['position'] == pos].nlargest(3, 'sf_score')[['web_name', 'now_cost', 'sf_score']]
             pos_df.columns = ['Player', 'Price', 'S&F Score']
             pos_df['S&F Score'] = pos_df['S&F Score'].round(1)
-            st.dataframe(style_df_with_injuries(pos_df), hide_index=True, width="stretch")
+            st.dataframe(
+                style_df_with_injuries(pos_df), 
+                hide_index=True, 
+                width="stretch",
+                column_config={
+                     "Price": st.column_config.NumberColumn(format="£%.1fm"),
+                     "S&F Score": st.column_config.NumberColumn(format="%.1f")
+                }
+            )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

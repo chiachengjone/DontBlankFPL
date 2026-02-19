@@ -516,8 +516,15 @@ def render_fixture_difficulty(processor):
                             # Use consensus_ep (Model xP) - the weighted blend of ML/Poisson/FPL
                             team_squad['ep'] = safe_numeric(team_squad.get('consensus_ep', team_squad.get('expected_points_poisson', pd.Series([0]*len(team_squad)))))
                             top_players = team_squad.nlargest(5, 'ep')[['web_name', 'position', 'now_cost', 'ep', 'selected_by_percent']]
-                            top_players.columns = ['Player', 'Pos', 'Price', get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])), 'Own%']
-                            st.dataframe(top_players, hide_index=True, width="stretch")
+                            ep_label = get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl']))
+                            top_players.columns = ['Player', 'Pos', 'Price', ep_label, 'Own%']
+                            
+                            tp_config = {
+                                "Price": st.column_config.NumberColumn(format="£%.1fm"),
+                                ep_label: st.column_config.NumberColumn(format="%.2f"),
+                                "Own%": st.column_config.NumberColumn(format="%.1f%%")
+                            }
+                            st.dataframe(top_players, hide_index=True, width="stretch", column_config=tp_config)
                 else:
                     st.info("No upcoming fixtures found")
     
@@ -538,19 +545,23 @@ def render_price_watch(players_df: pd.DataFrame):
     
     pr1, pr2 = st.columns(2)
     
+    pw_config = {
+        "Price": st.column_config.NumberColumn(format="£%.1fm")
+    }
+    
     with pr1:
         st.markdown("**Likely to Rise**")
         risers = price_df.nlargest(8, 'net_transfers')[['web_name', 'team_name', 'now_cost', 'net_transfers']]
         risers.columns = ['Player', 'Team', 'Price', 'Net Transfers']
         risers['Net Transfers'] = risers['Net Transfers'].apply(lambda x: f"+{int(x):,}")
-        st.dataframe(style_df_with_injuries(risers), hide_index=True, width="stretch")
+        st.dataframe(style_df_with_injuries(risers), hide_index=True, width="stretch", column_config=pw_config)
     
     with pr2:
         st.markdown("**Likely to Fall**")
         fallers = price_df.nsmallest(8, 'net_transfers')[['web_name', 'team_name', 'now_cost', 'net_transfers']]
         fallers.columns = ['Player', 'Team', 'Price', 'Net Transfers']
         fallers['Net Transfers'] = fallers['Net Transfers'].apply(lambda x: f"{int(x):,}")
-        st.dataframe(style_df_with_injuries(fallers), hide_index=True, width="stretch")
+        st.dataframe(style_df_with_injuries(fallers), hide_index=True, width="stretch", column_config=pw_config)
 
 
 def render_injury_alerts(players_df: pd.DataFrame):

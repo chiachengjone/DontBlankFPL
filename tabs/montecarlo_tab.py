@@ -201,7 +201,16 @@ def render_monte_carlo_tab(processor, players_df: pd.DataFrame):
                         "Sharpe": round(res.sharpe_ratio, 2),
                     })
                 contrib_df = pd.DataFrame(contrib_data).sort_values("Mean Pts", ascending=False)
-                st.dataframe(style_df_with_injuries(contrib_df, players_df), width="stretch", hide_index=True)
+                st.dataframe(
+                    style_df_with_injuries(contrib_df, players_df), 
+                    width="stretch", 
+                    hide_index=True,
+                    column_config={
+                        "Mean Pts": st.column_config.NumberColumn(format="%.2f"),
+                        "Std Dev": st.column_config.NumberColumn(format="%.2f"),
+                        "Sharpe": st.column_config.NumberColumn(format="%.2f"),
+                    }
+                )
 
             st.markdown("---")
 

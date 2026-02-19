@@ -474,7 +474,7 @@ def render_hero():
     <div class="hero-section">
         <div class="hero-row">
             <div class="hero-left">
-                <h1 class="hero-title">FPL Strategy Engine</h1>
+                <h1 class="hero-title">DontBlank</h1>
                 <p class="hero-subtitle">AI-powered insights for Fantasy Premier League 2025/26</p>
             </div>
             <div class="hero-right">

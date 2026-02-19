@@ -206,10 +206,26 @@ def render_genetic_tab(processor, players_df: pd.DataFrame, fetcher=None):
             bench_df = squad_df[squad_df["Status"] == "Bench"].copy()
 
             st.markdown("**Starting XI**")
-            st.dataframe(style_df_with_injuries(starting_df, players_df), width="stretch", hide_index=True)
+            st.dataframe(
+                style_df_with_injuries(starting_df, players_df), 
+                width="stretch", 
+                hide_index=True,
+                column_config={
+                    "Cost": st.column_config.NumberColumn(format="£%.1fm"),
+                    "xP": st.column_config.NumberColumn(format="%.2f"),
+                }
+            )
 
             st.markdown("**Bench**")
-            st.dataframe(style_df_with_injuries(bench_df, players_df), width="stretch", hide_index=True)
+            st.dataframe(
+                style_df_with_injuries(bench_df, players_df), 
+                width="stretch", 
+                hide_index=True,
+                 column_config={
+                    "Cost": st.column_config.NumberColumn(format="£%.1fm"),
+                    "xP": st.column_config.NumberColumn(format="%.2f"),
+                }
+            )
 
             # Convergence chart
             st.markdown("**Evolution Convergence**")
