@@ -11,6 +11,7 @@ from components.styles import render_section_title
 
 def generate_wildcard_squad(
     df: pd.DataFrame,
+    processor,
     formation: str,
     strategy: str,
     budget: float = 100.0,
@@ -27,6 +28,23 @@ def generate_wildcard_squad(
     
     # Standardize data
     active_models = st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])
+    
+    # Recalculate Poisson EP for THIS horizon (like analytics/ML tabs)
+    if horizon > 1:
+        try:
+            from poisson_ep import calculate_poisson_ep_for_dataframe
+            fixtures_df = processor.fixtures_df
+            current_gw = processor.fetcher.get_current_gameweek()
+            team_stats = st.session_state.get('_understat_team_stats', None)
+            poisson_result = calculate_poisson_ep_for_dataframe(
+                df, fixtures_df, current_gw, team_stats=team_stats, horizon=horizon
+            )
+            for col in ('expected_points_poisson', 'games_in_horizon', 'fixture_quality_factor'):
+                if col in poisson_result.columns:
+                    df[col] = poisson_result[col].values
+        except Exception:
+            pass
+    
     players = calculate_consensus_ep(df.copy(), active_models, horizon=horizon)
     players['now_cost'] = safe_numeric(players['now_cost'], 5)
     players['form'] = safe_numeric(players.get('form', pd.Series([0]*len(players))))
@@ -121,6 +139,18 @@ def generate_wildcard_squad(
         # We sort by consensus_ep to ensure we actually start the best ones in the final display
         pos_indices = result[pos_mask].sort_values('consensus_ep', ascending=False).index[:starting_req[pos]]
         result.loc[pos_indices, 'is_starter'] = True
+    
+    # Calculate avg per-GW values for display
+    if horizon > 1:
+        result['avg_poisson_ep'] = (safe_numeric(result.get('poisson_xp_total', result.get('poisson_ep', 0))) / horizon).round(2)
+        result['avg_fpl_ep'] = (safe_numeric(result.get('fpl_xp_total', result.get('ep_next_num', 0))) / horizon).round(2)
+        result['avg_ml_ep'] = (safe_numeric(result.get('ml_xp_total', result.get('ml_pred', 0))) / horizon).round(2)
+        result['avg_consensus_ep'] = (safe_numeric(result['consensus_ep']) / horizon).round(2)
+    else:
+        result['avg_poisson_ep'] = safe_numeric(result.get('poisson_xp_total', result.get('poisson_ep', 0))).round(2)
+        result['avg_fpl_ep'] = safe_numeric(result.get('fpl_xp_total', result.get('ep_next_num', 0))).round(2)
+        result['avg_ml_ep'] = safe_numeric(result.get('ml_xp_total', result.get('ml_pred', 0))).round(2)
+        result['avg_consensus_ep'] = safe_numeric(result['consensus_ep']).round(2)
     
     return result
 
@@ -228,7 +258,7 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
         # If it's an auto-run due to value change, use a lightweight spinner (or none if fast enough)
         # But WC gen can take 1-2s, so spinner is good.
         with st.spinner(f"Optimizing squad for next {horizon} GWs..."):
-            squad = generate_wildcard_squad(players_df, formation, strategy, budget, horizon)
+            squad = generate_wildcard_squad(players_df, processor, formation, strategy, budget, horizon)
             
             if squad.empty:
                 st.error("Could not generate a valid squad. Try adjusting budget.")
@@ -304,23 +334,33 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
             
             st.markdown(f"**{pos_names[pos]}**")
             
-            # Format display
-            display_df = pos_players[['web_name', 'team_name', 'now_cost', 'consensus_ep', 
-                                      'form', 'selected_by_percent', 'is_starter']].copy()
+            # Format display with all 3 models + avg model xP
             con_label = get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl']), horizon)
-            display_df.columns = ['Player', 'Team', 'Price', con_label, 'Form', 'EO%', 'Starting']
+            avg_con_label = f'Avg {con_label}' if horizon > 1 else con_label
+            
+            display_cols = ['web_name', 'team_name', 'now_cost', 'avg_poisson_ep', 'avg_fpl_ep', 'avg_ml_ep',
+                           'avg_consensus_ep', 'form', 'selected_by_percent', 'is_starter']
+            display_df = pos_players[[c for c in display_cols if c in pos_players.columns]].copy()
+            display_df.columns = ['Player', 'Team', 'Price', 'Avg Poisson', 'Avg FPL', 'Avg ML',
+                                 avg_con_label, 'Form', 'EO%', 'Starting']
             display_df['Starting'] = display_df['Starting'].apply(lambda x: 'Starting' if x else 'Bench')
             
+            col_config = {
+                'Price': st.column_config.NumberColumn(format='£%.1fm'),
+                'Avg Poisson': st.column_config.NumberColumn(format='%.2f'),
+                'Avg FPL': st.column_config.NumberColumn(format='%.2f'),
+                'Avg ML': st.column_config.NumberColumn(format='%.2f'),
+                avg_con_label: st.column_config.NumberColumn(format='%.2f'),
+                'Form': st.column_config.NumberColumn(format='%.1f'),
+                'EO%': st.column_config.NumberColumn(format='%.1f%%'),
+            }
+            
             st.dataframe(
-                style_df_with_injuries(display_df, players_df, format_dict={
-                    'Price': '£{:.1f}m',
-                    con_label: '{:.2f}',
-                    'Form': '{:.1f}',
-                    'EO%': '{:.1f}%'
-                }),
+                style_df_with_injuries(display_df, players_df),
                 hide_index=True,
                 width="stretch",
-                height=min(200, len(pos_players) * 40 + 40)
+                height=min(200, len(pos_players) * 40 + 40),
+                column_config=col_config
             )
         
         st.markdown("---")
@@ -349,21 +389,32 @@ def render_wildcard_tab(processor, players_df: pd.DataFrame):
         
         # Full squad table
         with st.expander("View Full Squad Table"):
-            full_df = squad[['web_name', 'team_name', 'position', 'now_cost', 
-                            'consensus_ep', 'form', 'selected_by_percent', 'is_starter']].copy()
             con_label = get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl']), horizon)
-            full_df.columns = ['Player', 'Team', 'Pos', 'Price', con_label, 'Form', 'EO%', 'Starter']
+            avg_con_label = f'Avg {con_label}' if horizon > 1 else con_label
+            
+            full_cols = ['web_name', 'team_name', 'position', 'now_cost',
+                        'avg_poisson_ep', 'avg_fpl_ep', 'avg_ml_ep',
+                        'avg_consensus_ep', 'form', 'selected_by_percent', 'is_starter']
+            full_df = squad[[c for c in full_cols if c in squad.columns]].copy()
+            full_df.columns = ['Player', 'Team', 'Pos', 'Price', 'Avg Poisson', 'Avg FPL', 'Avg ML',
+                              avg_con_label, 'Form', 'EO%', 'Starter']
             full_df = full_df.sort_values(['Starter', 'Pos'], ascending=[False, True])
             full_df['Starter'] = full_df['Starter'].apply(lambda x: 'Yes' if x else 'Bench')
             
+            col_config = {
+                'Price': st.column_config.NumberColumn(format='£%.1fm'),
+                'Avg Poisson': st.column_config.NumberColumn(format='%.2f'),
+                'Avg FPL': st.column_config.NumberColumn(format='%.2f'),
+                'Avg ML': st.column_config.NumberColumn(format='%.2f'),
+                avg_con_label: st.column_config.NumberColumn(format='%.2f'),
+                'Form': st.column_config.NumberColumn(format='%.1f'),
+                'EO%': st.column_config.NumberColumn(format='%.1f%%'),
+            }
+            
             st.dataframe(
-                style_df_with_injuries(full_df, players_df, format_dict={
-                    'Price': '£{:.1f}m',
-                    con_label: '{:.2f}',
-                    'Form': '{:.1f}',
-                    'EO%': '{:.1f}%'
-                }),
+                style_df_with_injuries(full_df, players_df),
                 hide_index=True,
                 width="stretch",
-                height=600
+                height=600,
+                column_config=col_config
             )

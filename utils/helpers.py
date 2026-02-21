@@ -20,6 +20,23 @@ from config import (
 )
 
 
+def evict_old_session_keys(prefix: str, keep_key: str, *, st_mod=None) -> None:
+    """Remove old session-state entries matching *prefix*, except *keep_key*.
+
+    This prevents unbounded memory growth from horizon-keyed caches such as
+    ``_analytics_poisson_{N}`` and ``ml_df_v2_{N}`` — only the most recent
+    horizon value is kept.
+    """
+    if st_mod is None:
+        import streamlit as st_mod  # noqa: N811
+    to_delete = [
+        k for k in list(st_mod.session_state.keys())
+        if k.startswith(prefix) and k != keep_key
+    ]
+    for k in to_delete:
+        del st_mod.session_state[k]
+
+
 def normalize_name(name: str) -> str:
     """
     Normalize player name by removing accents and special characters.
@@ -194,10 +211,10 @@ def get_injury_status(player_row) -> Dict:
 
 def get_price_change_info(player_row) -> Dict:
     """Get price change info for a player."""
-    cost_change_event = safe_numeric(pd.Series([player_row.get('cost_change_event', 0)])).iloc[0]
-    cost_change_start = safe_numeric(pd.Series([player_row.get('cost_change_start', 0)])).iloc[0]
-    transfers_in = safe_numeric(pd.Series([player_row.get('transfers_in_event', 0)])).iloc[0]
-    transfers_out = safe_numeric(pd.Series([player_row.get('transfers_out_event', 0)])).iloc[0]
+    cost_change_event = safe_numeric(player_row.get('cost_change_event', 0), default=0)
+    cost_change_start = safe_numeric(player_row.get('cost_change_start', 0), default=0)
+    transfers_in = safe_numeric(player_row.get('transfers_in_event', 0), default=0)
+    transfers_out = safe_numeric(player_row.get('transfers_out_event', 0), default=0)
     
     net_transfers = transfers_in - transfers_out
     
@@ -344,10 +361,10 @@ def get_rotation_risk(player_row) -> Dict:
     Assess rotation risk based on minutes played relative to available minutes.
     Returns dict with risk level, color, minutes_pct.
     """
-    minutes = safe_numeric(pd.Series([player_row.get('minutes', 0)])).iloc[0]
-    starts = safe_numeric(pd.Series([player_row.get('starts', 0)])).iloc[0]
+    minutes = safe_numeric(player_row.get('minutes', 0), default=0)
+    starts = safe_numeric(player_row.get('starts', 0), default=0)
     # Total possible minutes: 90 * games played by team (estimated from events_played/appearances)
-    total_points = safe_numeric(pd.Series([player_row.get('total_points', 0)])).iloc[0]
+    total_points = safe_numeric(player_row.get('total_points', 0), default=0)
 
     # Use starts as a proxy; assume current GW count from minutes / 90 as max
     # Better proxy: if the player has data, estimate from their starts vs total GWs completed
@@ -409,7 +426,7 @@ def get_ownership_tier(ownership_pct: float) -> Dict:
 
 def classify_ownership_column(df: pd.DataFrame, col: str = 'selected_by_percent') -> pd.Series:
     """Return a Series of ownership tier labels (Template / Popular / Enabler / Differential)."""
-    own = safe_numeric(df.get(col, pd.Series([0] * len(df))))
+    own = safe_numeric(df.get(col, pd.Series([0] * len(df))), default=0)
     return own.apply(lambda x: get_ownership_tier(x)['tier'])
 
 
@@ -462,7 +479,7 @@ def add_availability_columns(df: pd.DataFrame, players_df: pd.DataFrame = None) 
     for _, p in players_df.iterrows():
         name = p.get('web_name', '')
         avail_lookup[name] = get_availability_badge(p)
-        own = safe_numeric(pd.Series([p.get('selected_by_percent', 0)])).iloc[0]
+        own = safe_numeric(p.get('selected_by_percent', 0), default=0)
         tier_lookup[name] = get_ownership_tier(own)['tier']
 
     df['Avail'] = df[name_col].map(avail_lookup).fillna('')
@@ -487,13 +504,24 @@ def add_availability_columns(df: pd.DataFrame, players_df: pd.DataFrame = None) 
 # │ avg_consensus_ep        │ MODEL xP / horizon - Per-GW average when horizon>1. │
 # ├─────────────────────────┼─────────────────────────────────────────────────────┤
 # │ expected_points_poisson │ POISSON xP - Single-model output from poisson_ep.py.│
-# │                         │ Statistical model using xG/xA and fixture data.     │
+# │                         │ Sum of per-fixture xP across the full horizon.      │
+# │                         │ DGW/BGW-aware: sums 2 fixtures for DGW, 0 for BGW. │
 # ├─────────────────────────┼─────────────────────────────────────────────────────┤
 # │ ml_pred                 │ ML xP - XGBoost ensemble prediction.               │
-# │                         │ Single-GW prediction, scale by horizon if needed.   │
+# │                         │ Per-game prediction. Scaled by games_in_horizon in  │
+# │                         │ calculate_consensus_ep for multi-GW horizons.       │
 # ├─────────────────────────┼─────────────────────────────────────────────────────┤
 # │ ep_next / ep_next_num   │ FPL xP - FPL's official expected points estimate.   │
-# │                         │ Raw from API, single-GW only.                       │
+# │                         │ Raw from API, per-game. Scaled by games_in_horizon  │
+# │                         │ in calculate_consensus_ep for multi-GW horizons.    │
+# ├─────────────────────────┼─────────────────────────────────────────────────────┤
+# │ games_in_horizon        │ Number of actual fixtures a player's team has in    │
+# │                         │ the horizon window. Set by Poisson engine.          │
+# │                         │ DGW = 2 fixtures in 1 GW, BGW = 0 fixtures.        │
+# ├─────────────────────────┼─────────────────────────────────────────────────────┤
+# │ fpl_xp_total            │ FPL xP × games_in_horizon (set by consensus calc). │
+# │ ml_xp_total             │ ML xP × games_in_horizon (set by consensus calc).  │
+# │ poisson_xp_total        │ Poisson xP total (same as expected_points_poisson). │
 # ├─────────────────────────┼─────────────────────────────────────────────────────┤
 # │ expected_points         │ DEPRECATED - Legacy fallback column. Maps to        │
 # │                         │ expected_points_poisson in most contexts. Avoid.    │
@@ -502,8 +530,8 @@ def add_availability_columns(df: pd.DataFrame, players_df: pd.DataFrame = None) 
 # USAGE RULES:
 # 1. For UI displays labeled "Model xP" → use consensus_ep
 # 2. For Poisson-specific charts → use expected_points_poisson  
-# 3. For ML-specific displays → use ml_pred
-# 4. For FPL official EP → use ep_next_num
+# 3. For ML-specific displays → use ml_pred (per-game) or ml_xp_total (horizon)
+# 4. For FPL official EP → use ep_next_num (per-game) or fpl_xp_total (horizon)
 # 5. NEVER use expected_points or ep_next when consensus_ep is available
 #
 # ══════════════════════════════════════════════════════════════════════════════
@@ -524,28 +552,9 @@ def calculate_consensus_ep(df: pd.DataFrame, active_models: List[str], horizon: 
     if ml_pred is not already present in the DataFrame. This ensures consistent
     Model xP values across ALL tabs without requiring each tab to manually load ML.
     
-    Results are cached in session state per (active_models, horizon, len(df)) key
-    to avoid redundant recalculation across tabs.
+    No caching — this is a fast vectorized operation and caching caused stale
+    data bugs across tabs and horizon changes.
     """
-    # ── Session-state result cache ──
-    # Avoids re-running ML-loading and consensus arithmetic in every tab
-    try:
-        import streamlit as _st
-        _cache_key = f"_cep_{'_'.join(sorted(active_models))}_{horizon}_{len(df)}"
-        if _cache_key in _st.session_state:
-            cached = _st.session_state[_cache_key]
-            # Validate the cache is still aligned with the dataframe
-            if len(cached) == len(df) and 'consensus_ep' in cached.columns:
-                # Merge cached columns onto df
-                merge_cols = [c for c in ('consensus_ep', 'avg_consensus_ep', 'ml_pred', 'poisson_ep', 'ep_next_num')
-                              if c in cached.columns]
-                result = df.copy()
-                for col in merge_cols:
-                    result[col] = cached[col].values
-                return result
-    except Exception:
-        _cache_key = None
-
     df = df.copy()
     
     # Model keys mapping (consistency with app.py/tabs)
@@ -608,46 +617,68 @@ def calculate_consensus_ep(df: pd.DataFrame, active_models: List[str], horizon: 
                 # True fallback: no ML data available at all
                 df['ml_pred'] = df['poisson_ep'] * ML_FALLBACK_RATIO
     
-    # Calculation
+    # ── Per-player game count & fixture quality for the horizon ──
+    # games_in_horizon: actual fixture count (DGW=2, BGW=0). Set by Poisson.
+    # fixture_quality_factor: fixture-difficulty-adjusted game count (easy
+    #   opponents count >1, hard opponents <1). DGW/BGW-aware. No decay.
+    #   Set by Poisson engine alongside games_in_horizon.
+    #
+    # For horizon == 1 (single GW): no scaling for FPL/ML; Poisson is
+    #   already correct for the single GW including any DGW fixtures.
+    # For horizon > 1: FPL scales by flat game count; ML scales by
+    #   fixture_quality_factor to incorporate opponent difficulty.
+    if horizon <= 1:
+        games = pd.Series(1.0, index=df.index)
+        ml_games = pd.Series(1.0, index=df.index)
+    else:
+        # Games: actual fixture count (FPL scaling)
+        if 'games_in_horizon' in df.columns:
+            games = safe_numeric(df['games_in_horizon']).clip(lower=0)
+        else:
+            games = pd.Series(float(horizon), index=df.index)
+        # ML scaling: fixture-quality-adjusted (considers opponent difficulty)
+        if 'fixture_quality_factor' in df.columns:
+            ml_games = safe_numeric(df['fixture_quality_factor']).clip(lower=0)
+        elif 'horizon_multiplier' in df.columns:
+            # Fallback: horizon_multiplier includes slight decay but is
+            # still opponent-difficulty-aware. Better than flat games.
+            ml_games = safe_numeric(df['horizon_multiplier']).clip(lower=0)
+        else:
+            ml_games = games  # Last resort: flat game count
+    
+    # ── Build per-model total xP for the full horizon ──
+    # FPL: per-game × flat game count (FPL ep_next is opponent-agnostic)
+    # ML:  per-game × fixture-quality factor (opponent-difficulty adjusted)
+    # Poisson: already summed independently per fixture by the engine
+    fpl_total = safe_numeric(df['ep_next_num']) * games
+    ml_total  = safe_numeric(df['ml_pred'])     * ml_games
+    poisson_total = safe_numeric(df['poisson_ep'])   # already horizon-total
+    
+    model_totals = {
+        'fpl':     fpl_total,
+        'ml':      ml_total,
+        'poisson': poisson_total,
+    }
+    
+    # Calculation — weighted consensus from the three horizon totals
     consensus = pd.Series(0.0, index=df.index)
     for model, weight in normalized_weights.items():
-        col = model_col_map[model]
-        if col in df.columns:
-            val = safe_numeric(df[col])
-            
-            # Smart Horizon Scaling
-            # If horizon > 1, we expect to return a Total sum for the window
-            if horizon > 1:
-                if model == 'fpl':
-                    # FPL ep_next is always single-GW raw, so scale it
-                    val = val * horizon
-                elif model == 'ml':
-                    # ML predictions are usually single-GW in players_df, so scale
-                    # Only scale if typical single-GW range (e.g. max < 15 for 1 GW)
-                    if val.max() < 15: 
-                        val = val * horizon
-                # Poisson is assumed already totaled (sum of GWs) by engine loop
-            
-            consensus += val * weight
+        if model in model_totals:
+            consensus += model_totals[model] * weight
             
     df['consensus_ep'] = consensus.round(2)
     
-    # Calculate average if horizon > 1
+    # Store the scaled totals so display layers can use them directly
+    df['fpl_xp_total']     = fpl_total.round(2)
+    df['ml_xp_total']      = ml_total.round(2)
+    df['poisson_xp_total'] = poisson_total.round(2)
+    
+    # Calculate average per GW (divide by number of GWs, not games)
     if horizon > 1:
         df['avg_consensus_ep'] = (df['consensus_ep'] / horizon).round(2)
     else:
         df['avg_consensus_ep'] = df['consensus_ep']
     
-    # ── Write result to session-state cache ──
-    try:
-        if _cache_key is not None:
-            _st.session_state[_cache_key] = df[
-                [c for c in ('consensus_ep', 'avg_consensus_ep', 'ml_pred', 'poisson_ep', 'ep_next_num')
-                 if c in df.columns]
-            ].copy()
-    except Exception:
-        pass
-
     return df
 
 
@@ -703,7 +734,7 @@ def calculate_enhanced_captain_score(row: pd.Series, active_models: List[str]) -
     meta = (eo * 0.05 + form_norm * 0.05) * 10
     
     # 4. Injury Risk Adjustment
-    chance = safe_numeric(row.get('chance_of_playing_next_round', 100)) / 100
+    chance = safe_numeric(row.get('chance_of_playing_next_round'), default=100) / 100
     
     return float((core + pos_bonus + meta) * chance)
 

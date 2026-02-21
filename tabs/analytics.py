@@ -13,6 +13,7 @@ from utils.helpers import (
     safe_numeric, style_df_with_injuries, round_df,
     classify_ownership_column, normalize_name,
     calculate_consensus_ep, get_consensus_label,
+    evict_old_session_keys,
 )
 from tabs.analytics_helpers import (
     format_with_rank,
@@ -55,19 +56,27 @@ def render_analytics_tab(processor, players_df: pd.DataFrame):
         )
         
     f4, f5, f6 = st.columns([1, 1, 1])
+    with f6:
+        # Horizon slider - LOCAL to Analytics tab only
+        horizon = st.slider(
+            "xP Horizon (GWs)", 1, 5,
+            value=st.session_state.get('_analytics_horizon_val', 1),
+            help="Sum xP over the next N gameweeks (only affects this table)",
+            key="analytics_horizon"
+        )
+        st.session_state['_analytics_horizon_val'] = horizon
+
     with f4:
-        current_horizon = st.session_state.get('pref_weeks_ahead', 1)
-        
         active_models = st.session_state.active_models
-        con_ep_label = get_consensus_label(active_models, current_horizon)
+        con_ep_label = get_consensus_label(active_models, horizon)
         
         # Labels must match the column names in render_player_table exactly
-        ep_label = f"Poisson xP ({current_horizon}GW)" if current_horizon > 1 else "Poisson xP"
-        fpl_ep_label = f"FPL xP x{current_horizon}" if current_horizon > 1 else "FPL xP"
-        ml_ep_label = f"ML xP x{current_horizon}" if current_horizon > 1 else "ML xP"
+        ep_label = f"Poisson xP ({horizon}GW)" if horizon > 1 else "Poisson xP"
+        fpl_ep_label = f"FPL xP x{horizon}" if horizon > 1 else "FPL xP"
+        ml_ep_label = f"ML xP x{horizon}" if horizon > 1 else "ML xP"
         
         sort_options = [con_ep_label]
-        if current_horizon > 1 and len(active_models) > 1:
+        if horizon > 1 and len(active_models) > 1:
             sort_options.append(f'Avg {con_ep_label}')
         sort_options.extend([ep_label, fpl_ep_label, ml_ep_label, 'Total Points', 'Threat Momentum', 'CBIT', 'Price', 'Own%'])
         
@@ -82,25 +91,37 @@ def render_analytics_tab(processor, players_df: pd.DataFrame):
             ['All', 'Template', 'Popular', 'Enabler', 'Differential'],
             key="analytics_tier",
         )
-    with f6:
-        # Horizon slider - controls multi-gameweek xP
-        horizon = st.slider(
-            "xP Horizon (GWs)", 1, 5,
-            value=current_horizon,
-            help="Sum Poisson xP over the next N gameweeks using full Poisson engine",
-            key="analytics_horizon"
-        )
-        if horizon != current_horizon:
-            st.session_state.pref_weeks_ahead = horizon
-            # Clear cached players_df to force recalculation in app.py
-            if 'players_df' in st.session_state:
-                del st.session_state.players_df
-            st.rerun()
     
     search = st.text_input("Search player...", placeholder="Enter name", key="analytics_search")
     
     # Prepare data - Analytics always prefers Poisson data for a high-performance view
     df = players_df.copy()
+    
+    # ── Recalculate Poisson EP locally for THIS tab's horizon ──
+    # The global players_df may have been computed for a different horizon,
+    # so we re-run the Poisson engine here for the slider's value.
+    _analytics_poisson_key = f"_analytics_poisson_{horizon}"
+    evict_old_session_keys("_analytics_poisson_", _analytics_poisson_key)
+    if horizon > 1 and _analytics_poisson_key not in st.session_state:
+        try:
+            from poisson_ep import calculate_poisson_ep_for_dataframe
+            fixtures_df = processor.fixtures_df
+            current_gw = processor.fetcher.get_current_gameweek()
+            team_stats = st.session_state.get('_understat_team_stats', None)
+            poisson_result = calculate_poisson_ep_for_dataframe(
+                df, fixtures_df, current_gw, team_stats=team_stats, horizon=horizon
+            )
+            st.session_state[_analytics_poisson_key] = poisson_result[[
+                c for c in ('expected_points_poisson', 'games_in_horizon', 'fixture_quality_factor')
+                if c in poisson_result.columns
+            ]].copy()
+        except Exception:
+            pass
+    
+    if _analytics_poisson_key in st.session_state:
+        cached_poisson = st.session_state[_analytics_poisson_key]
+        for col in cached_poisson.columns:
+            df[col] = cached_poisson[col].values
     
     # Force use of Poisson EP for Analytics tab metrics
     if 'expected_points_poisson' in df.columns:
@@ -111,23 +132,25 @@ def render_analytics_tab(processor, players_df: pd.DataFrame):
     else:
         df['expected_points'] = safe_numeric(df['expected_points'])
     
-    # Standardize FPL EP for ranking and comparison
-    df['ep_next_val'] = safe_numeric(df.get('ep_next', 0))
-    
-    # ML & Consensus EP - Fetch ML Predictions from session state
+    # ML & Consensus EP - Fetch ML Predictions from session state (per-game values)
     if 'ml_predictions' in st.session_state:
         ml_preds = st.session_state['ml_predictions']
-        # Use raw single-GW predictions; calculate_consensus_ep will scale by horizon
+        # ML predictions are per-game. calculate_consensus_ep will scale
+        # by games_in_horizon for the correct multi-GW total.
         df['ml_pred'] = df['id'].apply(
-            lambda pid: ml_preds[pid].predicted_points if pid in ml_preds else df.loc[df['id'] == pid, 'expected_points'].iloc[0] / max(horizon, 1) * 0.85 if len(df[df['id'] == pid]) > 0 else 2.0
+            lambda pid: ml_preds[pid].predicted_points if pid in ml_preds else (df.loc[df['id'] == pid, 'expected_points'].iloc[0] * 0.85 if len(df[df['id'] == pid]) > 0 else 2.0)
         ).round(2)
     else:
-        # Fallback if no ML data - expected_points is already cumulative for the horizon
-        df['ml_pred'] = (df['expected_points'] * 0.85 + (safe_numeric(df.get('form', 0)) * 0.3 * horizon)).round(2)
+        # Fallback if no ML data
+        df['ml_pred'] = (df['expected_points'] * 0.85 + (safe_numeric(df.get('form', 0)) * 0.3)).round(2)
         
-    # Consensus is the average of Poisson (expected_points), FPL (ep_next_val * horizon), and ML (ml_ep)
-    # Use centralized consensus calculator
+    # Consensus calculation — scales FPL & ML by actual games_in_horizon
+    # (handles DGWs and BGWs), Poisson is already summed per-fixture.
     df = calculate_consensus_ep(df, st.session_state.active_models, horizon)
+    
+    # Use the properly scaled totals from consensus for display columns
+    df['ep_next_val'] = safe_numeric(df.get('fpl_xp_total', safe_numeric(df.get('ep_next', 0)) * horizon))
+    df['ml_pred'] = safe_numeric(df.get('ml_xp_total', df['ml_pred']))
         
     # Calculate Differential & Value Metrics (RECALCULATE for current models/horizon)
     eo = safe_numeric(df['selected_by_percent'], 5).clip(lower=0.1)

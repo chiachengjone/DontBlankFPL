@@ -6,7 +6,7 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 
-from utils.helpers import safe_numeric, round_df, style_df_with_injuries, normalize_name, get_injury_status
+from utils.helpers import safe_numeric, round_df, style_df_with_injuries, normalize_name, get_injury_status, evict_old_session_keys
 from tabs.analytics_helpers import format_with_rank
 
 
@@ -49,16 +49,8 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
         """)
 
     # ── Controls ──
-    # Use independent state for ML tab horizon
-    if 'ml_weeks_ahead' not in st.session_state:
-        st.session_state['ml_weeks_ahead'] = 1
-        
-    current_horizon = st.session_state['ml_weeks_ahead']
-    
-    ml_label = f"ML xP x{current_horizon}" if current_horizon > 1 else "ML xP"
-    fpl_label = f"FPL xP x{current_horizon}" if current_horizon > 1 else "FPL xP"
-    poisson_label = f"Poisson xP ({current_horizon}GW)" if current_horizon > 1 else "Poisson xP"
-    
+    # ML tab horizon is LOCAL — does not affect other tabs
+    # Render the horizon slider first so labels are derived from the actual value
     ctrl1, ctrl2, ctrl3 = st.columns([1, 1, 1])
     
     with ctrl1:
@@ -84,6 +76,21 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
     
     ctrl4, ctrl5, ctrl6 = st.columns([1, 1, 1])
     
+    with ctrl6:
+        n_gameweeks = st.slider(
+            "xP Horizon (GWs)", 1, 5,
+            value=st.session_state.get('_ml_horizon_val', 1),
+            help="Sum xP over the next N gameweeks (only affects this table)",
+            key="ml_weeks_ahead"
+        )
+        st.session_state['_ml_horizon_val'] = n_gameweeks
+        horizon = n_gameweeks
+    
+    # Build labels AFTER slider so they always match the current horizon
+    ml_label = f"ML xP x{horizon}" if horizon > 1 else "ML xP"
+    fpl_label = f"FPL xP x{horizon}" if horizon > 1 else "FPL xP"
+    poisson_label = f"Poisson xP ({horizon}GW)" if horizon > 1 else "Poisson xP"
+    
     with ctrl4:
         all_teams = sorted(players_df['team_name'].dropna().unique().tolist()) if 'team_name' in players_df.columns else []
         ml_team_filter = st.selectbox("Team", ['All'] + all_teams, key="ml_team_filter")
@@ -95,19 +102,11 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
             key="ml_sort"
         )
     
-    with ctrl6:
-        n_gameweeks = st.slider(
-            "xP Horizon (GWs)", 1, 5,
-            help="Sum xP over the next N gameweeks using full engine",
-            key="ml_weeks_ahead"
-        )
-        
-        horizon = n_gameweeks 
-    
     # ── Data Decoupling ──
     # Fetch data specifically for this horizon, independent of the global/Analytics tab
     # This prevents the "1 GW Global" setting from breaking "5 GW ML" projections
-    ml_cache_key = f"ml_df_h{horizon}"
+    ml_cache_key = f"ml_df_v2_{horizon}"
+    evict_old_session_keys("ml_df_v2_", ml_cache_key)
     if ml_cache_key in st.session_state:
         ml_players_df = st.session_state[ml_cache_key]
     else:
@@ -172,30 +171,32 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
             # We scale metrics to match the selected horizon (User Slider).
             horizon = n_gameweeks
             
+            # Per-player actual game count in the horizon window
+            # (handles DGWs = 2 games, BGWs = 0 games correctly)
+            player_games = int(player.get('games_in_horizon', horizon))
+            
+            # Per-player fixture-quality-adjusted game count for ML
+            # (considers opponent difficulty: easy opponents > 1, hard < 1)
+            player_fixture_quality = float(player.get('fixture_quality_factor', player_games))
+            
             # 1. Poisson xP: Already calculated for the full horizon by the engine
             poisson_ep = safe_numeric(player.get('expected_points_poisson', 0.0))
             
-            # 2. FPL xP: Simple multiplication (Naive extrapolation)
-            fpl_ep = fpl_ep_raw * horizon
+            # 2. FPL xP: Scale per-game estimate by actual number of games
+            fpl_ep = fpl_ep_raw * player_games
             
-            # 3. ML xP: Simple multiplication for the total
-            ml_pred_total = ml_pred * horizon
+            # 3. ML xP: Per-game prediction scaled by fixture quality factor
+            #    (opponent-difficulty adjusted game count)
+            ml_pred_total = ml_pred * player_fixture_quality
             
             # 4. Certainty Decay: Confidence drops the further out we look
             # We apply a decay factor (0.95^weeks)
             certainty_base = certainty 
             certainty_horizon = certainty_base * (0.95 ** (horizon - 1))
             
-            # 5. Range Expansion: The possible range of outcomes widens over time
-            # We sum the range linearly but apply a decay to the bounds
-            scaled_ci_low = 0.0
-            scaled_ci_high = 0.0
-            for i in range(horizon):
-                # Future weeks are harder to predict, so we widen the bounds slightly
-                # (represented here by summing decayed components)
-                decay = 0.92 ** i
-                scaled_ci_low += ci_low * decay
-                scaled_ci_high += ci_high * decay
+            # 5. Range Expansion: Scale CI bounds by games for the horizon
+            scaled_ci_low = ci_low * player_games if player_games > 0 else 0.0
+            scaled_ci_high = ci_high * player_games if player_games > 0 else 0.0
 
             pred_data.append({
                 "id": pid,
@@ -215,7 +216,7 @@ def render_ml_tab(processor, players_df: pd.DataFrame):
                 "EO%": player.get("selected_by_percent", 0),
                 "_ci_low": scaled_ci_low,
                 "_ci_high": scaled_ci_high,
-                "_uncertainty": pred.prediction_std * sum([0.92 ** i for i in range(horizon)]),
+                "_uncertainty": pred.prediction_std,
                 # Raw sorting keys matching dynamic labels
                 f"ML xP x{horizon}" if horizon > 1 else "ML xP": ml_pred_total,
                 f"FPL xP x{horizon}" if horizon > 1 else "FPL xP": fpl_ep,

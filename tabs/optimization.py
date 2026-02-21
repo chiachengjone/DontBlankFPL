@@ -60,10 +60,12 @@ def render_optimization_tab(processor, players_df: pd.DataFrame, fetcher):
     
     with c1:
         weeks_ahead = st.slider(
-            "Planning Horizon", min_value=3, max_value=10,
-            value=st.session_state.get('pref_weeks_ahead', 5),
+            "Planning Horizon", min_value=1, max_value=10,
+            value=st.session_state.get('_opt_horizon_val', 5),
+            help="Number of gameweeks to optimize for (only affects this tab)",
             key="opt_horizon",
         )
+        st.session_state['_opt_horizon_val'] = weeks_ahead
     with c2:
         from fpl_api import MAX_FREE_TRANSFERS
         free_transfers = st.slider("Free Transfers", min_value=1, max_value=MAX_FREE_TRANSFERS, value=1, key="opt_fts")
@@ -127,6 +129,11 @@ def analyze_transfers(processor, players_df, fetcher, team_id, weeks_ahead, free
         
         # Keep as sum; calculate_consensus_ep handles the averaging in its avg_consensus_ep col
         featured_df['poisson_ep'] = safe_numeric(temp_df['expected_points_poisson']).round(2)
+        # Propagate per-player game count and fixture quality for DGW/BGW-aware consensus
+        if 'games_in_horizon' in temp_df.columns:
+            featured_df['games_in_horizon'] = temp_df['games_in_horizon'].values
+        if 'fixture_quality_factor' in temp_df.columns:
+            featured_df['fixture_quality_factor'] = temp_df['fixture_quality_factor'].values
     except Exception as e:
         st.error(f"Poisson re-calculation failed: {e}")
         featured_df['poisson_ep'] = safe_numeric(featured_df.get('expected_points_poisson', 2.0))
@@ -138,6 +145,16 @@ def analyze_transfers(processor, players_df, fetcher, team_id, weeks_ahead, free
     featured_df = calculate_consensus_ep(featured_df, active_models, horizon=weeks_ahead)
     # Use average consensus for per-GW transfer scores
     ep_col = 'avg_consensus_ep'
+    
+    # Calculate average per-GW values for display
+    if weeks_ahead > 1:
+        featured_df['avg_poisson_ep'] = (safe_numeric(featured_df['poisson_ep']) / weeks_ahead).round(2)
+        featured_df['avg_fpl_ep'] = (safe_numeric(featured_df.get('fpl_xp_total', featured_df['ep_next_num'] * weeks_ahead)) / weeks_ahead).round(2)
+        featured_df['avg_ml_ep'] = (safe_numeric(featured_df.get('ml_xp_total', featured_df.get('ml_pred', 0))) / weeks_ahead).round(2)
+    else:
+        featured_df['avg_poisson_ep'] = safe_numeric(featured_df['poisson_ep']).round(2)
+        featured_df['avg_fpl_ep'] = safe_numeric(featured_df['ep_next_num']).round(2)
+        featured_df['avg_ml_ep'] = safe_numeric(featured_df.get('ml_pred', 0)).round(2)
     
     featured_df['selected_by_percent'] = safe_numeric(featured_df['selected_by_percent'])
     featured_df['now_cost'] = safe_numeric(featured_df['now_cost'], 5)
@@ -313,14 +330,16 @@ def render_transfer_recommendations(current_squad_df, available_df, ep_col):
     if not current_squad_df.empty:
         st.markdown("**Recommended OUT** (lowest score in your squad)", unsafe_allow_html=True)
         out_candidates = current_squad_df.nsmallest(5, 'transfer_score')
-        out_display = out_candidates[['web_name', 'team_name', 'position', 'now_cost', 'poisson_ep', 'ep_next_num', 'consensus_ep', 'form', 'transfer_score']].copy()
-        out_display.columns = ['Player', 'Team', 'Pos', 'Price', 'Poisson xP', 'FPL xP', get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])), 'Form', 'Score']
+        con_label = get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl']))
+        out_display = out_candidates[['web_name', 'team_name', 'position', 'now_cost', 'avg_poisson_ep', 'avg_fpl_ep', 'avg_ml_ep', 'avg_consensus_ep', 'form', 'transfer_score']].copy()
+        out_display.columns = ['Player', 'Team', 'Pos', 'Price', 'Avg Poisson', 'Avg FPL', 'Avg ML', f'Avg {con_label}', 'Form', 'Score']
         
         col_config = {
             "Price": st.column_config.NumberColumn(format="£%.1fm"),
-            "Poisson xP": st.column_config.NumberColumn(format="%.2f"),
-            "FPL xP": st.column_config.NumberColumn(format="%.2f"),
-            out_display.columns[6]: st.column_config.NumberColumn(format="%.2f"), # Consensus
+            "Avg Poisson": st.column_config.NumberColumn(format="%.2f"),
+            "Avg FPL": st.column_config.NumberColumn(format="%.2f"),
+            "Avg ML": st.column_config.NumberColumn(format="%.2f"),
+            out_display.columns[7]: st.column_config.NumberColumn(format="%.2f"),
             "Form": st.column_config.NumberColumn(format="%.1f"),
             "Score": st.column_config.NumberColumn(format="%.1f")
         }
@@ -523,19 +542,21 @@ def render_ai_transfer_plan(current_squad_df, available_df, ep_col, free_transfe
 
 def render_position_recommendations(available_df, ep_col):
     """Render recommendations by position."""
+    con_label = get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl']))
     for pos in ['GKP', 'DEF', 'MID', 'FWD']:
         pos_df = available_df[available_df['position'] == pos].nlargest(5, 'transfer_score')
         if not pos_df.empty:
             st.markdown(f"**{pos} Recommendations**")
-            display_df = pos_df[['web_name', 'team_name', 'now_cost', 'poisson_ep', 'ep_next_num', 'consensus_ep', 'form', 'selected_by_percent', 'transfer_score']].copy()
-            labels = ['Player', 'Team', 'Price', 'Poisson xP', 'FPL xP', get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])), 'Form', 'Owned%', 'Score']
+            display_df = pos_df[['web_name', 'team_name', 'now_cost', 'avg_poisson_ep', 'avg_fpl_ep', 'avg_ml_ep', 'avg_consensus_ep', 'form', 'selected_by_percent', 'transfer_score']].copy()
+            labels = ['Player', 'Team', 'Price', 'Avg Poisson', 'Avg FPL', 'Avg ML', f'Avg {con_label}', 'Form', 'Owned%', 'Score']
             display_df.columns = labels
             
             p_config = {
                 "Price": st.column_config.NumberColumn(format="£%.1fm"),
-                "Poisson xP": st.column_config.NumberColumn(format="%.2f"),
-                "FPL xP": st.column_config.NumberColumn(format="%.2f"),
-                labels[5]: st.column_config.NumberColumn(format="%.2f"),
+                "Avg Poisson": st.column_config.NumberColumn(format="%.2f"),
+                "Avg FPL": st.column_config.NumberColumn(format="%.2f"),
+                "Avg ML": st.column_config.NumberColumn(format="%.2f"),
+                labels[6]: st.column_config.NumberColumn(format="%.2f"),
                 "Form": st.column_config.NumberColumn(format="%.1f"),
                 "Owned%": st.column_config.NumberColumn(format="%.1f%%"),
                 "Score": st.column_config.NumberColumn(format="%.1f")
@@ -547,16 +568,18 @@ def render_position_recommendations(available_df, ep_col):
 def render_top_picks(available_df, ep_col):
     """Render top 10 overall picks."""
     st.markdown('<p class="section-title">Top 10 Overall Picks</p>', unsafe_allow_html=True)
+    con_label = get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl']))
     top_10 = available_df.nlargest(10, 'transfer_score')
-    top_display = top_10[['web_name', 'team_name', 'position', 'now_cost', 'poisson_ep', 'ep_next_num', 'consensus_ep', 'form', 'selected_by_percent', 'transfer_score']].copy()
-    labels = ['Player', 'Team', 'Pos', 'Price', 'Poisson xP', 'FPL xP', get_consensus_label(st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])), 'Form', 'Owned%', 'Score']
+    top_display = top_10[['web_name', 'team_name', 'position', 'now_cost', 'avg_poisson_ep', 'avg_fpl_ep', 'avg_ml_ep', 'avg_consensus_ep', 'form', 'selected_by_percent', 'transfer_score']].copy()
+    labels = ['Player', 'Team', 'Pos', 'Price', 'Avg Poisson', 'Avg FPL', 'Avg ML', f'Avg {con_label}', 'Form', 'Owned%', 'Score']
     top_display.columns = labels
     
     t_config = {
         "Price": st.column_config.NumberColumn(format="£%.1fm"),
-        "Poisson xP": st.column_config.NumberColumn(format="%.2f"),
-        "FPL xP": st.column_config.NumberColumn(format="%.2f"),
-        labels[6]: st.column_config.NumberColumn(format="%.2f"),
+        "Avg Poisson": st.column_config.NumberColumn(format="%.2f"),
+        "Avg FPL": st.column_config.NumberColumn(format="%.2f"),
+        "Avg ML": st.column_config.NumberColumn(format="%.2f"),
+        labels[7]: st.column_config.NumberColumn(format="%.2f"),
         "Form": st.column_config.NumberColumn(format="%.1f"),
         "Owned%": st.column_config.NumberColumn(format="%.1f%%"),
         "Score": st.column_config.NumberColumn(format="%.1f")

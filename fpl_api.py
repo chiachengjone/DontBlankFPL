@@ -481,12 +481,14 @@ class FPLDataProcessor:
         # Players near 0 are "high variance" CBIT assets
         df['cbit_dtt'] = (df['cbit_aa90'] - df['cbit_threshold']).round(1)
         
-        # ── CBIT Probability (Poisson) ──
-        # P(actions >= threshold) = 1 - CDF(threshold - 1)
+        # ── CBIT Probability (Modified Poisson) ──
+        # Real-world defensive actions are overdispersed, so raw Poisson overpredicts 
+        # consistency. We apply an empirical 15% discount for FPL realism.
         def calc_cbit_prob(aa90, threshold):
             if aa90 <= 0:
                 return 0.0
-            return 1 - poisson.cdf(threshold - 1, aa90)
+            raw_prob = 1 - poisson.cdf(threshold - 1, aa90)
+            return raw_prob * 0.85 
         
         df['cbit_prob'] = df.apply(
             lambda r: calc_cbit_prob(r['cbit_aa90'], r['cbit_threshold']), axis=1
@@ -945,18 +947,24 @@ class FPLDataProcessor:
         current_gw = self.fetcher.get_current_gameweek()
         
         # Precompute per-team horizon EP boost
+        # A true multiplier. 1 normal game = 1.0. Hard game < 1.0, Easy game > 1.0. Blank = 0.
         team_horizon_mult = {}
         for tid, fdrs in team_fdrs.items():
             blanks = team_blanks.get(tid, set())
             mult = 0.0
             for i in range(weeks_ahead):
                 if (current_gw + i) not in blanks:
-                    decay = decay_weights[i]
+                    # e.g FDR 3 (Neutral) = 1.0 multiplier
+                    # FDR 2 (Easy) = 1.1 multiplier
+                    # FDR 4 (Hard) = 0.9 multiplier
+                    # Apply a slight 5% decay per week into the future for uncertainty
+                    decay = 0.95 ** i
                     fdr_val = fdrs[i] if i < len(fdrs) else 3.0
-                    mult += decay * (6 - fdr_val) / 5
+                    game_multiplier = 1.0 + (3.0 - fdr_val) * 0.1
+                    mult += decay * game_multiplier
             team_horizon_mult[tid] = mult
             
-        df['horizon_multiplier'] = df['team'].map(team_horizon_mult).fillna(0.0)
+        df['horizon_multiplier'] = df['team'].map(team_horizon_mult).fillna(float(weeks_ahead) * 0.9)
         df['expected_points_horizon'] = df['expected_points'] * df['horizon_multiplier']
         
         # Add CBIT bonus to horizon EP

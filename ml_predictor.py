@@ -348,8 +348,18 @@ class MLPredictor:
         # Train ensemble
         self.train_ensemble(X_scaled, y)
         
-        # Predict with uncertainty
+        # Predict with uncertainty (Base 1-GW prediction)
         mean_pred, std_pred = self.predict_with_uncertainty(X_scaled)
+        
+        # ML predictions are always per-game (single fixture).
+        # Multi-GW scaling is handled by calculate_consensus_ep using
+        # the per-player games_in_horizon count (which accounts for
+        # DGWs and BGWs). We do NOT scale here.
+        # The confidence interval width still grows with horizon for
+        # display purposes.
+        if n_gameweeks > 1:
+            # Standard deviation grows with sqrt(N) for uncertainty display
+            std_pred = std_pred * (n_gameweeks ** 0.5)
         
         # Build results
         results = {}

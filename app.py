@@ -1,7 +1,4 @@
-"""
-FPL Strategy Engine - Streamlit Application
-A high-performance dashboard for Fantasy Premier League 2025/26 season.
-"""
+"""FPL Strategy Engine - Streamlit Application."""
 
 import logging
 import streamlit as st
@@ -12,23 +9,9 @@ logger = logging.getLogger(__name__)
 # Limit float display globally
 pd.set_option('display.float_format', lambda x: f'{x:.2f}')
 
-# Import from local modules
+# Core imports only — tab modules are lazy-loaded below to reduce cold-start time
 from fpl_api import create_data_pipeline
 from components.styles import apply_theme, render_header, render_status_bar, render_tab_header
-from tabs.dashboard import render_dashboard_tab
-from tabs.strategy import render_strategy_tab
-from tabs.optimization import render_optimization_tab
-from tabs.rival import render_rival_tab
-from tabs.analytics import render_analytics_tab
-from tabs.ml_tab import render_ml_tab
-from tabs.montecarlo_tab import render_monte_carlo_tab
-from tabs.genetic_tab import render_genetic_tab
-from tabs.captain_tab import render_captain_tab
-from tabs.team_analysis_tab import render_team_analysis_tab
-
-from tabs.price_predictor_tab import render_price_predictor_tab
-from tabs.history_tab import render_history_tab
-from tabs.wildcard_tab import render_wildcard_tab
 
 # Page configuration
 st.set_page_config(
@@ -100,9 +83,9 @@ def main():
         st.error(f"Failed to load FPL data: {error}")
         st.info("Check your internet connection and refresh.")
         # Fallback: Try to use the last known good data if the API fails
-        if '_last_good_players_df' in st.session_state:
+        if 'players_df' in st.session_state:
             st.warning("Showing last cached data (may be stale).")
-            players_df = st.session_state['_last_good_players_df']
+            players_df = st.session_state['players_df']
         else:
             if st.button("Retry"):
                 st.cache_resource.clear()
@@ -116,9 +99,15 @@ def main():
     # ── Feature Engineering ──
     # We cache the 'engineered' dataframe (with Poisson xP, etc.) separately 
     # because it depends on the 'weeks_ahead' setting, which can change.
+    _ENGINE_VERSION = "v2_fixture_quality"  # Bump to invalidate stale engineered-df caches
     try:
         weeks_ahead = st.session_state.pref_weeks_ahead
-        cache_key = f"_engineered_df_{weeks_ahead}"
+        cache_key = f"_engineered_df_{_ENGINE_VERSION}_{weeks_ahead}"
+        
+        # Evict old horizon caches to bound memory
+        _prefix = f"_engineered_df_{_ENGINE_VERSION}_"
+        for k in [k for k in st.session_state if k.startswith(_prefix) and k != cache_key]:
+            del st.session_state[k]
         
         if cache_key in st.session_state:
             players_df = st.session_state[cache_key]
@@ -128,26 +117,31 @@ def main():
             st.session_state[cache_key] = players_df
             
         st.session_state.players_df = players_df
-        # Save a copy for emergency fallback
-        st.session_state['_last_good_players_df'] = players_df
         
     except Exception as e:
         st.error(f"Error loading players: {e}")
         return
     
     # ── ML Model Initialization ──
-    # We attempt to auto-run the ML predictions on the first load so the 
-    # "ML Predictions" tab is populated without needing a manual click.
-    if "ml_predictions" not in st.session_state:
+    # We auto-run the ML predictions on the first load or whenever the global horizon changes.
+    # This ensures ML always evaluates the actual future fixtures (e.g. 3 GWs) natively.
+    current_ml_gws = st.session_state.get("ml_gws", None)
+    _ML_CODE_VERSION = "v2_per_game"  # Bump to force regeneration on code changes
+    
+    if ("ml_predictions" not in st.session_state
+            or current_ml_gws != weeks_ahead
+            or st.session_state.get("_ml_code_ver") != _ML_CODE_VERSION):
         try:
             from ml_predictor import create_ml_pipeline
             predictor = create_ml_pipeline(players_df)
-            # Default to 1 GW prediction for speed on startup
-            predictions = predictor.predict_gameweek_points(n_gameweeks=1, use_ensemble=True)
+            
+            # Predict for the exact number of gameweeks in the horizon
+            predictions = predictor.predict_gameweek_points(n_gameweeks=weeks_ahead, use_ensemble=True)
             
             st.session_state["ml_predictions"] = predictions
             st.session_state["ml_predictor"] = predictor
-            st.session_state["ml_gws"] = 1
+            st.session_state["ml_gws"] = weeks_ahead
+            st.session_state["_ml_code_ver"] = _ML_CODE_VERSION
             
             # Run cross-validation to get accuracy metrics
             cv_scores = predictor.cross_validate_predictions(n_splits=3)
@@ -248,59 +242,73 @@ def main():
     ])
     
     # Load each tab's content
-    # Note: We pass 'players_df.copy()' to ensure tabs don't accidentally mutate the master dataframe
+    # Tabs are lazy-imported to reduce cold-start time.
+    # .copy() is only used for tabs that mutate the DataFrame in-place.
     
     with tab0:
         render_tab_header("Dashboard", "At-a-glance overview of your gameweek — key metrics, top picks and alerts")
-        render_dashboard_tab(processor, players_df.copy())
+        from tabs.dashboard import render_dashboard_tab
+        render_dashboard_tab(processor, players_df)
     
     with tab1:
         render_tab_header("Strategy", "Explore the player landscape, fixture difficulty and ownership trends")
-        render_strategy_tab(processor, players_df.copy())
+        from tabs.strategy import render_strategy_tab
+        render_strategy_tab(processor, players_df)
     
     with tab2:
         render_tab_header("Squad Builder", "Optimise transfers and build your best XV within budget")
-        render_optimization_tab(processor, players_df.copy(), fetcher)
+        from tabs.optimization import render_optimization_tab
+        render_optimization_tab(processor, players_df, fetcher)
     
     with tab3:
         render_tab_header("Analytics", "Deep-dive into player data, differentials and value metrics")
-        render_analytics_tab(processor, players_df.copy())
+        from tabs.analytics import render_analytics_tab
+        render_analytics_tab(processor, players_df)
     
     with tab4:
         render_tab_header("Captain", "Compare captain candidates using Poisson, ML and FPL estimates")
-        render_captain_tab(processor, players_df.copy(), fetcher)
+        from tabs.captain_tab import render_captain_tab
+        render_captain_tab(processor, players_df, fetcher)
     
     with tab5:
         render_tab_header("Teams", "Team-level analysis — defensive stats, xG and fixture runs")
-        render_team_analysis_tab(processor, players_df.copy())
+        from tabs.team_analysis_tab import render_team_analysis_tab
+        render_team_analysis_tab(processor, players_df)
 
     with tab6:
         render_tab_header("Prices", "Track price changes, net transfers and rise/fall predictions")
-        render_price_predictor_tab(processor, players_df.copy())
+        from tabs.price_predictor_tab import render_price_predictor_tab
+        render_price_predictor_tab(processor, players_df)
     
     with tab7:
         render_tab_header("Wildcard", "Plan your wildcard squad with full-season optimisation")
+        from tabs.wildcard_tab import render_wildcard_tab
         render_wildcard_tab(processor, players_df.copy())
     
     with tab8:
         render_tab_header("History", "Review past gameweek scores and season trajectory")
-        render_history_tab(processor, players_df.copy(), fetcher)
+        from tabs.history_tab import render_history_tab
+        render_history_tab(processor, players_df, fetcher)
     
     with tab9:
         render_tab_header("Rival Scout", "Compare squads head-to-head and spot tactical differences")
-        render_rival_tab(processor, players_df.copy())
+        from tabs.rival import render_rival_tab
+        render_rival_tab(processor, players_df)
     
     with tab10:
         render_tab_header("ML Predictions", "Ensemble machine learning forecasts with confidence intervals")
+        from tabs.ml_tab import render_ml_tab
         render_ml_tab(processor, players_df.copy())
     
     with tab11:
         render_tab_header("Monte Carlo", "Stochastic simulations for risk analysis and upside potential")
+        from tabs.montecarlo_tab import render_monte_carlo_tab
         render_monte_carlo_tab(processor, players_df.copy())
     
     with tab12:
         render_tab_header("Genetic Optimizer", "Evolutionary algorithm for exploring diverse squad solutions")
-        render_genetic_tab(processor, players_df.copy(), fetcher)
+        from tabs.genetic_tab import render_genetic_tab
+        render_genetic_tab(processor, players_df, fetcher)
     
 
 

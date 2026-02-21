@@ -785,6 +785,8 @@ def calculate_poisson_ep_for_dataframe(
     if not fixture_rows or df.empty:
         df = df.copy()
         df['expected_points_poisson'] = 0.0
+        df['games_in_horizon'] = 0
+        df['fixture_quality_factor'] = 0.0
         return df
 
     fixtures_long = pd.DataFrame(fixture_rows)
@@ -917,12 +919,34 @@ def calculate_poisson_ep_for_dataframe(
     merged['xp_cs'] = xp_cs
     merged['xp_bonus'] = xp_bonus
     
-    grouped = merged.groupby('id')[['xp_fixture', 'xp_goals', 'xp_assists', 'xp_cs', 'xp_bonus']].sum()
+    # ── Fixture Quality Factor ──
+    # Per-fixture difficulty multiplier for ML scaling.
+    # Easy opponent (high xGA) → factor > 1; hard opponent → factor < 1.
+    # Uses the SAME opponent-difficulty ratio as the Poisson lambda but
+    # WITHOUT any time-decay so that future games count at full weight.
+    avg_xga = LEAGUE_AVG_XGA_PER_MATCH if LEAGUE_AVG_XGA_PER_MATCH > 0 else 1.3
+    opp_difficulty = (merged['opp_xGA_per90'] / avg_xga).clip(0.5, 2.0)
+    venue_factor = np.where(merged['is_home'], 1.05, 0.95)
+    merged['fixture_quality'] = opp_difficulty * venue_factor
+    
+    grouped = merged.groupby('id')[['xp_fixture', 'xp_goals', 'xp_assists', 'xp_cs', 'xp_bonus', 'fixture_quality']].sum()
+    
+    # Count actual fixtures (games) per player in the horizon window.
+    # This correctly handles DGWs (2 games in 1 GW → count=2) and
+    # BGWs (0 games in a GW → not counted). Players without any
+    # fixtures will get 0.
+    fixture_counts = merged.groupby('id').size()
     
     df['expected_points_poisson'] = df['id'].map(grouped['xp_fixture']).fillna(0.0)
     df['poisson_xp_goals'] = df['id'].map(grouped['xp_goals']).fillna(0)
     df['poisson_xp_assists'] = df['id'].map(grouped['xp_assists']).fillna(0)
     df['poisson_xp_cs'] = df['id'].map(grouped['xp_cs']).fillna(0)
     df['poisson_xp_bonus'] = df['id'].map(grouped['xp_bonus']).fillna(0)
+    df['games_in_horizon'] = df['id'].map(fixture_counts).fillna(0).astype(int)
+    # fixture_quality_factor: like games_in_horizon but adjusted for opponent
+    # difficulty and home/away. 4 neutral games → ≈4.0. 4 easy games → >4.0.
+    # ML uses this instead of flat game count so its multi-GW total reflects
+    # fixture difficulty (similar to how Poisson evaluates each fixture).
+    df['fixture_quality_factor'] = df['id'].map(grouped['fixture_quality']).fillna(0.0).round(3)
     
     return df

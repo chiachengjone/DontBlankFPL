@@ -146,11 +146,13 @@ def render_team_analysis_tab(processor, players_df: pd.DataFrame):
         team_id = team_data['id']
         team_short = team_data['short_name']
         
-        # Get team players and calculate consensus
-        team_players = players_df[players_df['team'] == team_id].copy()
+        # Compute consensus EP ONCE for ALL players, then filter per team.
+        # This avoids calling calculate_consensus_ep 20× (once per team).
         active_models = st.session_state.get('active_models', ['ml', 'poisson', 'fpl'])
-        team_players = calculate_consensus_ep(team_players, active_models)
+        all_with_consensus = calculate_consensus_ep(players_df, active_models)
         con_label = get_consensus_label(active_models)
+        
+        team_players = all_with_consensus[all_with_consensus['team'] == team_id].copy()
         
         # Use consensus_ep directly - avoid writing to deprecated 'expected_points' column
         team_players['now_cost'] = safe_numeric(team_players['now_cost'], 5)
@@ -162,9 +164,7 @@ def render_team_analysis_tab(processor, players_df: pd.DataFrame):
         # Calculate stats for ALL teams to determine ranks globally
         all_team_summary = []
         for tid in processor.teams_df['id'].unique():
-            t_players = players_df[players_df['team'] == tid].copy()
-            # We need consensus_ep for all teams to rank
-            t_players = calculate_consensus_ep(t_players, active_models)
+            t_players = all_with_consensus[all_with_consensus['team'] == tid]
             t_lineup = get_predicted_lineup(t_players)
             
             all_team_summary.append({

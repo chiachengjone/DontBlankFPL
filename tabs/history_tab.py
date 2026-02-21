@@ -282,22 +282,26 @@ def render_history_tab(processor, players_df: pd.DataFrame, fetcher):
     with hl_cols[0]:
         st.markdown("**Best Gameweek**")
         if best_gw:
+            best_rank = best_gw.get('rank')
+            best_rank_str = f"{best_rank:,}" if isinstance(best_rank, (int, float)) else "N/A"
             st.markdown(f'''
             <div style="background:#ffffff;box-shadow:0 2px 8px rgba(0,0,0,0.06);border:1px solid #22c55e;border-radius:10px;padding:1rem;">
                 <div style="color:#6ee7b7;font-size:0.72rem;font-weight:500;text-transform:uppercase;">GW{best_gw.get('event', '?')}</div>
                 <div style="color:#22c55e;font-size:2rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{best_gw.get('points', 0)} pts</div>
-                <div style="color:#86868b;font-size:0.8rem;">Rank: {best_gw.get('rank', 'N/A'):,}</div>
+                <div style="color:#86868b;font-size:0.8rem;">Rank: {best_rank_str}</div>
             </div>
             ''', unsafe_allow_html=True)
     
     with hl_cols[1]:
         st.markdown("**Worst Gameweek**")
         if worst_gw:
+            worst_rank = worst_gw.get('rank')
+            worst_rank_str = f"{worst_rank:,}" if isinstance(worst_rank, (int, float)) else "N/A"
             st.markdown(f'''
             <div style="background:#ffffff;box-shadow:0 2px 8px rgba(0,0,0,0.06);border:1px solid #ef4444;border-radius:10px;padding:1rem;">
                 <div style="color:#fca5a5;font-size:0.72rem;font-weight:500;text-transform:uppercase;">GW{worst_gw.get('event', '?')}</div>
                 <div style="color:#ef4444;font-size:2rem;font-weight:700;font-family:'JetBrains Mono',monospace;">{worst_gw.get('points', 0)} pts</div>
-                <div style="color:#86868b;font-size:0.8rem;">Rank: {worst_gw.get('rank', 'N/A'):,}</div>
+                <div style="color:#86868b;font-size:0.8rem;">Rank: {worst_rank_str}</div>
             </div>
             ''', unsafe_allow_html=True)
     
